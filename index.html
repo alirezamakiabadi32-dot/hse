@@ -401,7 +401,7 @@ html{-webkit-text-size-adjust:100%}
    <p>یکپارچه‌سازی کامل فرم‌های ایمنی، بهداشت و محیط‌زیست — از ثبت تا تحلیل و تصمیم‌گیری مدیریت</p>
   </div>
   <div class="lroles" id="lroles">
-   <button class="lrole" onclick="roleLogin('worker')"><div class="ri">👷</div><b>کارگر</b><span>ثبت شبه‌حادثه، امتیاز ایمنی، TBT/TBM، PPE و اعلان‌ها</span></button>
+   <button class="lrole" onclick="roleLogin('worker')"><div class="ri">👷</div><b>پرسنل اجرایی</b><span>ثبت شبه‌حادثه، امتیاز ایمنی، TBT/TBM، PPE و اعلان‌ها</span></button>
    <button class="lrole" onclick="roleLogin('expert')"><div class="ri">🦺</div><b>کارشناس ایمنی</b><span>بررسی حوادث، آنومالی، ارزیابی ریسک (FMEA/JSA/LEC)، مجوز کار و بازرسی</span></button>
    <button class="lrole" onclick="roleLogin('manager')"><div class="ri">👔</div><b>مدیریت ارشد</b><span>شاخص‌ها، تأییدیه‌ها، تعریف کاربران و کنترل دسترسی</span></button>
   </div>
@@ -417,7 +417,7 @@ html{-webkit-text-size-adjust:100%}
    </div>
    <div id="lerr" class="lerr hidden"></div>
   </div>
-  <div class="lnote">برای ورود، روی نقش خود کلیک کنید و نام کاربری و رمز عبور حساب خودتان را وارد کنید<br>حساب‌های نمونه: worker / expert / manager — رمز همه: 1234</div>
+  <div class="lnote">با نام کاربری و رمز عبور مربوط به خودتان وارد شوید</div>
  </div>
 </div>
 
@@ -483,7 +483,7 @@ const DEFAULT_LISTS = {
   BODY_PARTS:['سر و صورت','چشم','دست','پا','تنه','شنوایی','سیستم تنفسی','پوست','سایر'],
   UNSAFE_CATS:['وضعیت ناایمن','رفتار ناایمن'],
   PTW_TYPES:['کار گرم (جوش/برش/سنگ‌زنی)','ورود به فضای بسته','کار در ارتفاع','کار برق / LOTO','گودبرداری','حمل بار با جرثقیل','سایر'],
-  ACTION_SRC:['حادثه / شبه‌حادثه','بازرسی','ممیزی','مجوز کار','ارزیابی ریسک','گزارش کارگر','سایر'],
+  ACTION_SRC:['حادثه / شبه‌حادثه','بازرسی','ممیزی','مجوز کار','ارزیابی ریسک','گزارش پرسنل اجرایی','سایر'],
   PRIOS:['فوری','بالا','متوسط','کم'],
   TRAIN_VALS:['6','12','24','36','0'],
   MED_TYPES:['بدو استخدام','ادواری','بازگشت به کار','خروج از کار'],
@@ -537,7 +537,7 @@ function canManageLists(){return me && (me.role==='manager'||me.role==='expert')
    کنترل دسترسی
 ============================================================ */
 const PERM_ACTIONS=[['view','مشاهده'],['create','ایجاد'],['edit','ویرایش'],['del','حذف']];
-const PERM_ROLES=[['worker','کارگر'],['expert','کارشناس'],['manager','مدیر']];
+const PERM_ROLES=[['worker','پرسنل اجرایی'],['expert','کارشناس'],['manager','مدیر']];
 
 function defaultPerms(){
   const p={};
@@ -702,7 +702,7 @@ async function checkConnection(){
 window.addEventListener('online', checkConnection);
 window.addEventListener('offline', function(){ const ind=$('#syncIndicator'), txt=$('#syncTxt'); if(ind&&txt){ind.className='sync-indicator error'; txt.textContent='قطع اینترنت';} });
 window.addEventListener('error',function(e){try{toast('⚠️ خطای فنی: '+e.message)}catch(x){}});
-const ROLE_CHIP={worker:['کارگر','b-info'],expert:['کارشناس ایمنی','b-org'],manager:['مدیر ارشد','b-bad']};
+const ROLE_CHIP={worker:['پرسنل اجرایی','b-info'],expert:['کارشناس ایمنی','b-org'],manager:['مدیر ارشد','b-bad']};
 function roleChip(r){const x=ROLE_CHIP[r]||['—','b-mut'];return '<span class="chip '+x[1]+'">'+x[0]+'</span>'}
 function askConfirm(msg,cb){
  openModal('تأیید عملیات','<div style="font-size:13.5px;line-height:2.2">'+esc(msg)+'</div>',
@@ -924,7 +924,7 @@ function ruleMatchChips(r){
   if(r.match && r.match.present) out.push('حضور در جلسه');
   if(r.match && r.match.hasPerson) out.push('فرد مشخص');
   if(r.match && r.match.unsafeGt!==undefined && r.match.unsafeGt!==null) out.push('رفتار ناایمن > '+nd(r.match.unsafeGt));
-  if(r.src==='incidents' && r.match && r.match.createdByWorker) out.push('ثبت‌کننده: کارگر');
+  if(r.src==='incidents' && r.match && r.match.createdByWorker) out.push('ثبت‌کننده: پرسنل اجرایی');
   if(r.src==='incidents' && r.match && r.match.createdByPerson) out.push('ثبت‌کننده: خود فرد');
   if(r.src==='bbs' && r.match && !r.match.hasPerson) out.push('هیچ فردی');
   return out.length? out.map(x=>'<span class="chip b-info" style="font-size:10px">'+x+'</span>').join(' ') : '<span class="chip b-mut" style="font-size:10px">همه موارد</span>';
@@ -1345,7 +1345,7 @@ function seed(){
    result:{rootCause:'نبود بازرسی ادواری و رویه تخلیه سرباره',corrective:'تعویض لوله و تعریف رویه',preventive:'برنامه بازرسی ادواری'}
  };
  R('unsafe',{date:jAgo(1),area:'قالب‌سازی و مولر',cat:'وضعیت ناایمن',desc:'انباشت قالب‌های سنگی مسیر عبور را بسته است.',risk:'بالا',responsible:'حسین کریمی',due:jAgo(-2),status:'در حال رسیدگی',createdBy:'سارا محمدی'});
- R('unsafe',{date:jAgo(4),area:'سالن ذوب',cat:'رفتار ناایمن',desc:'ایستادن کارگر زیر بار معلق جرثقیل.',risk:'بحرانی',responsible:'امیر حیدری',status:'اصلاح شد',fixedBy:'امیر حیدری',fixedJ:jAgo(3),createdBy:'سارا محمدی'});
+ R('unsafe',{date:jAgo(4),area:'سالن ذوب',cat:'رفتار ناایمن',desc:'ایستادن پرسنل اجرایی زیر بار معلق جرثقیل.',risk:'بحرانی',responsible:'امیر حیدری',status:'اصلاح شد',fixedBy:'امیر حیدری',fixedJ:jAgo(3),createdBy:'سارا محمدی'});
  R('actions',{src:'حادثه / شبه‌حادثه',ref:'INC-0003',desc:'تهیه پاوشی‌د نسوز و کنترل روزانه پوشش کارکنان ذوب',owner:'علی رضایی',prio:'بالا',due:jAgo(-5),verify:'سارا محمدی',status:'در حال انجام'});
  R('actions',{src:'بازرسی',ref:'INS-0001',desc:'جمع‌آوری و سازماندهی قالب‌های انباشته و علامت‌گذاری مسیر',owner:'حسین کریمی',prio:'متوسط',due:jAgo(-1),verify:'سارا محمدی',status:'باز'});
  R('risks',{act:'شارژ کوره ذوب',area:'سالن ذوب',hazard:'تماس مذاب با رطوبت',event:'انفجار و پاشش فلز مذاب',ctrl:'خشک‌سازی شارژ، محدوده‌بندی، PPE نسوز',s:'4',p:'3',addCtrl:'پروتکل اجباری کنترل رطوبت',rs:'2',rp:'2',owner:'علی رضایی',status:'تایید شده',review:jAgo(-90)});
@@ -1813,7 +1813,7 @@ function openForm(k,id,pre){
  
  // Custom sections
  if(k==='incidents'){
-   // محدودیت کارگر: فقط شبه‌حادثه
+   // محدودیت پرسنل اجرایی: فقط شبه‌حادثه
    if(me.role==='worker'){
      b=b.replace(/<select class="in" id="f_type"[\s\S]*?<\/select>/, '<select class="in" id="f_type" data-k="type"><option selected>شبه‌حادثه (Near Miss)</option></select>');
      setTimeout(()=>{ const el=$('#f_type'); if(el) el.value='شبه‌حادثه (Near Miss)'; },30);
@@ -1853,7 +1853,7 @@ function saveForm(k,id){
  if(isNew&&!canCreate(k)){toast('اجازه ثبت جدید ندارید');return}
  if(!isNew&&!canEdit(k,rec)){toast('اجازه ویرایش ندارید');return}
  if(isNew)rec={id:uid(PF[k]),createdBy:me.name,createdJ:todayJ(),log:[]};
- // محدودیت کارگر در ثبت حادثه
+ // محدودیت پرسنل اجرایی در ثبت حادثه
  if(k==='incidents' && me.role==='worker') { rec.type='شبه‌حادثه (Near Miss)'; }
  let bad=null;
  $$('#mbody [data-k]').forEach(el=>{const key=el.dataset.k;const f=M.fields.find(x=>x.k===key);
@@ -2112,7 +2112,7 @@ function dashMgmt(){
  +kcard('LTIFR',(Math.round(K.ltifr*10)/10),'پایه ۱,۰۰۰,۰۰۰ ساعت','red')
  +kcard('نفر-ساعت '+K.jy,nd(K.hrs),'شبه‌حادثه: '+nd(K.nm)+' مورد','blue')+'</div>';
  const scTop=calcScores(cmk).filter(r=>r.score!==0).slice(0,3);
- h+='<div class="grid3" style="margin-top:14px"><div class="card"><div class="sechead">🏆 امتیاز ایمنی کارگران — '+monthLabel(cmk)+'</div>'+miniList(scTop.map((r,i)=>'<div class="list-row" onclick="setPage(\'scores\')"><span class="lt">'+(i===0?'🥇':i===1?'🥈':'🥉')+' '+esc(r.name)+'</span><span class="chip '+(r.score>0?'b-ok':'b-warn')+'">'+nd(r.score)+' امتیاز</span></div>'),'هنوز امتیازی این ماه ثبت نشده')+'</div>';
+ h+='<div class="grid3" style="margin-top:14px"><div class="card"><div class="sechead">🏆 امتیاز ایمنی پرسنل اجراییان — '+monthLabel(cmk)+'</div>'+miniList(scTop.map((r,i)=>'<div class="list-row" onclick="setPage(\'scores\')"><span class="lt">'+(i===0?'🥇':i===1?'🥈':'🥉')+' '+esc(r.name)+'</span><span class="chip '+(r.score>0?'b-ok':'b-warn')+'">'+nd(r.score)+' امتیاز</span></div>'),'هنوز امتیازی این ماه ثبت نشده')+'</div>';
  h+='<div class="card"><div class="sechead">📊 روش‌های ارزیابی ریسک</div>'+
    '<div class="emgrow"><span>📊 ماتریس ۵×۵</span><span class="chip b-info">'+nd(db.risks.length)+' رکورد</span></div>'+
    '<div class="emgrow"><span>⚙️ FMEA</span><span class="chip b-info">'+nd(db.fmea.length)+' رکورد</span></div>'+
@@ -2294,7 +2294,7 @@ function scoresPage(){curPage='scores';
  ensureArchives();
  const mk=mKey(todayJ());
  const rows=calcScores(mk);
- let h='<div class="ptitle"><h2>🏅 امتیاز ایمنی کارگران — '+monthLabel(mk)+'</h2><div class="toolbar">';
+ let h='<div class="ptitle"><h2>🏅 امتیاز ایمنی پرسنل اجراییان — '+monthLabel(mk)+'</h2><div class="toolbar">';
  if(me.role==='manager') h+='<button class="btn ghost" onclick="scoreRulesForm()">⚙️ مدیریت آیتم‌ها</button>';
  h+='<button class="btn ghost sm" onclick="exportScoresReport(\'word\')">📄 Word</button>';
  h+='<button class="btn ghost sm" onclick="exportScoresReport(\'pdf\')">📄 PDF</button>';
@@ -2302,7 +2302,7 @@ function scoresPage(){curPage='scores';
  h+='<div class="card"><div class="sechead">⚙️ آیتم‌های امتیازدهی فعال</div><div style="display:flex;gap:6px;flex-wrap:wrap">';
  scoreRules().forEach(r=>{h+='<span class="chip '+(r.pts>0?'b-ok':'b-bad')+'">'+esc(r.label)+' ('+(r.pts>0?'+':'')+nd(r.pts)+')</span>'});
  h+='</div></div>';
- h+='<div class="card"><div class="sechead">جدول امتیاز ماه جاری</div><div class="tscroll"><table class="tbl"><thead><tr><th>رتبه</th><th>نام کارگر</th><th>امتیاز کل</th>';
+ h+='<div class="card"><div class="sechead">جدول امتیاز ماه جاری</div><div class="tscroll"><table class="tbl"><thead><tr><th>رتبه</th><th>نام پرسنل اجرایی</th><th>امتیاز کل</th>';
  const rules=scoreRules();
  rules.forEach(r=>{h+='<th>'+esc(r.label)+'</th>'});
  h+='</tr></thead><tbody>'+rows.map((r,i)=>{
@@ -2318,7 +2318,7 @@ function exportScoresReport(format){
  const mk=mKey(todayJ());
  const rows=calcScores(mk);
  const rules=scoreRules();
- let h='<h1>🏅 گزارش امتیاز ایمنی کارگران — '+monthLabel(mk)+'</h1>';
+ let h='<h1>🏅 گزارش امتیاز ایمنی پرسنل اجراییان — '+monthLabel(mk)+'</h1>';
  h+='<p>تاریخ: '+nd(todayJ())+' — تهیه‌کننده: '+esc(me.name)+'</p>';
  h+='<table><thead><tr><th>رتبه</th><th>نام</th><th>امتیاز کل</th>'+rules.map(r=>'<th>'+esc(r.label)+'</th>').join('')+'</tr></thead><tbody>';
  rows.forEach((r,i)=>{
@@ -2332,7 +2332,7 @@ function exportScoresReport(format){
 function scoreRulesForm(){
  if(me.role!=='manager'){toast('فقط مدیر ارشد');return}
  const rules=scoreRules();
- let body='<div style="font-size:12px;color:var(--mut);margin-bottom:10px">آیتم‌های امتیازدهی ماهانه برای کارگران.</div>';
+ let body='<div style="font-size:12px;color:var(--mut);margin-bottom:10px">آیتم‌های امتیازدهی ماهانه برای پرسنل اجراییان.</div>';
  body+='<div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px"><table class="tbl" style="font-size:12px"><thead><tr><th>عنوان</th><th>منبع</th><th>شرط</th><th>امتیاز</th><th>عملیات</th></tr></thead><tbody>';
  rules.forEach((r,i)=>{
    body+='<tr><td><b>'+esc(r.label)+'</b></td><td>'+esc(ruleSourceLabel(r.src))+'</td><td>'+ruleMatchChips(r)+'</td><td><span class="chip '+(r.pts>0?'b-ok':'b-bad')+'">'+(r.pts>0?'+':'')+nd(r.pts)+'</span></td><td><button class="ibtn" onclick="ruleEdit('+i+')">✏️</button> <button class="ibtn" onclick="ruleDel('+i+')">🗑️</button></td></tr>';
@@ -2357,7 +2357,7 @@ function ruleSrcChange(){
  let h='';
  if(src==='incidents'){
    h+='<input id="sr_type" class="in" placeholder="نوع شامل (اختیاری) — مثال: شبه" style="margin-bottom:6px">';
-   h+='<label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" id="sr_workerOnly"> فقط ثبت‌کننده کارگر باشد</label>';
+   h+='<label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" id="sr_workerOnly"> فقط ثبت‌کننده پرسنل اجرایی باشد</label>';
  } else if(src==='tbm+toolbox'||src==='tbm'||src==='toolbox'){
    h+='<label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" id="sr_present" checked> حضور در جلسه</label>';
  } else if(src==='bbs'){
@@ -2425,7 +2425,7 @@ function allModulesForPerms(){
  Object.keys(MODS).forEach(k=>{ mods.push({key:k, label:MODS[k].t, icon:MODS[k].i, group:'فرم‌ها و داده‌ها'}); });
  mods.push({key:'dash', label:'داشبورد', icon:'🏠', group:'صفحات ویژه'});
  mods.push({key:'kpi', label:'شاخص‌ها', icon:'📈', group:'صفحات ویژه'});
- mods.push({key:'scores', label:'امتیاز کارگران', icon:'🏅', group:'صفحات ویژه'});
+ mods.push({key:'scores', label:'امتیاز پرسنل اجراییان', icon:'🏅', group:'صفحات ویژه'});
  mods.push({key:'settings', label:'تنظیمات', icon:'⚙️', group:'صفحات ویژه'});
  return mods;
 }
@@ -2900,7 +2900,7 @@ const SPECIAL={
  dash:{t:'داشبورد',i:'🏠',ren:()=>me.role==='worker'?dashWorker():dashMgmt()},
  kpi:{t:'شاخص‌ها',i:'📈',ren:kpiPage},
  risks:{t:'ارزیابی ریسک',i:'📊',ren:riskPage},
- scores:{t:'امتیاز کارگران',i:'🏅',ren:scoresPage},
+ scores:{t:'امتیاز پرسنل اجراییان',i:'🏅',ren:scoresPage},
  s5:{t:'ارزیابی 5S',i:'🏭',ren:s5Page},
  perms:{t:'کنترل دسترسی‌ها',i:'🔐',ren:permsPage},
  settings:{t:'تنظیمات',i:'⚙️',ren:settingsPage}
@@ -2938,10 +2938,10 @@ function goDash(){setPage('dash')}
 function openModal(t,b,f){closeCal();closeBell();$('#mtitle').textContent=t;$('#mbody').innerHTML=b;$('#mfoot').innerHTML=f||'';$('#modal').classList.add('open');document.body.classList.add('modal-open')}
 function closeModal(){closeCal();$('#modal').classList.remove('open');document.body.classList.remove('modal-open')}
 (function(){const m=$('#modal');if(m)m.addEventListener('click',e=>{if(e.target.id==='modal')closeModal()})})();
-function showHelp(){openModal('ℹ️ راهنمای سامانه','<div style="font-size:13px;line-height:2.1"><b>سامانه جامع HSE فولاد تنبور</b><br>• <b>کارگر:</b> ثبت شبه‌حادثه (فقط نوع شبه‌حادثه)، امتیاز، 5S واحد، PPE و آموزش.<br>• <b>کارشناس:</b> بررسی حوادث، تحلیل (فیش‌بون/۵چرا/۴M)، آنومالی، ارزیابی ریسک (ماتریس/FMEA/JSA/LEC)، مجوز کار، بازرسی، 5S، BBS، امتیاز.<br>• <b>مدیر:</b> تعریف کاربران، تأیید مجوزها، چک‌لیست‌ها، آیتم‌های امتیازدهی، کنترل دسترسی، گزارش‌ها.<br><br>📄 <b>خروجی PDF و Word:</b> در هر صفحه و رکورد از دکمه‌های 📄 Word و 📄 PDF استفاده کنید.</div>','<button class="btn pri" onclick="closeModal()">متوجه شدم</button>')}
+function showHelp(){openModal('ℹ️ راهنمای سامانه','<div style="font-size:13px;line-height:2.1"><b>سامانه جامع HSE فولاد تنبور</b><br>• <b>پرسنل اجرایی:</b> ثبت شبه‌حادثه (فقط نوع شبه‌حادثه)، امتیاز، 5S واحد، PPE و آموزش.<br>• <b>کارشناس:</b> بررسی حوادث، تحلیل (فیش‌بون/۵چرا/۴M)، آنومالی، ارزیابی ریسک (ماتریس/FMEA/JSA/LEC)، مجوز کار، بازرسی، 5S، BBS، امتیاز.<br>• <b>مدیر:</b> تعریف کاربران، تأیید مجوزها، چک‌لیست‌ها، آیتم‌های امتیازدهی، کنترل دسترسی، گزارش‌ها.<br><br>📄 <b>خروجی PDF و Word:</b> در هر صفحه و رکورد از دکمه‌های 📄 Word و 📄 PDF استفاده کنید.</div>','<button class="btn pri" onclick="closeModal()">متوجه شدم</button>')}
 
 /* ---------- Login ---------- */
-const ROLEINFO={worker:['👷','کارگر'],expert:['🦺','کارشناس ایمنی'],manager:['👔','مدیریت ارشد']};
+const ROLEINFO={worker:['👷','پرسنل اجرایی'],expert:['🦺','کارشناس ایمنی'],manager:['👔','مدیریت ارشد']};
 let loginRole=null;
 function setLerr(m){const e=$('#lerr');if(!e)return;if(m){e.textContent=m;e.classList.remove('hidden')}else e.classList.add('hidden')}
 function roleLogin(role){loginRole=role;closeCal();
