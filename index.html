@@ -397,6 +397,36 @@ const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 const p2=n=>String(n).padStart(2,'0');
 const nd=n=>String(n).replace(/\d/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d]);
 const nfmt=n=>Number(n||0).toLocaleString('fa-IR');
+
+// تابع تعمیرکار ساختار داده‌ها (حل مشکل filter)
+function sanitizeData(data) {
+  if (!data) return data;
+  // تمام کلیدهایی که باید حتما آرایه باشند
+  const arrayKeys = ['personnel', 'incidents', 'unsafe', 'actions', 'risks', 'inspections', 'ptw', 'ppeCat', 'ppeTx', 'trainings', 'hours', 'healthExp', 'medical', 'envWaste', 'envMon', 'chem', 'contacts', 'drills', 'emgEquip', 'toolbox', 'tbm', 'bbs', 'audits', 'docs', 'announce', 'areas', 'scoreArch'];
+  
+  arrayKeys.forEach(key => {
+    if (data[key] !== undefined && data[key] !== null) {
+      if (Array.isArray(data[key])) {
+        // اگر آرایه است، نال‌ها را حذف کن
+        data[key] = data[key].filter(x => x !== null && x !== undefined);
+      } else if (typeof data[key] === 'object') {
+        // اگر Firebase آن را آبجکت کرده، تبدیل به آرایه کن
+        data[key] = Object.values(data[key]).filter(x => x !== null && x !== undefined);
+      } else {
+        data[key] = [];
+      }
+    } else {
+      data[key] = [];
+    }
+  });
+
+  // مقادیر پیش‌فرض ساختاری
+  if (!data.seq || typeof data.seq !== 'object') data.seq = {};
+  if (!data.tpls || typeof data.tpls !== 'object') data.tpls = defaultTPLS();
+  
+  return data;
+}
+
 function save(){
  try{ localStorage.setItem(LS,JSON.stringify(db)); }catch(e){}
  dbRef.set(db).then(()=> {
@@ -1443,25 +1473,27 @@ function startApp(){$('#login').classList.add('hidden');$('#app').classList.remo
  try{
   const snapshot = await dbRef.once('value');
   const data = snapshot.val();
-  if(data && data.personnel && data.incidents){
-   db=data; loaded=true;
+  if(data && data.personnel){
+   db = sanitizeData(data);
+   loaded = true;
   }
- }catch(e){ console.warn('Firebase در دسترس نیست'); }
+ }catch(e){ console.warn('Firebase در دسترس نیست یا خالی است.'); }
 
  if(!loaded){
   try{
     const local = JSON.parse(localStorage.getItem(LS));
-    if(local && local.personnel) db = local;
+    if(local && local.personnel) db = sanitizeData(local);
   }catch(e){ db=null }
  }
 
- if(!db || !db.personnel || !db.seq || !db.incidents){
+ if(!db || !db.personnel || db.personnel.length === 0){
    db = seed(); 
+   db = sanitizeData(db); // برای اطمینان از ساختار آرایه‌ها در دیتای اولیه
  }
 
- if(!db.scoreArch)db.scoreArch=[];
+ if(!db.scoreArch) db.scoreArch = [];
  (db.personnel||[]).forEach(p=>{if(!p.id)p.id=uid('USR');if(!p.role)p.role='worker'});
- if(!db.tpls){db.tpls=defaultTPLS()}
+ if(!db.tpls) db.tpls=defaultTPLS();
  TPLS=db.tpls;
 
  if(!loaded){
@@ -1477,10 +1509,13 @@ function startApp(){$('#login').classList.add('hidden');$('#app').classList.remo
  dbRef.on('value', (snapshot) => {
    if(document.body.classList.contains('modal-open')) return;
    const cloud = snapshot.val();
-   if(cloud && JSON.stringify(cloud)!==JSON.stringify(db)){
-     db=cloud;
-     try{localStorage.setItem(LS,JSON.stringify(db))}catch(e){}
-     if(me) setPage(curPage);
+   if(cloud) {
+     const sanitizedCloud = sanitizeData(cloud);
+     if(JSON.stringify(sanitizedCloud) !== JSON.stringify(db)){
+       db = sanitizedCloud;
+       try{localStorage.setItem(LS,JSON.stringify(db))}catch(e){}
+       if(me) setPage(curPage);
+     }
    }
  });
 })();
