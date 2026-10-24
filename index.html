@@ -612,8 +612,10 @@ function perms(){
   return db.permissions;
 }
 
+const WORKER_VIEW=['dash','incidents','ptw','ppeTx','medical','trainings','toolbox','tbm'];
 function can(module, action){
   if(!me) return false;
+  if(me.role==='worker' && action==='view' && !WORKER_VIEW.includes(module)) return false;
   if(me.role==='manager') return true;
   const P = perms();
   if(!P[module] || !P[module][action]) return false;
@@ -1073,7 +1075,7 @@ function calcScores(mk){
           const person=db.personnel.find(p=>p.name===r.createdBy);
           if(!person || person.role!=='worker') return;
         }
-        if(rl.match&&rl.match.createdByPerson){ if(r.createdBy!==me.name) return; }
+        if(rl.match&&rl.match.createdByPerson){ if(!me||r.createdBy!==me.name) return; }
         if(r.createdBy) add(r.createdBy, rl.key, rl.pts);
       });
     } else if(rl.src==='tbm' || rl.src==='toolbox' || rl.src==='tbm+toolbox'){
@@ -1749,12 +1751,19 @@ function fmtCell(k,r,c){
  if(f&&f.t==='num'&&c==='cost')return nfmt(v);
  return esc(v===''||v==null?'—':v)
 }
+function isOwnRecord(k,r){
+ if(!me) return false;
+ if(me.role!=='worker') return true;
+ if(!r) return false;
+ if(k==='incidents') return r.createdBy===me.name||r.injured===me.name;
+ if(k==='ptw') return r.createdBy===me.name||(r.workers||[]).includes(me.name);
+ if(k==='ppeTx'||k==='medical') return r.person===me.name;
+ if(k==='trainings'||k==='toolbox'||k==='tbm') return (r.people||[]).includes(me.name);
+ return false;
+}
 function myRows(k){
  let rows=db[k].slice();
- if(me.role==='worker'){
-  if(k==='ppeTx'||k==='medical')rows=rows.filter(r=>r.person===me.name);
-  if(k==='trainings'||k==='toolbox'||k==='tbm')rows=rows.filter(r=>(r.people||[]).includes(me.name));
- }
+ if(me.role==='worker') rows=rows.filter(r=>isOwnRecord(k,r));
  if(curPage==='risks'&&riskMethod==='matrix'&&riskFilter)rows=rows.filter(r=>+r.s===riskFilter.s&&+r.p===riskFilter.p);
  return rows
 }
@@ -1781,10 +1790,10 @@ function renderRows(){
   return '<tr onclick="openDetail(\''+k+'\',\''+r.id+'\')">'+tds+'</tr>'}).join(''):'<tr><td colspan="'+ncols+'" style="text-align:center;color:var(--mut);padding:22px">موردی یافت نشد</td></tr>';
  const st=$('#mstats');
  if(st){let s='<span class="big">'+nd(rows.length)+'</span> مورد';
-  const cmk=mKey(todayJ());const mon=db[k].filter(r=>mKey(r.date||r.createdJ)===cmk).length;
+  const cmk=mKey(todayJ());const scope=me.role==='worker'?myRows(k):db[k];const mon=scope.filter(r=>mKey(r.date||r.createdJ)===cmk).length;
   s+=' | ثبت این ماه: <b>'+nd(mon)+'</b>';
   if(k==='actions'){const od=db.actions.filter(r=>['باز','در حال انجام'].includes(r.status)&&isOverdue(r.due)).length;s+=' | معوق: <b style="color:var(--bad)">'+nd(od)+'</b>'}
-  if(k==='incidents'){const lti=db.incidents.filter(r=>r.type==='جراحت دردسرساز (LTI)').length;s+=' | LTI: <b>'+nd(lti)+'</b>'}
+  if(k==='incidents'){const lti=(me.role==='worker'?myRows('incidents'):db.incidents).filter(r=>r.type==='جراحت دردسرساز (LTI)').length;s+=' | LTI: <b>'+nd(lti)+'</b>'}
   st.innerHTML=s}
  requestAnimationFrame(()=>{const s=$('.tscroll');if(s)s.scrollLeft=prevScroll});
 }
@@ -2577,9 +2586,11 @@ function permsPage(){
        PERM_ROLES.forEach(rl=>{
          const role=rl[0];
          const isMgr=role==='manager';
-         const on=isMgr || (P[m.key] && P[m.key][a[0]] && P[m.key][a[0]][role]);
-         h+='<label class="'+(on?'on':'off')+(isMgr?' lock':'')+'" title="'+esc(rl[1])+' — '+esc(a[1])+'" onclick="togglePerm(\''+m.key+'\',\''+a[0]+'\',\''+role+'\')">';
-         h+='<input type="checkbox" '+(on?'checked':'')+' '+(isMgr?'disabled':'')+'>';
+         const lockW=role==='worker'&&!WORKER_VIEW.includes(m.key);
+         const locked=isMgr||lockW;
+         const on=!lockW && (isMgr || (P[m.key] && P[m.key][a[0]] && P[m.key][a[0]][role]));
+         h+='<label class="'+(on?'on':'off')+(locked?' lock':'')+'" title="'+esc(rl[1])+' — '+esc(a[1])+(lockW?' (قفل: پرسنل اجرایی فقط به بخش‌های خودش دسترسی دارد)':'')+'"'+(locked?'':' onclick="togglePerm(\''+m.key+'\',\''+a[0]+'\',\''+role+'\')"')+'>';
+         h+='<input type="checkbox" '+(on?'checked':'')+' '+(locked?'disabled':'')+'>';
          h+='<span>'+(role==='worker'?'👷':role==='expert'?'🦺':'👔')+'</span>';
          h+='</label>';
        });
@@ -2592,8 +2603,9 @@ function permsPage(){
  h+='<div class="card" style="margin-top:14px"><div class="sechead">👥 نمای کلی</div><div class="grid3">';
  PERM_ROLES.forEach(rl=>{
    const role=rl[0];
-   const canViewMods=mods.filter(m=>role==='manager'?true:(P[m.key]&&P[m.key]['view']&&P[m.key]['view'][role]));
-   const canCreateMods=mods.filter(m=>role==='manager'?true:(P[m.key]&&P[m.key]['create']&&P[m.key]['create'][role]));
+   const wLock=m=>role==='worker'&&!WORKER_VIEW.includes(m.key);
+   const canViewMods=mods.filter(m=>role==='manager'?true:(!wLock(m)&&P[m.key]&&P[m.key]['view']&&P[m.key]['view'][role]));
+   const canCreateMods=mods.filter(m=>role==='manager'?true:(!wLock(m)&&P[m.key]&&P[m.key]['create']&&P[m.key]['create'][role]));
    h+='<div class="kpi '+(role==='manager'?'red':role==='expert'?'orange':'blue')+'"><div class="kl">'+esc(rl[1])+'</div><div class="kv">'+nd(canViewMods.length)+' / '+nd(mods.length)+'</div><div class="ks">'+nd(canCreateMods.length)+' قابل ایجاد</div></div>';
  });
  h+='</div></div>';
@@ -3027,6 +3039,7 @@ function saveVerifyCapa(id){
 function openDetail(k,id){
  const M=MODS[k],r=db[k].find(x=>x.id===id);if(!r)return;
  if(!canView(k)){toast('اجازه مشاهده این بخش را ندارید');return}
+ if(!isOwnRecord(k,r)){toast('فقط اطلاعات مربوط به خودتان قابل مشاهده است');return}
  let h='<div class="dhead"><span class="chip idc">'+r.id+'</span>'+(r.code?'<span class="chip b-org" style="direction:ltr;font-family:monospace">'+esc(r.code)+'</span>':'')+(M.status&&r.status?chip(r.status):'')+'<small style="color:var(--mut)">ثبت: '+esc(r.createdBy)+' / '+esc(r.createdJ)+'</small></div><div class="dgrid">';
  M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;const v=r[f.k];if(v===undefined||v===''||v===null)return;
   let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=esc((v||[]).join('، '));break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;default:out=esc(v)}
@@ -3426,25 +3439,26 @@ function globalSearchDo(q){
         const list=(db[k]||[]);
         list.forEach(function(r){
           if(!r || !r.id) return;
+          if(!isOwnRecord(k,r)) return;
           const h=buildHaystack(k, r);
           const sc=scoreMatch(h.text, queryWords, h.title, h.code);
           if(sc<0) return;
           out.push({kind:k,rec:r,icon:M.i,moduleLabel:M.t,title:safeTitleOf(k, r),sub:gsSubOf(k, r),snippet:snippetAround(h.text, queryWords, 110),score:sc,moduleHit:false,type:'record'});
         });
       });
-      (db.personnel||[]).forEach(function(p){
+      (me.role==='worker'?[]:(db.personnel||[])).forEach(function(p){
         const hay=faNormalize([p.name,p.job,p.area,p.role,p.u].filter(Boolean).join(' '));
         const sc=scoreMatch(hay, queryWords, p.name, '');
         if(sc<0) return;
         out.push({kind:'_person',rec:p,icon:'👤',moduleLabel:'پرسنل',title:p.name,sub:(p.job||'')+' • '+((ROLE_CHIP[p.role]&&ROLE_CHIP[p.role][0])||p.role||'')+' • '+(p.area||''),snippet:snippetAround(hay, queryWords, 100),score:sc,moduleHit:false,type:'person'});
       });
-      (db.areas||[]).forEach(function(a){
+      (me.role==='worker'?[]:(db.areas||[])).forEach(function(a){
         const hay=faNormalize(a);
         if(queryWords.every(w=>hay.indexOf(w)>=0)){
           out.push({kind:'_area', rec:{id:'area:'+a, name:a}, icon:'🏭', moduleLabel:'واحدها', title:a, sub:'واحد سازمانی', snippet:hay, score:5, moduleHit:false, type:'area'});
         }
       });
-      if(db.lists){
+      if(db.lists && me.role!=='worker'){
         Object.keys(db.lists).forEach(function(lk){
           (db.lists[lk]||[]).forEach(function(v){
             const hay=faNormalize(v+' '+lk);
@@ -3461,6 +3475,7 @@ function globalSearchDo(q){
         if(queryWords.every(w=>modText.indexOf(w)>=0)){
           (db[k]||[]).forEach(function(r){
             if(!r||!r.id) return;
+            if(!isOwnRecord(k,r)) return;
             if(out.some(x=>x.kind===k && x.rec.id===r.id)) return;
             out.push({kind:k, rec:r, icon:M.i, moduleLabel:M.t, title:safeTitleOf(k,r), sub:gsSubOf(k,r), snippet:'', score:1, moduleHit:true, type:'record'});
           });
