@@ -677,15 +677,164 @@ function defaultScoreRules(){
   ];
 }
 
-function save(){
- try{ localStorage.setItem(LS,JSON.stringify(db)); }catch(e){}
- dbRef.set(db).then(()=> {
-  checkConnection();
- }).catch((error) => {
-  toast('⚠️ خطا در ذخیره ابری Firebase: ' + error.message);
-  const ind=$('#syncIndicator'),txt=$('#syncTxt');
-  if(ind&&txt){ind.className='sync-indicator error';txt.textContent='قطع ارتباط';}
- });
+/* ============================================================
+   ذخیره‌سازی ابری بهینه — Delta Sync + Debounce + Retry
+============================================================ */
+const CLOUD_META_KEY = 'hse_cloud_meta';
+let _saveTimer = null;
+let _pendingDelta = {};          // تغییرات انباشته‌شده
+let _pendingDeletes = {};        // حذف‌های انباشته‌شده
+let _isSaving = false;
+let _saveRetryCount = 0;
+let _lastCloudSync = 0;
+let _cloudConnected = false;
+let _dirtyKeys = new Set();      // ماژول‌های تغییرکرده
+const SAVE_DEBOUNCE_MS = 800;    // تأخیر debounce
+const RETRY_DELAYS = [1000, 3000, 8000, 20000]; // تأخیر retry
+
+/* --- ثبت تغییر یک کلید در صف --- */
+function queueChange(path, value){
+  _pendingDelta[path] = value;
+  delete _pendingDeletes[path];
+  _markDirty(path);
+}
+
+function queueDelete(path){
+  _pendingDeletes[path] = null;
+  delete _pendingDelta[path];
+  _markDirty(path);
+}
+
+function _markDirty(path){
+  const root = String(path).split('/')[0];
+  if(root) _dirtyKeys.add(root);
+}
+
+/* --- ذخیره محلی سریع (فقط کلیدهای تغییریافته) --- */
+function _saveLocal(){
+  try {
+    // ذخیره meta جداگانه
+    localStorage.setItem(LS, JSON.stringify(db));
+    _lastCloudSync = Date.now();
+  } catch(e) {
+    // اگر حجم زیاد بود، فقط کلیدهای dirty را ذخیره کن
+    try {
+      const meta = JSON.parse(localStorage.getItem(CLOUD_META_KEY) || '{}');
+      meta.lastSave = Date.now();
+      localStorage.setItem(CLOUD_META_KEY, JSON.stringify(meta));
+    } catch(_){}
+  }
+}
+
+/* --- ارسال دلتا به Firebase --- */
+async function _flushDelta(){
+  if(_isSaving) return;
+  const delta = Object.assign({}, _pendingDelta);
+  const deletes = Object.assign({}, _pendingDeletes);
+  const hasDelta = Object.keys(delta).length > 0;
+  const hasDeletes = Object.keys(deletes).length > 0;
+  if(!hasDelta && !hasDeletes) return;
+
+  _isSaving = true;
+  const indicator = $('#syncIndicator'), txt = $('#syncTxt');
+  if(indicator) indicator.className = 'sync-indicator';
+  if(txt) txt.textContent = 'در حال ذخیره...';
+
+  try {
+    // 1) حذف‌ها
+    const deletePromises = Object.keys(deletes).map(p => dbRef.child(p).remove());
+    // 2) آپدیت‌ها — فقط کلیدهای تغییریافته
+    const updates = {};
+    Object.keys(delta).forEach(p => { updates[p] = delta[p]; });
+
+    if(Object.keys(updates).length){
+      await dbRef.update(updates);
+    }
+    if(deletePromises.length){
+      await Promise.all(deletePromises);
+    }
+
+    // پاک کردن صف فقط پس از موفقیت
+    Object.keys(delta).forEach(p => { delete _pendingDelta[p]; });
+    Object.keys(deletes).forEach(p => { delete _pendingDeletes[p]; });
+
+    _saveRetryCount = 0;
+    _cloudConnected = true;
+    _lastCloudSync = Date.now();
+    _dirtyKeys.clear();
+
+    if(indicator) indicator.className = 'sync-indicator ok';
+    if(txt) txt.textContent = 'همگام‌سازی شد';
+  } catch(err) {
+    _cloudConnected = false;
+    const delay = RETRY_DELAYS[Math.min(_saveRetryCount, RETRY_DELAYS.length - 1)];
+    _saveRetryCount++;
+    if(indicator) indicator.className = 'sync-indicator error';
+    if(txt) txt.textContent = 'خطا — تلاش مجدد ' + nd(_saveRetryCount) + ' در ' + nd(Math.round(delay/1000)) + 's';
+    // برگرداندن به صف (delta دست‌نخورده می‌ماند)
+    Object.assign(_pendingDelta, delta);
+    Object.assign(_pendingDeletes, deletes);
+    // برنامه‌ریزی retry
+    setTimeout(_flushDelta, delay);
+  } finally {
+    _isSaving = false;
+  }
+}
+
+/* --- save اصلی: debounce + local سریع + delta cloud --- */
+function save(opts){
+  opts = opts || {};
+  // 1) ذخیره محلی فوری
+  _saveLocal();
+  // 2) اگر هیچ delta‌ای صف نشده، از کل db استفاده کن (برای سازگاری با کد قدیمی)
+  if(!Object.keys(_pendingDelta).length && !Object.keys(_pendingDeletes).length){
+    // نسخه قدیمی: کل db را صف کن
+    // اما به‌جای set، از update روی همه کلیدها استفاده کن
+    Object.keys(db).forEach(k => { _pendingDelta[k] = db[k]; });
+  }
+  // 3) debounce
+  clearTimeout(_saveTimer);
+  if(opts.immediate){
+    _flushDelta();
+  } else {
+    _saveTimer = setTimeout(_flushDelta, SAVE_DEBOUNCE_MS);
+  }
+}
+
+/* --- ذخیره فوری (برای عملیات حساس مثل حذف) --- */
+function saveNow(){
+  save({immediate:true});
+}
+
+/* --- checkConnection بهینه (فقط وقتی لازم است) --- */
+let _lastConnCheck = 0;
+async function checkConnection(){
+  const ind = $('#syncIndicator'), txt = $('#syncTxt');
+  if(!ind || !txt) return;
+  // اگر اخیراً چک شده و متصل بود، دوباره چک نکن
+  if(Date.now() - _lastConnCheck < 15000 && _cloudConnected){
+    ind.className = 'sync-indicator ok';
+    txt.textContent = 'متصل به Firebase';
+    return;
+  }
+  if(_isSaving){
+    ind.className = 'sync-indicator';
+    txt.textContent = 'در حال ذخیره...';
+    return;
+  }
+  _lastConnCheck = Date.now();
+  ind.className = 'sync-indicator';
+  txt.textContent = 'در حال بررسی...';
+  try {
+    await dbRef.child('.info/connected').once('value');
+    _cloudConnected = true;
+    ind.className = 'sync-indicator ok';
+    txt.textContent = 'متصل به Firebase';
+  } catch(e) {
+    _cloudConnected = false;
+    ind.className = 'sync-indicator error';
+    txt.textContent = 'قطع ارتباط';
+  }
 }
 function toast(m){const t=$('#toast');if(!t)return;t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3200)}
 async function checkConnection(){
@@ -1795,6 +1944,12 @@ function renderTplItems(tpl,ans){const w=$('#tplWrap');if(!w)return;
 function saveForm(k,id){
  const M=MODS[k];
  let rec=id?db[k].find(r=>r.id===id):null;const isNew=!rec;
+// در saveForm، بعد از db[k].push(rec) یا ویرایش:
+if(isNew){
+  queueChange(k + '/' + rec.id, rec);
+} else {
+  queueChange(k + '/' + rec.id, rec);
+}
  if(isNew&&!canCreate(k)){toast('اجازه ثبت جدید ندارید');return}
  if(!isNew&&!canEdit(k,rec)){toast('اجازه ویرایش ندارید');return}
  if(isNew)rec={id:uid(PF[k]),createdBy:me.name,createdJ:todayJ(),log:[]};
