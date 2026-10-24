@@ -287,7 +287,8 @@ html{-webkit-text-size-adjust:100%}
 .ana-result-box{background:#fff7ed;border:1px dashed #fdba74;border-radius:10px;padding:10px;margin-top:10px;font-size:12.5px;line-height:1.9}
 .ana-result-box b{color:var(--pri2)}
 @media(max-width:980px){
- #side{transform:translateX(100%);transition:.25s}#side.open{transform:none}
+ html,body{overflow-x:hidden;max-width:100%}
+ #side{transform:translateX(100%);visibility:hidden;transition:transform .25s,visibility .25s}#side.open{transform:none;visibility:visible}
  #main{margin-right:0}
  .side-toggle{display:inline-block}
  .side-close{display:block}
@@ -377,6 +378,17 @@ html{-webkit-text-size-adjust:100%}
  .card{padding:10px}
  .kpi .kv{font-size:20px}
 }
+.sign-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sign-box{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff}
+.sign-title{font-size:12px;font-weight:700;color:var(--pri2);margin-bottom:6px}
+.sign-img{max-width:100%;max-height:110px;display:block;margin:0 auto;border:1px dashed #e2e8f0;border-radius:6px;background:#fff}
+.sign-meta{font-size:11.5px;text-align:center;margin-top:6px;line-height:1.7}
+.sign-empty{font-size:12px;color:var(--mut);text-align:center;padding:14px 0}
+.sign-pad{display:block;width:100%;height:auto;aspect-ratio:600/220;border:1px dashed #94a3b8;border-radius:8px;background:#fff;touch-action:none}
+.sign-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:11.5px}
+.sign-who{color:var(--mut)}
+.sign-hint{font-size:10.5px;color:var(--mut);margin-top:4px}
+@media(max-width:640px){.sign-grid{grid-template-columns:1fr}}
 @media print{
  #side,#topbar,.toolbar,.tbtn,.btn,.calpop,#fab,.bellpop,.sync-indicator,.addopt-btn,.risk-tabs{display:none!important}
  #main{margin:0}body{background:#fff}
@@ -461,12 +473,47 @@ const dbRef = firebase.database().ref('hse_data');
 const LS='hse_foundry_cloud';
 let db=null, me=null, curPage='dash', riskFilter=null, riskMethod='matrix';
 let _gsResults=[];
+let _renderAfterModal=false;
 let _gsTimer=null;
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const p2=n=>String(n).padStart(2,'0');
 const nd=n=>String(n).replace(/\d/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d]);
 const nfmt=n=>Number(n||0).toLocaleString('fa-IR');
+
+/* ---------- هش رمز عبور (SHA-256 خالص JS، با نام کاربری به‌عنوان نمک) ---------- */
+function _sha256Hex(str){
+  const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  let H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const bytes=[...unescape(encodeURIComponent(str))].map(c=>c.charCodeAt(0));
+  const bitLen=bytes.length*8;
+  bytes.push(0x80); while(bytes.length%64!==56) bytes.push(0);
+  for(let i=7;i>=0;i--) bytes.push(i>3?0:(bitLen>>>(i*8))&0xff);
+  const rotr=(x,n)=>(x>>>n)|(x<<(32-n));
+  for(let off=0;off<bytes.length;off+=64){
+    const W=new Array(64);
+    for(let i=0;i<16;i++) W[i]=(bytes[off+i*4]<<24)|(bytes[off+i*4+1]<<16)|(bytes[off+i*4+2]<<8)|bytes[off+i*4+3];
+    for(let i=16;i<64;i++){
+      const s0=rotr(W[i-15],7)^rotr(W[i-15],18)^(W[i-15]>>>3);
+      const s1=rotr(W[i-2],17)^rotr(W[i-2],19)^(W[i-2]>>>10);
+      W[i]=(W[i-16]+s0+W[i-7]+s1)|0;
+    }
+    let [a,b,c,d,e,f,g,h]=H;
+    for(let i=0;i<64;i++){
+      const S1=rotr(e,6)^rotr(e,11)^rotr(e,25);
+      const ch=(e&f)^(~e&g);
+      const t1=(h+S1+ch+K[i]+W[i])|0;
+      const S0=rotr(a,2)^rotr(a,13)^rotr(a,22);
+      const mj=(a&b)^(a&c)^(b&c);
+      const t2=(S0+mj)|0;
+      h=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
+    }
+    H=[(H[0]+a)|0,(H[1]+b)|0,(H[2]+c)|0,(H[3]+d)|0,(H[4]+e)|0,(H[5]+f)|0,(H[6]+g)|0,(H[7]+h)|0];
+  }
+  return H.map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
+}
+function hashPw(username, pw){ return _sha256Hex(String(username||'').toLowerCase()+':'+String(pw||'')); }
+function isHashedPw(v){ return /^[0-9a-f]{64}$/.test(String(v||'')); }
 
 /* ---------- لیست‌های پویا ---------- */
 const DEFAULT_LISTS = {
@@ -710,57 +757,85 @@ let _cloudConnected = false;
 const SAVE_DEBOUNCE_MS = 800;
 const RETRY_DELAYS = [1000, 3000, 8000, 20000];
 
+const RECORD_MODS=['personnel','incidents','unsafe','actions','risks','fmea','jsa','lec','inspections','ptw','ppeCat','ppeTx','trainings','hours','healthExp','medical','envWaste','envMon','chem','contacts','drills','emgEquip','toolbox','tbm','bbs','audits','docs','announce','s5'];
+let _seqCounter = 0;
+let _dirtyRecs = {};
+
+/* ثبت تغییر کل یک ماژول (برای لیست‌های ساده و ماژول‌های غیررکوردی) */
 function queueModule(moduleName){
   if(!moduleName) return;
-  _pendingModules[moduleName] = true;
-  delete _pendingDeletes[moduleName];
+  _pendingModules[moduleName] = ++_seqCounter;
 }
-function queueDelete(moduleName){
+/* ثبت تغییر فقط یک رکورد — جلوی بازنویسی تغییرات همکاران را می‌گیرد */
+function queueRec(moduleName, id){
   if(!moduleName) return;
-  _pendingModules[moduleName] = true;
+  if(!id || RECORD_MODS.indexOf(moduleName)<0) return queueModule(moduleName);
+  if(!_dirtyRecs[moduleName]) _dirtyRecs[moduleName] = {};
+  _dirtyRecs[moduleName][id] = ++_seqCounter;
 }
+function queueDelete(moduleName){ queueModule(moduleName); }
+function hasPendingChanges(){
+  return Object.keys(_pendingModules).length>0 || Object.keys(_dirtyRecs).length>0;
+}
+function _idMap(arr){
+  const obj={};
+  arr.forEach((item,i)=>{ obj[(item&&item.id)?item.id:('_'+i)]=item; });
+  return obj;
+}
+function _clean(v){ return JSON.parse(JSON.stringify(v===undefined?null:v)); }
 
-function _buildUpdatePayload(){
-  const updates = {};
-  Object.keys(_pendingModules).forEach(m=>{
-    if(db[m] === undefined) return;
+function _buildUpdatePayload(snapP, snapD){
+  const updates={};
+  Object.keys(snapP).forEach(m=>{
+    if(db[m]===undefined) return;
     if(Array.isArray(db[m])){
-      const arr = db[m];
-      if(arr.length === 0){
-        updates[m] = null;
-      } else {
-        const obj = {};
-        arr.forEach((item, i) => { obj[i] = item; });
-        updates[m] = obj;
-      }
+      if(!db[m].length) updates[m]=null;
+      else if(RECORD_MODS.indexOf(m)>=0) updates[m]=_clean(_idMap(db[m]));
+      else { const obj={}; db[m].forEach((it,i)=>{ obj[i]=it; }); updates[m]=_clean(obj); }
     } else {
-      updates[m] = db[m];
+      updates[m]=_clean(db[m]);
     }
   });
+  Object.keys(snapD).forEach(m=>{
+    if(updates[m]!==undefined) return;
+    const rows=db[m]||[];
+    Object.keys(snapD[m]).forEach(id=>{
+      const rec=rows.find(x=>x&&x.id===id);
+      updates[m+'/'+id] = rec ? _clean(rec) : null;
+    });
+  });
+  if(Object.keys(updates).length) updates.seq=_clean(db.seq||{});
   return updates;
 }
 
 async function _flushDelta(){
   if(_isSaving) return;
-  const hasPending = Object.keys(_pendingModules).length > 0;
-  if(!hasPending) return;
+  if(!hasPendingChanges()) return;
 
   _isSaving = true;
+  let ok=false;
   const indicator = $('#syncIndicator'), txt = $('#syncTxt');
   if(indicator) indicator.className = 'sync-indicator';
   if(txt) txt.textContent = 'در حال ذخیره...';
 
+  const snapP = Object.assign({}, _pendingModules);
+  const snapD = JSON.parse(JSON.stringify(_dirtyRecs));
   try {
-    const updates = _buildUpdatePayload();
+    const updates = _buildUpdatePayload(snapP, snapD);
     if(Object.keys(updates).length){
       await dbRef.update(updates);
     }
-    _pendingModules = {};
-    _pendingDeletes = {};
+    /* فقط مواردی پاک می‌شوند که همین‌جا ارسال شده‌اند؛ تغییراتی که در حین ارسال ثبت شدند می‌مانند */
+    Object.keys(snapP).forEach(m=>{ if(_pendingModules[m]===snapP[m]) delete _pendingModules[m]; });
+    Object.keys(snapD).forEach(m=>{
+      const cur=_dirtyRecs[m]; if(!cur) return;
+      Object.keys(snapD[m]).forEach(id=>{ if(cur[id]===snapD[m][id]) delete cur[id]; });
+      if(!Object.keys(cur).length) delete _dirtyRecs[m];
+    });
+    ok=true;
     _saveRetryCount = 0;
     _cloudConnected = true;
     _lastCloudSync = Date.now();
-
     if(indicator) indicator.className = 'sync-indicator ok';
     if(txt) txt.textContent = 'همگام‌سازی شد';
   } catch(err) {
@@ -772,22 +847,14 @@ async function _flushDelta(){
     setTimeout(_flushDelta, delay);
   } finally {
     _isSaving = false;
+    /* اگر در حین ارسال تغییر جدیدی ثبت شده، دوباره ارسال کن */
+    if(ok && hasPendingChanges()) setTimeout(_flushDelta, SAVE_DEBOUNCE_MS);
   }
 }
 
 function save(opts){
   opts = opts || {};
   try { localStorage.setItem(LS, JSON.stringify(db)); } catch(e){}
-
-  if(!Object.keys(_pendingModules).length){
-    ['personnel','incidents','unsafe','actions','risks','fmea','jsa','lec',
-     'inspections','ptw','ppeCat','ppeTx','trainings','hours','healthExp',
-     'medical','envWaste','envMon','chem','contacts','drills','emgEquip',
-     'toolbox','tbm','bbs','audits','docs','announce','s5','scoreArch',
-     'scoreRules','permissions','lists','tpls','s5_tpls','areas','seq'
-    ].forEach(m => { if(db[m] !== undefined) _pendingModules[m] = true; });
-  }
-
   clearTimeout(_saveTimer);
   if(opts.immediate){
     _flushDelta();
@@ -796,6 +863,17 @@ function save(opts){
   }
 }
 
+/* منتظر می‌ماند تا همه‌ی تغییرات ارسال شوند (قبل از بارگذاری مجدد صفحه) */
+function waitForFlush(timeoutMs){
+  return new Promise(res=>{
+    const t0=Date.now();
+    (function poll(){
+      if(!_isSaving && !hasPendingChanges()) return res(true);
+      if(Date.now()-t0 > (timeoutMs||12000)) return res(false);
+      setTimeout(poll,150);
+    })();
+  });
+}
 function saveNow(){ save({immediate:true}); }
 
 let _lastConnCheck = 0;
@@ -1006,7 +1084,7 @@ function s5GlobalStats(){
   return {latest, avg, bands, perS, trend, total:rows.length, monthCount: rows.filter(r=>mKey(r.date)===curMonth).length};
 }
 
-function uid(p){db.seq[p]=(db.seq[p]||0)+1;return p+'-'+String(db.seq[p]).padStart(4,'0')}
+function uid(p){db.seq[p]=(db.seq[p]||0)+1;return p+'-'+String(db.seq[p]).padStart(4,'0')+'-'+Math.random().toString(36).slice(2,5).toUpperCase()}
 function lvlName(sc){return sc<=4?'کم':sc<=9?'متوسط':sc<=15?'بالا':'بحرانی'}
 function lvlClass(sc){return sc<=4?'b-ok':sc<=9?'b-warn':sc<=15?'b-org':'b-bad'}
 const lvlChip=sc=>sc?'<span class="chip '+lvlClass(sc)+'">'+lvlName(sc)+' ('+nd(sc)+')</span>':'—';
@@ -1109,6 +1187,7 @@ function ensureArchives(){
   const rows=calcScores(mk);
   const has=rows.some(r=>r.score!==0);
   db.scoreArch.push({month:mk,rows:rows,top:has?{name:rows[0].name,score:rows[0].score}:null});
+  queueModule('scoreArch');
   if(!has)break;
  }
  save();
@@ -1509,7 +1588,7 @@ function seed(){
  const d={areas:DEFAULT_LISTS.AREAS0.slice(),tpls:defaultTPLS(),s5_tpls:defaultS5TPLS(),scoreArch:[],scoreRules:defaultScoreRules(),permissions:defaultPerms(),lists:{},s5:[],fmea:[],jsa:[],lec:[]};
  Object.keys(DEFAULT_LISTS).forEach(k=>d.lists[k]=DEFAULT_LISTS[k].slice());
  const PS=[['علی رضایی','اپراتور کوره','سالن ذوب','worker','worker'],['حسین کریمی','قالب‌ساز','قالب‌سازی و مولر','worker','hossein'],['مهدی احمدی','ریخته‌گر','ریخته‌گری مذاب','worker','mehdi'],['رضا موسوی','اپراتور سندبلاست','سندبلاست و تمیزکاری','worker','reza'],['جواد نوری','جوشکار','برش و جوشکاری','worker','javad'],['سعید قاسمی','اپراتور مولر','قالب‌سازی و مولر','worker','saeed'],['امیر حیدری','اپراتور جرثقیل','سالن ذوب','worker','amir'],['محمد صادقی','انباردار','انبار مواد و کک','worker','mohammad'],['نرگس شریفی','کارشناس آزمایشگاه','آزمایشگاه','worker','narges'],['فاطمه یوسفی','مسئول اداری','اداری و رفاهی','worker','fateme'],['حسن عباسی','تعمیرکار مکانیک','تأسیسات','worker','hasan'],['ایمان توکلی','برقکار','تأسیسات','worker','iman'],['سارا محمدی','کارشناس HSE','اداری و رفاهی','expert','expert'],['رضا کریمی','مدیر کارخانه','اداری و رفاهی','manager','manager']];
- d.personnel=PS.map(x=>({id:uid('USR'),name:x[0],job:x[1],area:x[2],role:x[3],u:x[4],p:'1234'}));
+ d.personnel=PS.map(x=>({id:uid('USR'),name:x[0],job:x[1],area:x[2],role:x[3],u:x[4],p:hashPw(x[4],'1234')}));
  Object.keys(PF).forEach(k=>{d[k]=[]});
  const R=(m,o)=>{const base={id:uid(PF[m]),createdBy:'سامانه',createdJ:o.date||todayJ(),log:[{u:'سامانه',d:o.date||todayJ(),t:'ثبت اولیه'}]};d[m].push(Object.assign(base,o));return base.id};
  const INC1=R('incidents',{date:jAgo(3),time:'10:15',area:'ریخته‌گری مذاب',type:'شبه‌حادثه (Near Miss)',title:'پاشش مذاب هنگام شارژ کوره',desc:'قطعات مرطوب همراه شارژ وارد کوره شد و پاشش مذاب رخ داد؛ فرد در فاصله امن بود.',injured:'خیر',immediate:'توقف شارژ و خشک‌سازی قطعات',rootCause:'ورود قطعات مرطوب به خط شارژ',corrective:'ساختن سایه‌بان انبار شارژ و کنترل رطوبت',status:'در حال بررسی',createdBy:'علی رضایی'});
@@ -1592,19 +1671,40 @@ function reportCSSForWord(){
     th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:right;vertical-align:top}
     th{background:#f1f5f9;font-weight:700;color:#475569}
     tr:nth-child(even) td{background:#f8fafc}
+    .kpi-row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+    .kpi-box{flex:1 1 140px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;text-align:center;font-size:10pt;color:#475569}
+    .kpi-box b{display:block;font-size:16pt;color:#c2410c;margin:4px 0}
     .footer{font-size:9pt;color:#64748b;margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;text-align:center}
   </style>`;
+}
+function saveBlob(blob, name, mime){
+  let file=null;
+  try{ file=new File([blob], name, {type:mime}); }catch(e){}
+  if(file && navigator.canShare && navigator.share){
+    let can=false; try{ can=navigator.canShare({files:[file]}); }catch(e){}
+    if(can){
+      navigator.share({files:[file], title:name}).then(()=>toast('✔ فایل آماده شد'), err=>{
+        if(err && err.name==='AbortError') return;
+        fallbackSaveBlob(blob,name);
+      });
+      return;
+    }
+  }
+  fallbackSaveBlob(blob,name);
+}
+function fallbackSaveBlob(blob, name){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=name; a.rel='noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+  toast('✔ فایل آماده شد — در صورت سفید ماندن صفحه، از دکمه چاپ استفاده کنید');
 }
 function exportWord(html, filename){
   try{
     const doc=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><title>${esc(filename)}</title>${reportCSSForWord()}</head><body>${html}<div class="footer">سامانه جامع HSE فولاد تنبور — ${nd(todayJ())}</div></body></html>`;
     const blob=new Blob(['\ufeff',doc],{type:'application/msword'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download=filename+'.doc';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),2000);
-    toast('✔ فایل Word دانلود شد');
+    saveBlob(blob, filename+'.doc', 'application/msword');
   }catch(e){ toast('خطا در تولید Word: '+e.message); }
 }
 function exportPDF(html, filename){
@@ -1620,6 +1720,9 @@ function exportPDF(html, filename){
       .hse-report th,.hse-report td{border:1px solid #cbd5e1;padding:6px 8px;text-align:right;vertical-align:top}
       .hse-report th{background:#f1f5f9;font-weight:700;color:#475569}
       .hse-report tr:nth-child(even) td{background:#f8fafc}
+      .hse-report .kpi-row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+      .hse-report .kpi-box{flex:1 1 140px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;text-align:center;font-size:10pt;color:#475569}
+      .hse-report .kpi-box b{display:block;font-size:16pt;color:#c2410c;margin:4px 0}
       .hse-report .footer{font-size:9pt;color:#64748b;margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;text-align:center}`;
     document.head.appendChild(s);
   }
@@ -1628,12 +1731,14 @@ function exportPDF(html, filename){
   wrap.style.cssText='position:fixed;left:0;top:0;width:800px;background:#fff;z-index:-1;pointer-events:none;overflow:visible';
   wrap.innerHTML=html+'<div class="footer">سامانه جامع HSE فولاد تنبور — '+nd(todayJ())+'</div>';
   document.body.appendChild(wrap);
-  html2pdf().from(wrap).set({
+  const pdfJob=html2pdf().from(wrap).set({
     margin:6, filename:filename+'.pdf',
     image:{type:'jpeg',quality:0.95},
     html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false,scrollX:0,scrollY:0,windowWidth:800},
     jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
-  }).save().then(()=>{ wrap.remove(); toast('✔ فایل PDF دانلود شد'); })
+  });
+  (typeof pdfJob.outputPdf==='function'?pdfJob.outputPdf('blob'):pdfJob.save().then(()=>null))
+   .then(blob=>{ wrap.remove(); if(blob) saveBlob(blob, filename+'.pdf', 'application/pdf'); else toast('✔ فایل PDF دانلود شد'); })
    .catch(e=>{ wrap.remove(); toast('خطا در PDF — از دکمه چاپ استفاده کنید'); });
 }
 function buildModuleReport(k){
@@ -1681,6 +1786,7 @@ function exportRecord(k,id,format){
     h+='<tr><th style="width:30%">'+esc(f.l)+'</th><td>'+out+'</td></tr>';
   });
   h+='</tbody></table>';
+  if(hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
   const fn='HSE-'+r.id+'-'+todayJ().replace(/\//g,'-');
   if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
 }
@@ -1911,6 +2017,7 @@ function openForm(k,id,pre){
  if(k==='risks')b+='<div class="lvprev" id="lvprev"></div>';
  if(k==='fmea')b+='<div class="lvprev" id="fmprev"></div>';
  if(k==='lec')b+='<div class="lvprev" id="lecprev"></div>';
+ b+=signFormBlock(k,rec);
  openModal((rec?'ویرایش — ':'ثبت جدید — ')+M.t,b,
   '<button class="btn pri" onclick="saveForm(\''+k+'\','+(id?'\''+id+'\'':'null')+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
  setTimeout(()=>{const mb=document.getElementById('mbody');if(mb)mb.scrollTop=0},50);
@@ -1919,6 +2026,7 @@ function openForm(k,id,pre){
  if(k==='fmea'){const upd=()=>{const S=+($('#f_s')||{}).value||1,O=+($('#f_o')||{}).value||1,D=+($('#f_d')||{}).value||1;const rpn=S*O*D;const cls=rpn<=50?'b-ok':rpn<=100?'b-warn':rpn<=200?'b-org':'b-bad';const lbl=rpn<=50?'کم':rpn<=100?'متوسط':rpn<=200?'بالا':'بحرانی';const el=$('#fmprev');if(el)el.innerHTML='RPN (S×O×D) = <b>'+nd(S)+' × '+nd(O)+' × '+nd(D)+' = '+nd(rpn)+'</b> — <span class="chip '+cls+'">'+lbl+'</span>'};['f_s','f_o','f_d'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
  if(k==='lec'){const upd=()=>{const L=+($('#f_L')||{}).value||0,E=+($('#f_E')||{}).value||0,C=+($('#f_C')||{}).value||0;const sc=Math.round(L*E*C*100)/100;const lvl=lecLevel(sc);const cls=sc<20?'b-ok':sc<70?'b-info':sc<200?'b-warn':sc<400?'b-org':'b-bad';const el=$('#lecprev');if(el)el.innerHTML='امتیاز LEC = <b>'+nd(sc)+'</b> — <span class="chip '+cls+'">'+lvl+'</span>'};['f_L','f_E','f_C'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
  if(k==='jsa'){setTimeout(()=>{initJsaSteps(rec?rec.steps:null)},80)}
+ if(signable(k)) setTimeout(initSignPads,60);
 }
 function renderTplItems(tpl,ans){const w=$('#tplWrap');if(!w)return;
  if(!tpl||!TPLS[tpl]){w.innerHTML='<div class="lvprev">ابتدا نوع چک‌لیست را انتخاب کنید.</div>';return}
@@ -1929,7 +2037,8 @@ function renderTplItems(tpl,ans){const w=$('#tplWrap');if(!w)return;
 /* FIX: saveForm — باگ اصلی رفع شد */
 function saveForm(k,id){
  const M=MODS[k];
- let rec=id?db[k].find(r=>r.id===id):null;const isNew=!rec;
+ const orig=id?db[k].find(r=>r.id===id):null;const isNew=!orig;
+ let rec=orig?JSON.parse(JSON.stringify(orig)):null;
 
  // FIX: دسترسی‌ها اول چک شوند
  if(isNew&&!canCreate(k)){toast('اجازه ثبت جدید ندارید');return}
@@ -1984,6 +2093,7 @@ function saveForm(k,id){
    const steps=_jsaSteps.filter(s=>(s.step||'').trim()||(s.hazard||'').trim());
    if(!steps.length){bad=bad||'حداقل یک مرحله شغلی'}else rec.steps=steps;
  }
+ collectSignature(rec);
  if(bad){toast('⚠️ تکمیل الزامی است: '+bad);return}
 
  if(k==='actions'){
@@ -1992,11 +2102,9 @@ function saveForm(k,id){
    if(rec.status==='تایید و بسته شد') rec.progress=100;
    if(rec.ref && isNew){
      const u=db.unsafe.find(x=>x.id===rec.ref);
-     if(u){ u.capaRef=rec.code; if(u.status==='ثبت شده'||u.status==='در حال رسیدگی') u.status='ارجاع به اقدام'; }
+     if(u){ u.capaRef=rec.code; if(u.status==='ثبت شده'||u.status==='در حال رسیدگی') u.status='ارجاع به اقدام'; queueRec('unsafe',u.id); }
      const inc=db.incidents.find(x=>x.id===rec.ref);
-     if(inc){ inc.capaRef=rec.code; }
-     queueModule('unsafe');
-     queueModule('incidents');
+     if(inc){ inc.capaRef=rec.code; queueRec('incidents',inc.id); }
    }
  }
 
@@ -2006,10 +2114,11 @@ function saveForm(k,id){
    db[k].push(rec);
  } else {
    rec.log.push({u:me.name,d:todayJ(),t:'ویرایش'});
+   const ix=db[k].findIndex(x=>x.id===rec.id);
+   if(ix>=0) db[k][ix]=rec; else db[k].push(rec);
  }
 
- // FIX: فقط همین ماژول را صف کن (نه قبل از تعریف rec)
- queueModule(k);
+ queueRec(k, rec.id);
 
  save();
  closeModal();
@@ -2028,7 +2137,7 @@ function openS5Wizard(id){
  if(id && !can('s5','edit')){toast('دسترسی ویرایش 5S ندارید');return}
  const rec = id ? db.s5.find(r=>r.id===id) : null;
  const isNew = !rec;
- s5Wiz={step:0, rec: isNew? null : Object.assign({},rec), isNew, editing:!isNew};
+ s5Wiz={step:0, rec: isNew? null : JSON.parse(JSON.stringify(rec)), isNew, editing:!isNew};
  drawS5Wizard();
 }
 function closeS5Wizard(){closeModal();s5Wiz={step:0,rec:null,isNew:true,editing:false};}
@@ -2097,9 +2206,11 @@ function drawS5Wizard(){
    body+='</div>';
    const m=s5MinKey(rec);
    if(m) body+='<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:10px;font-size:12.5px;margin-bottom:10px">⚠️ <b>ضعیف‌ترین رکن:</b> '+esc(m.name)+' با '+nd(m.pct)+'٪</div>';
+   body+=signFormBlock('s5',rec);
    footer='<div class="s5-wizard-nav"><button class="btn ghost" onclick="s5Prev()">→ مرحله قبل</button><button class="btn pri" onclick="saveS5()">💾 ذخیره ارزیابی</button></div>';
  }
  openModal('🏭 ویزارد 5S — مرحله '+nd(step+1)+' از '+nd(totalSteps), stepsBar+body, footer);
+ if(step===totalSteps-1) setTimeout(initSignPads,60);
 }
 function s5SetItem(key,i,val){
  if(!s5Wiz.rec) return;
@@ -2134,6 +2245,7 @@ function saveS5(){
  if(!s5Wiz.rec){toast('اطلاعات ناقص');return}
  const rec=s5Wiz.rec;
  if(!rec.date||!rec.area||!rec.assessor){toast('اطلاعات پایه الزامی است');return}
+ collectSignature(rec);
  rec.createdBy = rec.createdBy || me.name;
  rec.createdJ = rec.createdJ || todayJ();
  rec.log = rec.log || [];
@@ -2146,7 +2258,7 @@ function saveS5(){
    rec.log.push({u:me.name,d:todayJ(),t:'ویرایش'});
    if(i>=0) db.s5[i]=rec; else db.s5.push(rec);
  }
- queueModule('s5');
+ queueRec('s5', rec.id);
  save();
  closeS5Wizard();
  toast('✔ ارزیابی 5S ذخیره شد');
@@ -2661,10 +2773,10 @@ function applyImport(){
    const d=JSON.parse($('#bkimp').value);
    if(!d.personnel||!d.incidents)throw new Error('bad');
    db=sanitizeData(d);
-   Object.keys(db).forEach(m=>{ _pendingModules[m]=true; });
+   Object.keys(db).forEach(m=>queueModule(m));
    save({immediate:true});
-   toast('✔ بازیابی شد');
-   setTimeout(()=>location.reload(), 800);
+   toast('⏳ در حال ذخیره در ابر...');
+   waitForFlush().then(ok=>{ if(ok){ toast('✔ بازیابی شد'); setTimeout(()=>location.reload(), 500); } else toast('ذخیره ابری کامل نشد — اتصال را بررسی کنید'); });
  }catch(e){toast('متن معتبر نیست')}
 }
 function doImport(inp){
@@ -2675,15 +2787,22 @@ function doImport(inp){
      const d=JSON.parse(e.target.result);
      if(!d.personnel||!d.incidents)throw new Error('bad');
      db=sanitizeData(d);
-     Object.keys(db).forEach(m=>{ _pendingModules[m]=true; });
+     Object.keys(db).forEach(m=>queueModule(m));
      save({immediate:true});
-     toast('بازیابی انجام شد');
-     setTimeout(()=>location.reload(), 800);
+     toast('⏳ در حال ذخیره در ابر...');
+     waitForFlush().then(ok=>{ if(ok){ toast('بازیابی انجام شد'); setTimeout(()=>location.reload(), 500); } else toast('ذخیره ابری کامل نشد — اتصال را بررسی کنید'); });
    }catch(x){toast('فایل معتبر نیست')}
  };
  r.readAsText(f);
 }
-function doReset(){ askConfirm('همه داده‌ها به نمونه اولیه بازمی‌گردد. مطمئنید؟',function(){ try{localStorage.removeItem(LS)}catch(e){};location.reload()}); }
+function doReset(){ askConfirm('همه داده‌ها (برای همه کاربران) به نمونه اولیه بازمی‌گردد. مطمئنید؟',function(){
+ try{localStorage.removeItem(LS)}catch(e){}
+ db=sanitizeData(seed());
+ Object.keys(db).forEach(m=>queueModule(m));
+ save({immediate:true});
+ toast('⏳ در حال بازنشانی...');
+ waitForFlush().then(ok=>{ if(ok) location.reload(); else toast('بازنشانی در ابر کامل نشد — اتصال را بررسی کنید'); });
+}); }
 function diag(){
  const res=[];
  function t(name,fn){let out;try{out=fn()}catch(e){out='⛔ خطا: '+e.message}res.push([name,out])}
@@ -2777,23 +2896,29 @@ function askDelListItem(listKey,encVal){
 }
 function personForm(i){const p=(i>=0&&db.personnel[i])?db.personnel[i]:null;
  openModal(p?'✏️ ویرایش پرسنل':'➕ تعریف شخص جدید',
- '<div class="fgrid"><div class="ff"><label>نام <i>*</i></label><input id="pf_n" class="in" value="'+esc(p?p.name:'')+'"></div><div class="ff"><label>سمت</label><input id="pf_j" class="in" value="'+esc(p?p.job:'')+'"></div><div class="ff"><label>واحد</label><select id="pf_a" class="in">'+db.areas.map(a=>'<option '+(p&&p.area===a?'selected':'')+'>'+esc(a)+'</option>').join('')+'</select></div><div class="ff"><label>نقش <i>*</i></label><select id="pf_r" class="in">'+['worker','expert','manager'].map(r=>'<option value="'+r+'" '+((p?p.role:'worker')===r?'selected':'')+'>'+ROLE_CHIP[r][0]+'</option>').join('')+'</select></div><div class="ff"><label>نام کاربری</label><input id="pf_u" class="in" value="'+esc(p?p.u:'')+'" style="direction:ltr"></div><div class="ff"><label>رمز</label><input id="pf_p" class="in" value="'+esc(p?p.p:'')+'" style="direction:ltr"></div></div>',
+ '<div class="fgrid"><div class="ff"><label>نام <i>*</i></label><input id="pf_n" class="in" value="'+esc(p?p.name:'')+'"></div><div class="ff"><label>سمت</label><input id="pf_j" class="in" value="'+esc(p?p.job:'')+'"></div><div class="ff"><label>واحد</label><select id="pf_a" class="in">'+db.areas.map(a=>'<option '+(p&&p.area===a?'selected':'')+'>'+esc(a)+'</option>').join('')+'</select></div><div class="ff"><label>نقش <i>*</i></label><select id="pf_r" class="in">'+['worker','expert','manager'].map(r=>'<option value="'+r+'" '+((p?p.role:'worker')===r?'selected':'')+'>'+ROLE_CHIP[r][0]+'</option>').join('')+'</select></div><div class="ff"><label>نام کاربری</label><input id="pf_u" class="in" value="'+esc(p?p.u:'')+'" style="direction:ltr"></div><div class="ff"><label>رمز '+(p?'(برای تغییر، رمز جدید را وارد کنید)':'')+'</label><input id="pf_p" type="password" class="in" value="" autocomplete="new-password" style="direction:ltr"></div></div>',
  '<button class="btn pri" onclick="savePerson('+i+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
 }
 function savePerson(i){
  const n=$('#pf_n').value.trim(),un=$('#pf_u').value.trim(),pw=$('#pf_p').value.trim(),role=$('#pf_r').value;
  if(!n){toast('نام الزامی است');return}
  if(un&&db.personnel.some((p,j)=>p.u===un&&j!==i)){toast('نام کاربری تکراری');return}
- if(i>=0&&db.personnel[i]){Object.assign(db.personnel[i],{name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un,p:pw})}
- else db.personnel.push({id:uid('USR'),name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un,p:pw});
- queueModule('personnel');
+ const old=(i>=0&&db.personnel[i])?db.personnel[i]:null;
+ if(old && un!==(old.u||'') && !pw){toast('با تغییر نام کاربری، رمز جدید را وارد کنید');return}
+ if(!old && un && !pw){toast('برای حساب جدید رمز وارد کنید');return}
+ const passField = pw ? (un? hashPw(un,pw) : '') : (old? old.p : '');
+ const rec={name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un,p:passField};
+ let id;
+ if(old){ Object.assign(old,rec); id=old.id; }
+ else { id=uid('USR'); db.personnel.push(Object.assign({id:id},rec)); }
+ queueRec('personnel', id);
  save();closeModal();toast('✔ ذخیره شد');settingsPage()
 }
 function delPerson(i){const p=db.personnel[i];if(!p)return;
  if(p.id===me.id){toast('حساب خودتان قابل حذف نیست');return}
  askConfirm('«'+p.name+'» حذف شود؟',function(){
    db.personnel.splice(i,1);
-   queueModule('personnel');
+   queueRec('personnel', p.id);
    save();settingsPage();toast('حذف شد')
  })}
 function addArea(){const v=$('#newarea').value.trim();if(!v){toast('نام واحد را وارد کنید');return}
@@ -3026,7 +3151,7 @@ function saveVerifyCapa(id){
  r.progress = eff==='اثربخش' ? 100 : r.progress;
  if(!r.log) r.log=[];
  r.log.push({u:me.name,d:todayJ(),t:'تأیید اثربخشی: '+eff});
- queueModule('actions');
+ queueRec('actions', r.id);
  save();
  closeModal();
  toast('✔ تأیید ثبت شد');
@@ -3035,16 +3160,84 @@ function saveVerifyCapa(id){
  openDetail('actions',id);
 }
 
+/* ---------- امضا ---------- */
+const SIGN_ROLES=[['expert','🦺 کارشناس HSE'],['manager','👔 مدیریت']];
+const SIGN_EXCLUDE=['contacts','hours','ppeCat','emgEquip','announce','chem'];
+function signable(k){ return k==='s5' || (!!MODS[k] && SIGN_EXCLUDE.indexOf(k)<0); }
+function myJob(){ const p=(db&&db.personnel)?db.personnel.find(x=>x.id===me.id):null; return p?(p.job||''):''; }
+function canSignAs(role){ return !!me && me.role===role && (role==='expert'||role==='manager'); }
+function hasSigns(signs){ return !!signs && Object.keys(signs).some(r=>signs[r]&&signs[r].img); }
+function signDisplayHTML(signs){
+  let h='<div style="margin-top:12px"><div style="font-weight:700;font-size:12.5px;color:#c2410c;margin-bottom:6px">✍️ امضاها</div><div style="display:flex;gap:10px;flex-wrap:wrap">';
+  SIGN_ROLES.forEach(([role,title])=>{
+    const s=signs&&signs[role]; if(!s||!s.img) return;
+    h+='<div style="flex:1 1 200px;max-width:320px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;text-align:center;background:#fff">'
+      +'<div style="font-size:11px;color:#475569;margin-bottom:4px">'+title+'</div>'
+      +'<img src="'+s.img+'" alt="امضا" style="max-width:100%;max-height:90px;display:block;margin:0 auto">'
+      +'<div style="font-size:12px;font-weight:700;margin-top:4px">'+esc(s.name)+'</div>'
+      +'<div style="font-size:11px;color:#475569">'+esc(s.job||'')+'</div>'
+      +'<div style="font-size:10.5px;color:#64748b">'+esc(s.date||'')+'</div></div>';
+  });
+  return h+'</div></div>';
+}
+function signFormBlock(k,rec){
+  const signs=(rec&&rec.signs)||{};
+  const canAny=!!me && (me.role==='expert'||me.role==='manager');
+  if(!signable(k) || !canAny){
+    return hasSigns(signs) ? '<div class="ff wide">'+signDisplayHTML(signs)+'</div>' : '';
+  }
+  let h='<div class="ff wide" style="margin-top:12px"><label>✍️ امضا — نام و سمت امضاکننده زیر امضا ثبت می‌شود</label><div class="sign-grid">';
+  SIGN_ROLES.forEach(([role,title])=>{
+    const s=signs[role];
+    h+='<div class="sign-box"><div class="sign-title">'+title+'</div>';
+    if(s&&s.img) h+='<img class="sign-img" src="'+s.img+'" alt="امضا"><div class="sign-meta">'+esc(s.name)+' — '+esc(s.job||'')+' — '+esc(s.date||'')+'</div>';
+    else h+='<div class="sign-empty">امضا نشده</div>';
+    if(canSignAs(role)){
+      h+='<div class="sign-pad-wrap"><canvas class="sign-pad" data-role="'+role+'" width="600" height="220"></canvas>'
+        +'<div class="sign-tools"><button type="button" class="btn ghost sm" onclick="sigClear(\''+role+'\')">🧹 پاک کردن</button>'
+        +'<span class="sign-who">'+esc(me.name)+' — '+esc(myJob())+'</span></div>'
+        +'<div class="sign-hint">'+(s&&s.img?'برای جایگزینی امضا، دوباره امضا کنید':'با انگشت یا ماوس داخل کادر امضا کنید')+'</div></div>';
+    }
+    h+='</div>';
+  });
+  return h+'</div></div>';
+}
+function initSignPads(){
+  document.querySelectorAll('canvas.sign-pad').forEach(cv=>{
+    const ctx=cv.getContext('2d');
+    ctx.lineWidth=2.4; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#0f172a';
+    cv.style.touchAction='none'; cv.dataset.drawn='';
+    let down=false,last=null;
+    const pos=e=>{const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)*cv.width/r.width,y:(e.clientY-r.top)*cv.height/r.height}};
+    cv.onpointerdown=e=>{down=true;last=pos(e);try{cv.setPointerCapture(e.pointerId)}catch(_){}e.preventDefault()};
+    cv.onpointermove=e=>{if(!down)return;const q=pos(e);ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(q.x,q.y);ctx.stroke();last=q;cv.dataset.drawn='1'};
+    const up=()=>{down=false;last=null};
+    cv.onpointerup=up; cv.onpointercancel=up;
+  });
+}
+function sigClear(role){
+  const cv=document.querySelector('canvas.sign-pad[data-role="'+role+'"]'); if(!cv) return;
+  cv.getContext('2d').clearRect(0,0,cv.width,cv.height); cv.dataset.drawn='';
+}
+function collectSignature(rec){
+  if(!rec||!me||!(me.role==='expert'||me.role==='manager')) return;
+  const cv=document.querySelector('canvas.sign-pad[data-role="'+me.role+'"]');
+  if(!cv||cv.dataset.drawn!=='1') return;
+  rec.signs=Object.assign({},rec.signs||{});
+  rec.signs[me.role]={name:me.name,job:myJob(),date:todayJ(),img:cv.toDataURL('image/png')};
+}
+
 /* ---------- Detail ---------- */
 function openDetail(k,id){
  const M=MODS[k],r=db[k].find(x=>x.id===id);if(!r)return;
  if(!canView(k)){toast('اجازه مشاهده این بخش را ندارید');return}
  if(!isOwnRecord(k,r)){toast('فقط اطلاعات مربوط به خودتان قابل مشاهده است');return}
- let h='<div class="dhead"><span class="chip idc">'+r.id+'</span>'+(r.code?'<span class="chip b-org" style="direction:ltr;font-family:monospace">'+esc(r.code)+'</span>':'')+(M.status&&r.status?chip(r.status):'')+'<small style="color:var(--mut)">ثبت: '+esc(r.createdBy)+' / '+esc(r.createdJ)+'</small></div><div class="dgrid">';
+ let h='<div class="dhead"><span class="chip idc">'+esc(r.id)+'</span>'+(r.code?'<span class="chip b-org" style="direction:ltr;font-family:monospace">'+esc(r.code)+'</span>':'')+(M.status&&r.status?chip(r.status):'')+'<small style="color:var(--mut)">ثبت: '+esc(r.createdBy)+' / '+esc(r.createdJ)+'</small></div><div class="dgrid">';
  M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;const v=r[f.k];if(v===undefined||v===''||v===null)return;
   let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=esc((v||[]).join('، '));break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;default:out=esc(v)}
   h+='<div class="dl">'+f.l+'</div><div class="dv">'+out+'</div>'});
  h+='</div>';
+ if(r.signs && hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
  if(k==='incidents' && r.analyses){
    const a=normalizeAnalyses(r.analyses);
    h+='<h4 class="msh">🔬 تحلیل حادثه</h4>';
@@ -3172,7 +3365,7 @@ function setStat(k,id,val){
    if(val==='انجام شد'&&(!r.progress||+r.progress<100))r.progress=100;
  }
  r.log.push({u:me.name,d:todayJ(),t:'تغییر وضعیت به: '+val});
- queueModule(k);
+ queueRec(k, id);
  save();
  toast('وضعیت به‌روزرسانی شد');
  openDetail(k,id);
@@ -3183,7 +3376,7 @@ function delRec(k,id){
  if(!canDel(k)){toast('اجازه حذف ندارید');return}
  askConfirm('از حذف این مورد («'+id+'») مطمئن هستید؟',function(){
   db[k]=db[k].filter(x=>x.id!==id);
-  queueModule(k);
+  queueRec(k, id);
   save();
   closeCal();
   closeModal();
@@ -3211,7 +3404,7 @@ function ptwAct(id,to){
  r.status=to;
  if(!r.log) r.log=[];
  r.log.push({u:me.name,d:todayJ(),t:'مرحله: '+to});
- queueModule('ptw');
+ queueRec('ptw', id);
  save();
  toast('✔ ثبت شد');
  openDetail('ptw',id);
@@ -3614,7 +3807,7 @@ function setPage(k){const Pg=pageOf(k);
  try{renderBell()}catch(e){}
 }
 function openModal(t,b,f){closeCal();closeBell();$('#mtitle').textContent=t;$('#mbody').innerHTML=b;$('#mfoot').innerHTML=f||'';$('#modal').classList.add('open');document.body.classList.add('modal-open')}
-function closeModal(){closeCal();$('#modal').classList.remove('open');document.body.classList.remove('modal-open')}
+function closeModal(){closeCal();$('#modal').classList.remove('open');document.body.classList.remove('modal-open');if(_renderAfterModal&&me){_renderAfterModal=false;setTimeout(()=>{if(!document.body.classList.contains('modal-open'))setPage(curPage)},0)}}
 (function(){const m=$('#modal');if(m)m.addEventListener('click',e=>{if(e.target.id==='modal')closeModal()})})();
 function showHelp(){openModal('ℹ️ راهنمای سامانه','<div style="font-size:13px;line-height:2.1"><b>سامانه جامع HSE فولاد تنبور</b><br>• <b>پرسنل اجرایی:</b> ثبت شبه‌حادثه، امتیاز، 5S واحد، PPE و آموزش.<br>• <b>کارشناس:</b> بررسی حوادث، آنومالی و CAPA، تحلیل، ارزیابی ریسک، مجوز کار، بازرسی، 5S، BBS.<br>• <b>مدیر:</b> تعریف کاربران، تأیید مجوزها، کنترل دسترسی، گزارش‌ها.<br><br>🔍 <b>جستجوی سراسری:</b> با دکمه 🔍 در نوار بالا یا میانبر <b>Ctrl+K</b> می‌توانید در تمام ماژول‌ها جستجو کنید.<br>🔗 <b>ارجاع به CAPA:</b> در جزئیات آنومالی یا حادثه، دکمه «ارجاع به CAPA» را بزنید.<br>✅ <b>تأیید اثربخشی:</b> پس از اجرا، مسئول تأییدکننده در جزئیات CAPA دکمه «تأیید اثربخشی» را می‌بیند.</div>','<button class="btn pri" onclick="closeModal()">متوجه شدم</button>')}
 
@@ -3633,9 +3826,17 @@ function doLogin(){
  if(!db||!Array.isArray(db.personnel)){setLerr('داده‌ها هنوز بارگذاری نشده‌اند، لطفاً چند لحظه صبر کنید');return}
  const u=$('#lu').value.trim(),p=$('#lp').value;
  if(!u||!p){setLerr('نام کاربری و رمز را وارد کنید');return}
- const f=db.personnel.find(x=>x.u&&x.p===p&&String(x.u).toLowerCase()===u.toLowerCase()&&x.role===loginRole);
- if(f){login(f);return}
- const ex=db.personnel.find(x=>x.u&&x.p===p&&String(x.u).toLowerCase()===u.toLowerCase());
+ const hit=(x)=>{
+   if(!x.u||String(x.u).toLowerCase()!==u.toLowerCase()) return false;
+   if(isHashedPw(x.p)) return x.p===hashPw(x.u,p);
+   return x.p===p; /* رمز قدیمی متنی */
+ };
+ const f=db.personnel.find(x=>hit(x)&&x.role===loginRole);
+ if(f){
+   if(!isHashedPw(f.p)){ f.p=hashPw(f.u,p); queueRec('personnel',f.id); save(); }
+   login(f); return;
+ }
+ const ex=db.personnel.find(x=>hit(x));
  setLerr(ex?'این حساب با نقش «'+ROLEINFO[loginRole][1]+'» هم‌خوانی ندارد':'نام کاربری یا رمز اشتباه است');
 }
 function login(p){me={name:p.name,role:p.role,id:p.id,area:p.area||''};try{sessionStorage.setItem('hse_me',JSON.stringify(me))}catch(e){};startApp()}
@@ -3649,9 +3850,7 @@ function startApp(){$('#login').classList.add('hidden');$('#app').classList.remo
    FIX: Firebase on('value') — جلوگیری از حلقه بازخورد
 ============================================================ */
 dbRef.on('value', (snapshot) => {
-  if (_isSaving || _isApplyingRemote) return;
-  if (Object.keys(_pendingModules).length) return;
-  if (document.body.classList.contains('modal-open')) return;
+  if (_isSaving || hasPendingChanges()) return;
   const cloud = snapshot.val();
   if (!cloud) return;
   try {
@@ -3664,7 +3863,9 @@ dbRef.on('value', (snapshot) => {
     TPLS = db.tpls || defaultTPLS();
     S5 = db.s5_tpls || defaultS5TPLS();
     try { localStorage.setItem(LS, JSON.stringify(db)); } catch(e){}
-    if (me && !document.body.classList.contains('modal-open')) {
+    if (me && document.body.classList.contains('modal-open')) {
+      _renderAfterModal = true;
+    } else if (me) {
       const sc = document.querySelector('.tscroll');
       const scrollPos = sc ? sc.scrollLeft : 0;
       setPage(curPage);
@@ -3684,11 +3885,14 @@ dbRef.on('value', (snapshot) => {
    FIX: boot — ترتیب صحیح
 ============================================================ */
 (async function boot(){
- let loaded=false;
+ let loaded=false, legacyStore=false;
  try{
   const snapshot = await dbRef.once('value');
   const data = snapshot.val();
-  if(data && data.personnel){ db = sanitizeData(data); loaded = true; }
+  if(data && data.personnel){
+    db = sanitizeData(data); loaded = true;
+    legacyStore = RECORD_MODS.some(m=>data[m] && typeof data[m]==='object' && Object.keys(data[m]).some(k=>/^\d+$/.test(k)));
+  }
  }catch(e){ console.warn('Firebase در دسترس نیست.'); }
 
  if(!loaded){
@@ -3717,19 +3921,20 @@ dbRef.on('value', (snapshot) => {
      const payload = {};
      Object.keys(db).forEach(k => {
        if(Array.isArray(db[k])){
-         const obj={};
-         db[k].forEach((it,i)=>{ obj[i]=it; });
-         payload[k]=obj;
+         if(RECORD_MODS.indexOf(k)>=0){ payload[k]=_clean(_idMap(db[k])); }
+         else { const obj={}; db[k].forEach((it,i)=>{ obj[i]=it; }); payload[k]=obj; }
        } else {
-         payload[k]=db[k];
+         payload[k]=_clean(db[k]);
        }
      });
      await dbRef.set(payload);
    }catch(e){ console.warn('ارسال seed به Firebase ناموفق:', e); }
  }
 
+ if(legacyStore){ RECORD_MODS.forEach(m=>{ if(db[m]) queueModule(m); }); queueModule('seq'); }
  try{localStorage.setItem(LS,JSON.stringify(db))}catch(e){}
  try{ensureArchives()}catch(e){}
+ if(legacyStore) save({immediate:true});
 
  try{me=JSON.parse(sessionStorage.getItem('hse_me')||'null')}catch(e){me=null}
  if(me){const pp=db.personnel.find(x=>x.id===me.id);if(!pp)me=null;else{me.area=pp.area||'';me.name=pp.name;me.role=pp.role}}
