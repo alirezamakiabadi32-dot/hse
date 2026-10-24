@@ -431,6 +431,7 @@ html{-webkit-text-size-adjust:100%}
    <div class="sync-indicator" id="syncIndicator" title="وضعیت ذخیره‌سازی ابری" onclick="checkConnection()">
      <span class="dot"></span> <span id="syncTxt">در حال بررسی...</span>
    </div>
+   <button class="tbtn" onclick="openGlobalSearch()" title="جستجوی سراسری (Ctrl+K)" aria-label="جستجو">🔍<span class="tghide"> جستجو</span></button>
    <button class="tbtn" onclick="showHelp()" title="راهنما" aria-label="راهنما">ℹ️<span class="tghide"> راهنما</span></button>
    <button class="tbtn hidephone" onclick="doPrint()" title="چاپ" aria-label="چاپ">🖨️</button>
    <div class="bellwrap">
@@ -459,6 +460,8 @@ const dbRef = firebase.database().ref('hse_data');
 
 const LS='hse_foundry_cloud';
 let db=null, me=null, curPage='dash', riskFilter=null, riskMethod='matrix';
+let _gsResults=[];
+let _gsTimer=null;
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const p2=n=>String(n).padStart(2,'0');
@@ -1394,7 +1397,7 @@ function seed(){
  };
  R('unsafe',{date:jAgo(1),area:'قالب‌سازی و مولر',cat:'وضعیت ناایمن',desc:'انباشت قالب‌های سنگی مسیر عبور را بسته است.',risk:'بالا',severity:'متوسط',probability:'زیاد',responsible:'حسین کریمی',due:jAgo(-2),observer:'سارا محمدی',status:'در حال رسیدگی',createdBy:'سارا محمدی'});
  R('unsafe',{date:jAgo(4),area:'سالن ذوب',cat:'رفتار ناایمن',desc:'ایستادن پرسنل اجرایی زیر بار معلق جرثقیل.',risk:'بحرانی',severity:'فاجعه‌بار',probability:'زیاد',responsible:'امیر حیدری',observer:'سارا محمدی',status:'اصلاح شد',fixedBy:'امیر حیدری',fixedJ:jAgo(3),verifyBy:'سارا محمدی',verifyJ:jAgo(3),createdBy:'سارا محمدی'});
- const ACT1=R('actions',{code:'CAPA-04-001',src:'آنومالی',ref:'UNS-0001',type:'اصلاحی (Corrective)',desc:'جمع‌آوری و سازماندهی قالب‌های انباشته و علامت‌گذاری مسیر عبور',rootCause:'نبود محل مشخص برای نگهداری قالب‌های مصرفی',owner:'حسین کریمی',prio:'بالا',startD:jAgo(1),due:jAgo(-3),progress:25,resources:'نیروی کارگری + رنگ خط‌کشی',verify:'سارا محمدی',status:'در حال انجام',createdBy:'سارا محمدی'});
+ R('actions',{code:'CAPA-04-001',src:'آنومالی',ref:'UNS-0001',type:'اصلاحی (Corrective)',desc:'جمع‌آوری و سازماندهی قالب‌های انباشته و علامت‌گذاری مسیر عبور',rootCause:'نبود محل مشخص برای نگهداری قالب‌های مصرفی',owner:'حسین کریمی',prio:'بالا',startD:jAgo(1),due:jAgo(-3),progress:25,resources:'نیروی کارگری + رنگ خط‌کشی',verify:'سارا محمدی',status:'در حال انجام',createdBy:'سارا محمدی'});
  R('actions',{code:'CAPA-04-002',src:'حادثه / شبه‌حادثه',ref:'INC-0003',type:'اصلاحی (Corrective)',desc:'تهیه پوشش نسوز و کنترل روزانه پوشش کارکنان ذوب',rootCause:'نبود پوشش کامل نسوز',owner:'علی رضایی',prio:'بالا',startD:jAgo(10),due:jAgo(-5),progress:60,verify:'سارا محمدی',status:'در حال انجام',createdBy:'سارا محمدی'});
  R('risks',{act:'شارژ کوره ذوب',area:'سالن ذوب',hazard:'تماس مذاب با رطوبت',event:'انفجار و پاشش فلز مذاب',ctrl:'خشک‌سازی شارژ، محدوده‌بندی، PPE نسوز',s:'4',p:'3',addCtrl:'پروتکل اجباری کنترل رطوبت',rs:'2',rp:'2',owner:'علی رضایی',status:'تایید شده',review:jAgo(-90)});
  R('risks',{act:'عملیات سندبلاست',area:'سندبلاست و تمیزکاری',hazard:'غبار تنفسی سیلیس',event:'سیلیکوز و بیماری ریوی',ctrl:'کابین بسته، سیستم مکش، ماسک تأمین هوا',s:'5',p:'3',addCtrl:'پایش دوره‌ای غبار',rs:'3',rp:'2',owner:'رضا موسوی',status:'تایید شده',review:jAgo(-120)});
@@ -1818,7 +1821,6 @@ function saveForm(k,id){
  if(k==='lec'){const L=+rec.L||0,E=+rec.E||0,C=+rec.C||0;rec.score=Math.round(L*E*C*100)/100;rec.level=lecLevel(rec.score);}
  if(k==='jsa'){saveJsaValuesFromDom();const steps=_jsaSteps.filter(s=>(s.step||'').trim()||(s.hazard||'').trim());if(!steps.length){bad=bad||'حداقل یک مرحله شغلی'}else rec.steps=steps;}
  if(bad){toast('⚠️ تکمیل الزامی است: '+bad);return}
- // CAPA auto-code
  if(k==='actions'){
    if(!rec.code) rec.code = genActionCode();
    if(rec.status==='انجام شد' && (!rec.progress||+rec.progress<100)) rec.progress=100;
@@ -2054,7 +2056,7 @@ function dashMgmt(){
    kcard('آنومالی باز',nd(openUnsafe.length),'نیازمند رسیدگی',openUnsafe.length?'orange':'green')+
    kcard('CAPA باز',nd(openActions.length),'اقدامات در جریان',openActions.length?'orange':'green')+
    kcard('آنومالی بحرانی',nd(openUnsafe.filter(r=>r.risk==='بحرانی').length),'وضعیت فوری',openUnsafe.filter(r=>r.risk==='بحرانی').length?'red':'green')+
-   kcard('CAPA اثربخش',nd(db.actions.filter(r=>r.effectiveness==='اثربخش').length),'تأییدشده',"green")+
+   kcard('CAPA اثربخش',nd(db.actions.filter(r=>r.effectiveness==='اثربخش').length),'تأییدشده','green')+
  '</div>';
  const scTop=calcScores(cmk).filter(r=>r.score!==0).slice(0,3);
  h+='<div class="grid3" style="margin-top:14px"><div class="card"><div class="sechead">🏆 امتیاز ایمنی پرسنل اجراییان — '+monthLabel(cmk)+'</div>'+miniList(scTop.map((r,i)=>'<div class="list-row" onclick="setPage(\'scores\')"><span class="lt">'+(i===0?'🥇':i===1?'🥈':'🥉')+' '+esc(r.name)+'</span><span class="chip '+(r.score>0?'b-ok':'b-warn')+'">'+nd(r.score)+' امتیاز</span></div>'),'هنوز امتیازی این ماه ثبت نشده')+'</div>';
@@ -2233,6 +2235,16 @@ function renderMethodTab(k){
 }
 function riskCell(s,p){riskFilter={s:s,p:p};renderRows();toast('نمایش ریسک‌های شدت '+s+' و احتمال '+p)}
 function riskReset(){riskFilter=null;renderRows()}
+function exportRiskAll(format){
+ let h='<h1>📊 گزارش جامع ارزیابی ریسک</h1>';
+ h+='<p>تاریخ: <b>'+nd(todayJ())+'</b> — تهیه‌کننده: '+esc(me.name)+'</p>';
+ h+='<h2>📊 ماتریس ریسک ۵×۵</h2>'+buildModuleReport('risks');
+ h+='<h2>⚙️ FMEA — حالت خرابی و اثرات</h2>'+buildModuleReport('fmea');
+ h+='<h2>🔧 JSA — تحلیل ایمنی شغل</h2>'+buildModuleReport('jsa');
+ h+='<h2>📐 LEC — ویلیام فاین</h2>'+buildModuleReport('lec');
+ const fn='HSE-Risk-Report-'+todayJ().replace(/\//g,'-');
+ if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
+}
 
 /* ---------- Scores page ---------- */
 function scoresPage(){curPage='scores';
@@ -2703,7 +2715,6 @@ function capaFromUnsafe(id){
    startD: todayJ()
  });
 }
-
 function capaFromIncident(id){
  const r=db.incidents.find(x=>x.id===id);
  if(!r){toast('حادثه یافت نشد');return}
@@ -2722,14 +2733,12 @@ function capaFromIncident(id){
    due: jAddM(todayJ(),1)
  });
 }
-
 function capaFromInsp(id){
  const r=db.inspections.find(x=>x.id===id);
  if(!r){toast('بازرسی یافت نشد');return}
  if(!TPLS[r.tpl]){toast('قالب حذف شده');return}
  openForm('actions',null,{src:'بازرسی',ref:r.id,type:'اصلاحی (Corrective)',prio:'بالا',desc:'رفع مغایرت‌های چک‌لیست «'+TPLS[r.tpl].t+'» مورخ '+r.date+':\n• '+r.fails.join('\n• ')});
 }
-
 function capaFromS5(id){
  const r=db.s5.find(x=>x.id===id); if(!r)return;
  const m=s5MinKey(r); if(!m){toast('رکن ضعیفی یافت نشد');return}
@@ -2745,7 +2754,6 @@ function capaFromS5(id){
    due:jAddM(todayJ(),1)
  });
 }
-
 function verifyCapa(id){
  const r=db.actions.find(x=>x.id===id);
  if(!r){toast('اقدام یافت نشد');return}
@@ -2838,7 +2846,6 @@ function openDetail(k,id){
  if(k==='inspections'&&r.tpl){h+='<h4 class="msh">نتایج اقلام ('+nd(r.score||0)+'٪ انطباق)</h4>';
   if(TPLS[r.tpl]){h+='<div class="tplres">'+TPLS[r.tpl].items.map((it,i)=>{const a=(r.answers||{})[i]||'na';const cl=a==='ok'?'b-ok':a==='fail'?'b-bad':'b-mut';const tx=a==='ok'?'مناسب':a==='fail'?'مغایرت':'نامرتبط';return '<div class="tri"><span>'+esc(it)+'</span><span class="chip '+cl+'">'+tx+'</span></div>'}).join('')+'</div>'}
   else h+='<div class="lvprev">قالب حذف شده. مغایرت‌ها: '+((r.fails&&r.fails.length)?esc(r.fails.join('، ')):'ندارد')+'</div>'}
- // Unsafe: aging/overdue/capa
  if(k==='unsafe'){
    const aging=jDaysAgo(r.date);
    const overdue=r.due&&jDaysAgo(r.due)>0&&!['اصلاح شد','رد شده'].includes(r.status);
@@ -2856,7 +2863,6 @@ function openDetail(k,id){
    }
    h+='</div>';
  }
- // Actions: progress + effectiveness
  if(k==='actions'){
    const p=Math.max(0,Math.min(100,+r.progress||0));
    h+='<div class="grid4" style="margin-top:12px">';
@@ -2974,6 +2980,101 @@ function kpiPage(){const K=kpis();const jy=K.jy;
  '</div></div>';
  return h}
 
+/* ============================================================
+   جستجوی سراسری (Global Search)
+============================================================ */
+function openGlobalSearch(){
+  if(!me){toast('ابتدا وارد شوید');return}
+  openModal('🔍 جستجوی سراسری',
+    '<div class="ff wide" style="margin-bottom:8px">'+
+    '<input id="gsInput" class="in" style="font-size:16px;padding:12px" placeholder="نام، کد، شرح، واحد، مسئول..." autocomplete="off" oninput="globalSearchDo(this.value)">'+
+    '</div>'+
+    '<div id="gsResults" style="margin-top:6px"><div style="color:var(--mut);font-size:12.5px;padding:12px;text-align:center">حداقل ۲ کاراکتر تایپ کنید...</div></div>',
+    '<button class="btn ghost" onclick="closeModal()">بستن</button>');
+  setTimeout(()=>{const i=document.getElementById('gsInput');if(i){i.focus();i.select()}},80);
+}
+
+function globalSearchDo(q){
+  q=String(q||'').trim().toLowerCase();
+  const w=document.getElementById('gsResults');
+  if(!w) return;
+  if(q.length<2){
+    w.innerHTML='<div style="color:var(--mut);font-size:12.5px;padding:12px;text-align:center">حداقل ۲ کاراکتر تایپ کنید...</div>';
+    _gsResults=[];
+    return;
+  }
+  clearTimeout(_gsTimer);
+  _gsTimer=setTimeout(()=>{
+    const out=[];
+    Object.keys(MODS).forEach(k=>{
+      if(!canView(k)) return;
+      const M=MODS[k];
+      (db[k]||[]).forEach(r=>{
+        if(!r) return;
+        const hay=JSON.stringify(Object.assign({},r,{log:0,answers:0,photo:0})).toLowerCase();
+        if(hay.indexOf(q)>=0){
+          out.push({kind:k, rec:r, label:M.i+' '+M.t, icon:M.i});
+        }
+      });
+    });
+    out.sort((a,b)=>String(b.rec.date||b.rec.createdJ||'').localeCompare(String(a.rec.date||a.rec.createdJ||'')));
+    _gsResults=out.slice(0,60);
+    if(!_gsResults.length){
+      w.innerHTML='<div style="color:var(--mut);font-size:12.5px;padding:12px;text-align:center">نتیجه‌ای یافت نشد</div>';
+      return;
+    }
+    w.innerHTML='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">'+nd(out.length)+' نتیجه'+(out.length>60?' — نمایش ۶۰ مورد نخست':'')+'</div>'+
+      '<div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:10px">'+
+      _gsResults.map((x,i)=>{
+        const title=gsTitleOf(x.kind,x.rec);
+        const sub=gsSubOf(x.kind,x.rec);
+        return '<div class="list-row" style="padding:10px 12px;flex-wrap:wrap;row-gap:2px" onclick="gsOpen('+i+')">'+
+          '<span style="flex:0 0 auto;font-size:18px">'+x.icon+'</span>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div class="lt" style="white-space:normal;line-height:1.6"><b style="font-size:12.5px">'+esc(title)+'</b></div>'+
+            '<div style="font-size:11px;color:var(--mut)">'+esc(sub)+'</div>'+
+          '</div>'+
+          '<span class="chip b-mut" style="direction:ltr;font-family:monospace;font-size:10.5px">'+esc(x.rec.id||'')+'</span>'+
+        '</div>';
+      }).join('')+'</div>';
+  },200);
+}
+
+function gsTitleOf(k,r){
+  const pick=['title','desc','act','hazard','course','job','item','name','month','code','topic','task','type','scenario','param','point'];
+  for(const key of pick){
+    if(r[key]&&String(r[key]).trim()) return String(r[key]).slice(0,120);
+  }
+  if(r.code) return r.code+' — '+(r.desc||'');
+  return (r.id||'');
+}
+
+function gsSubOf(k,r){
+  const parts=[];
+  if(r.code) parts.push('کد: '+r.code);
+  if(r.date) parts.push('تاریخ: '+r.date);
+  if(r.area) parts.push(r.area);
+  if(r.owner) parts.push('مسئول: '+r.owner);
+  if(r.person) parts.push(r.person);
+  if(r.status) parts.push('وضعیت: '+r.status);
+  return parts.join(' • ');
+}
+
+function gsOpen(i){
+  const x=_gsResults[i];
+  if(!x) return;
+  closeModal();
+  setTimeout(()=>openDetail(x.kind,x.rec.id),80);
+}
+
+document.addEventListener('keydown',function(e){
+  if((e.ctrlKey||e.metaKey)&&(e.key==='k'||e.key==='K')){
+    e.preventDefault();
+    if(document.getElementById('gsInput')){ const i=document.getElementById('gsInput'); i.focus(); i.select(); return; }
+    if(me) openGlobalSearch();
+  }
+});
+
 /* ---------- Navigation ---------- */
 const SPECIAL={
  dash:{t:'داشبورد',i:'🏠',ren:()=>me.role==='worker'?dashWorker():dashMgmt()},
@@ -3016,7 +3117,7 @@ function setPage(k){const Pg=pageOf(k);
 function openModal(t,b,f){closeCal();closeBell();$('#mtitle').textContent=t;$('#mbody').innerHTML=b;$('#mfoot').innerHTML=f||'';$('#modal').classList.add('open');document.body.classList.add('modal-open')}
 function closeModal(){closeCal();$('#modal').classList.remove('open');document.body.classList.remove('modal-open')}
 (function(){const m=$('#modal');if(m)m.addEventListener('click',e=>{if(e.target.id==='modal')closeModal()})})();
-function showHelp(){openModal('ℹ️ راهنمای سامانه','<div style="font-size:13px;line-height:2.1"><b>سامانه جامع HSE فولاد تنبور</b><br>• <b>پرسنل اجرایی:</b> ثبت شبه‌حادثه، امتیاز، 5S واحد، PPE و آموزش.<br>• <b>کارشناس:</b> بررسی حوادث، آنومالی و CAPA، تحلیل، ارزیابی ریسک، مجوز کار، بازرسی، 5S، BBS.<br>• <b>مدیر:</b> تعریف کاربران، تأیید مجوزها، کنترل دسترسی، گزارش‌ها.<br><br>🔗 <b>ارجاع به CAPA:</b> در جزئیات آنومالی یا حادثه، دکمه «ارجاع به CAPA» را بزنید تا اقدام خودکار با کد یکتا ساخته شود.<br>✅ <b>تأیید اثربخشی:</b> پس از اجرا، مسئول تأییدکننده در جزئیات CAPA دکمه «تأیید اثربخشی» را می‌بیند.</div>','<button class="btn pri" onclick="closeModal()">متوجه شدم</button>')}
+function showHelp(){openModal('ℹ️ راهنمای سامانه','<div style="font-size:13px;line-height:2.1"><b>سامانه جامع HSE فولاد تنبور</b><br>• <b>پرسنل اجرایی:</b> ثبت شبه‌حادثه، امتیاز، 5S واحد، PPE و آموزش.<br>• <b>کارشناس:</b> بررسی حوادث، آنومالی و CAPA، تحلیل، ارزیابی ریسک، مجوز کار، بازرسی، 5S، BBS.<br>• <b>مدیر:</b> تعریف کاربران، تأیید مجوزها، کنترل دسترسی، گزارش‌ها.<br><br>🔍 <b>جستجوی سراسری:</b> با دکمه 🔍 در نوار بالا یا میانبر <b>Ctrl+K</b> می‌توانید در تمام ماژول‌ها جستجو کنید.<br>🔗 <b>ارجاع به CAPA:</b> در جزئیات آنومالی یا حادثه، دکمه «ارجاع به CAPA» را بزنید.<br>✅ <b>تأیید اثربخشی:</b> پس از اجرا، مسئول تأییدکننده در جزئیات CAPA دکمه «تأیید اثربخشی» را می‌بیند.</div>','<button class="btn pri" onclick="closeModal()">متوجه شدم</button>')}
 
 /* ---------- Login ---------- */
 const ROLEINFO={worker:['👷','پرسنل اجرایی'],expert:['🦺','کارشناس ایمنی'],manager:['👔','مدیریت ارشد']};
