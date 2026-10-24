@@ -418,7 +418,7 @@ html{-webkit-text-size-adjust:100%}
  <aside id="side">
   <div class="sbrand">
    <span class="ic">🔥</span>
-   <div><b>سامانه جامع HSE</b><small>فولاد تنبور | نسخه ابری ۴.۲</small></div>
+   <div><b>سامانه جامع HSE</b><small>فولاد تنبور | نسخه ابری ۴.۳</small></div>
    <button class="side-close" onclick="closeSide()" aria-label="بستن منو">✕</button>
   </div>
   <nav id="snav"></nav>
@@ -452,7 +452,7 @@ html{-webkit-text-size-adjust:100%}
 
 <script>
 /* ============================================================
-   سامانه جامع HSE فولاد تنبور — نسخه Firebase + FMEA + JSA + LEC + تحلیل حادثه
+   سامانه جامع HSE فولاد تنبور — نسخه ۴.۳ (اصلاح باگ‌ها)
 ============================================================ */
 const firebaseConfig = { databaseURL: "https://hseta-58036-default-rtdb.firebaseio.com/" };
 firebase.initializeApp(firebaseConfig);
@@ -520,12 +520,17 @@ function addListItem(key, val){
   if(!db.lists) db.lists = {};
   if(!db.lists[key]) db.lists[key] = (DEFAULT_LISTS[key]||[]).slice();
   if(db.lists[key].some(x=>x===val)){toast('این گزینه قبلاً وجود دارد');return false}
-  db.lists[key].push(val); save(); return true;
+  db.lists[key].push(val);
+  queueModule('lists');
+  save();
+  return true;
 }
 function delListItem(key, val){
   if(!canManageLists()){toast('فقط کارشناس ایمنی و مدیر می‌توانند آیتم حذف کنند');return}
   if(!db.lists || !db.lists[key]) return;
-  db.lists[key] = db.lists[key].filter(x=>x!==val); save();
+  db.lists[key] = db.lists[key].filter(x=>x!==val);
+  queueModule('lists');
+  save();
 }
 function canManageLists(){return me && (me.role==='manager'||me.role==='expert')}
 
@@ -641,17 +646,27 @@ function sanitizePermissions(data){
   return data;
 }
 
+/* ============================================================
+   FIX: sanitizeData — آرایه‌های Firebase را درست تبدیل کن
+============================================================ */
 function sanitizeData(data) {
   if (!data) return data;
-  const arrayKeys = ['personnel','incidents','unsafe','actions','risks','fmea','jsa','lec','inspections','ptw','ppeCat','ppeTx','trainings','hours','healthExp','medical','envWaste','envMon','chem','contacts','drills','emgEquip','toolbox','tbm','bbs','audits','docs','announce','areas','scoreArch','s5'];
+  const arrayKeys = ['personnel','incidents','unsafe','actions','risks','fmea','jsa','lec',
+    'inspections','ptw','ppeCat','ppeTx','trainings','hours','healthExp','medical',
+    'envWaste','envMon','chem','contacts','drills','emgEquip','toolbox','tbm','bbs',
+    'audits','docs','announce','areas','scoreArch','s5'];
   arrayKeys.forEach(key => {
-    if (data[key] !== undefined && data[key] !== null) {
-      if (Array.isArray(data[key])) {
-        data[key] = data[key].filter(x => x !== null && x !== undefined);
-      } else if (typeof data[key] === 'object') {
-        data[key] = Object.values(data[key]).filter(x => x !== null && x !== undefined);
+    if (data[key] === undefined || data[key] === null) {
+      data[key] = [];
+    } else if (Array.isArray(data[key])) {
+      data[key] = data[key].filter(x => x !== null && x !== undefined);
+    } else if (typeof data[key] === 'object') {
+      const keys = Object.keys(data[key]);
+      const isNumeric = keys.length > 0 && keys.every(k => /^\d+$/.test(k));
+      if (isNumeric) {
+        data[key] = keys.sort((a,b)=>+a-+b).map(k => data[key][k]).filter(x => x !== null && x !== undefined);
       } else {
-        data[key] = [];
+        data[key] = Object.values(data[key]).filter(x => x !== null && x !== undefined);
       }
     } else {
       data[key] = [];
@@ -678,62 +693,55 @@ function defaultScoreRules(){
 }
 
 /* ============================================================
-   ذخیره‌سازی ابری بهینه — Delta Sync + Debounce + Retry
+   FIX: موتور ذخیره‌سازی — آپدیت کامل ماژول (نه مسیر رکورد)
+   دلیل: Firebase Realtime Database آرایه‌ها را با update مسیردار خراب می‌کند
 ============================================================ */
 const CLOUD_META_KEY = 'hse_cloud_meta';
 let _saveTimer = null;
-let _pendingDelta = {};          // تغییرات انباشته‌شده
-let _pendingDeletes = {};        // حذف‌های انباشته‌شده
+let _pendingModules = {};
+let _pendingDeletes = {};
 let _isSaving = false;
+let _isApplyingRemote = false;
 let _saveRetryCount = 0;
 let _lastCloudSync = 0;
 let _cloudConnected = false;
-let _dirtyKeys = new Set();      // ماژول‌های تغییرکرده
-const SAVE_DEBOUNCE_MS = 800;    // تأخیر debounce
-const RETRY_DELAYS = [1000, 3000, 8000, 20000]; // تأخیر retry
+const SAVE_DEBOUNCE_MS = 800;
+const RETRY_DELAYS = [1000, 3000, 8000, 20000];
 
-/* --- ثبت تغییر یک کلید در صف --- */
-function queueChange(path, value){
-  _pendingDelta[path] = value;
-  delete _pendingDeletes[path];
-  _markDirty(path);
+function queueModule(moduleName){
+  if(!moduleName) return;
+  _pendingModules[moduleName] = true;
+  delete _pendingDeletes[moduleName];
+}
+function queueDelete(moduleName){
+  if(!moduleName) return;
+  _pendingModules[moduleName] = true;
 }
 
-function queueDelete(path){
-  _pendingDeletes[path] = null;
-  delete _pendingDelta[path];
-  _markDirty(path);
+function _buildUpdatePayload(){
+  const updates = {};
+  Object.keys(_pendingModules).forEach(m=>{
+    if(db[m] === undefined) return;
+    if(Array.isArray(db[m])){
+      const arr = db[m];
+      if(arr.length === 0){
+        updates[m] = null;
+      } else {
+        const obj = {};
+        arr.forEach((item, i) => { obj[i] = item; });
+        updates[m] = obj;
+      }
+    } else {
+      updates[m] = db[m];
+    }
+  });
+  return updates;
 }
 
-function _markDirty(path){
-  const root = String(path).split('/')[0];
-  if(root) _dirtyKeys.add(root);
-}
-
-/* --- ذخیره محلی سریع (فقط کلیدهای تغییریافته) --- */
-function _saveLocal(){
-  try {
-    // ذخیره meta جداگانه
-    localStorage.setItem(LS, JSON.stringify(db));
-    _lastCloudSync = Date.now();
-  } catch(e) {
-    // اگر حجم زیاد بود، فقط کلیدهای dirty را ذخیره کن
-    try {
-      const meta = JSON.parse(localStorage.getItem(CLOUD_META_KEY) || '{}');
-      meta.lastSave = Date.now();
-      localStorage.setItem(CLOUD_META_KEY, JSON.stringify(meta));
-    } catch(_){}
-  }
-}
-
-/* --- ارسال دلتا به Firebase --- */
 async function _flushDelta(){
   if(_isSaving) return;
-  const delta = Object.assign({}, _pendingDelta);
-  const deletes = Object.assign({}, _pendingDeletes);
-  const hasDelta = Object.keys(delta).length > 0;
-  const hasDeletes = Object.keys(deletes).length > 0;
-  if(!hasDelta && !hasDeletes) return;
+  const hasPending = Object.keys(_pendingModules).length > 0;
+  if(!hasPending) return;
 
   _isSaving = true;
   const indicator = $('#syncIndicator'), txt = $('#syncTxt');
@@ -741,27 +749,15 @@ async function _flushDelta(){
   if(txt) txt.textContent = 'در حال ذخیره...';
 
   try {
-    // 1) حذف‌ها
-    const deletePromises = Object.keys(deletes).map(p => dbRef.child(p).remove());
-    // 2) آپدیت‌ها — فقط کلیدهای تغییریافته
-    const updates = {};
-    Object.keys(delta).forEach(p => { updates[p] = delta[p]; });
-
+    const updates = _buildUpdatePayload();
     if(Object.keys(updates).length){
       await dbRef.update(updates);
     }
-    if(deletePromises.length){
-      await Promise.all(deletePromises);
-    }
-
-    // پاک کردن صف فقط پس از موفقیت
-    Object.keys(delta).forEach(p => { delete _pendingDelta[p]; });
-    Object.keys(deletes).forEach(p => { delete _pendingDeletes[p]; });
-
+    _pendingModules = {};
+    _pendingDeletes = {};
     _saveRetryCount = 0;
     _cloudConnected = true;
     _lastCloudSync = Date.now();
-    _dirtyKeys.clear();
 
     if(indicator) indicator.className = 'sync-indicator ok';
     if(txt) txt.textContent = 'همگام‌سازی شد';
@@ -771,28 +767,25 @@ async function _flushDelta(){
     _saveRetryCount++;
     if(indicator) indicator.className = 'sync-indicator error';
     if(txt) txt.textContent = 'خطا — تلاش مجدد ' + nd(_saveRetryCount) + ' در ' + nd(Math.round(delay/1000)) + 's';
-    // برگرداندن به صف (delta دست‌نخورده می‌ماند)
-    Object.assign(_pendingDelta, delta);
-    Object.assign(_pendingDeletes, deletes);
-    // برنامه‌ریزی retry
     setTimeout(_flushDelta, delay);
   } finally {
     _isSaving = false;
   }
 }
 
-/* --- save اصلی: debounce + local سریع + delta cloud --- */
 function save(opts){
   opts = opts || {};
-  // 1) ذخیره محلی فوری
-  _saveLocal();
-  // 2) اگر هیچ delta‌ای صف نشده، از کل db استفاده کن (برای سازگاری با کد قدیمی)
-  if(!Object.keys(_pendingDelta).length && !Object.keys(_pendingDeletes).length){
-    // نسخه قدیمی: کل db را صف کن
-    // اما به‌جای set، از update روی همه کلیدها استفاده کن
-    Object.keys(db).forEach(k => { _pendingDelta[k] = db[k]; });
+  try { localStorage.setItem(LS, JSON.stringify(db)); } catch(e){}
+
+  if(!Object.keys(_pendingModules).length){
+    ['personnel','incidents','unsafe','actions','risks','fmea','jsa','lec',
+     'inspections','ptw','ppeCat','ppeTx','trainings','hours','healthExp',
+     'medical','envWaste','envMon','chem','contacts','drills','emgEquip',
+     'toolbox','tbm','bbs','audits','docs','announce','s5','scoreArch',
+     'scoreRules','permissions','lists','tpls','s5_tpls','areas','seq'
+    ].forEach(m => { if(db[m] !== undefined) _pendingModules[m] = true; });
   }
-  // 3) debounce
+
   clearTimeout(_saveTimer);
   if(opts.immediate){
     _flushDelta();
@@ -801,17 +794,12 @@ function save(opts){
   }
 }
 
-/* --- ذخیره فوری (برای عملیات حساس مثل حذف) --- */
-function saveNow(){
-  save({immediate:true});
-}
+function saveNow(){ save({immediate:true}); }
 
-/* --- checkConnection بهینه (فقط وقتی لازم است) --- */
 let _lastConnCheck = 0;
 async function checkConnection(){
   const ind = $('#syncIndicator'), txt = $('#syncTxt');
   if(!ind || !txt) return;
-  // اگر اخیراً چک شده و متصل بود، دوباره چک نکن
   if(Date.now() - _lastConnCheck < 15000 && _cloudConnected){
     ind.className = 'sync-indicator ok';
     txt.textContent = 'متصل به Firebase';
@@ -836,14 +824,8 @@ async function checkConnection(){
     txt.textContent = 'قطع ارتباط';
   }
 }
+
 function toast(m){const t=$('#toast');if(!t)return;t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3200)}
-async function checkConnection(){
- const ind=$('#syncIndicator'),txt=$('#syncTxt');
- if(!ind||!txt)return;
- ind.className='sync-indicator'; txt.textContent='در حال بررسی...';
- try{ await dbRef.once('value'); ind.className='sync-indicator ok'; txt.textContent='متصل به Firebase'; }
- catch(e){ ind.className='sync-indicator error'; txt.textContent='قطع ارتباط'; }
-}
 window.addEventListener('online', checkConnection);
 window.addEventListener('offline', function(){ const ind=$('#syncIndicator'), txt=$('#syncTxt'); if(ind&&txt){ind.className='sync-indicator error'; txt.textContent='قطع اینترنت';} });
 window.addEventListener('error',function(e){try{toast('⚠️ خطای فنی: '+e.message)}catch(x){}});
@@ -957,9 +939,7 @@ function defaultS5TPLS(){
   };
 }
 let S5={};
-/* ============================================================
-   5S — توابع
-============================================================ */
+
 function s5Tpl(){ return (db && db.s5_tpls) ? db.s5_tpls : (db ? (db.s5_tpls=defaultS5TPLS()) : defaultS5TPLS()); }
 function s5ItemsOf(key){ const t=s5Tpl()[key]; return t && Array.isArray(t.items) ? t.items : []; }
 function s5Keys(){ return Object.keys(s5Tpl()).sort((a,b)=>(s5Tpl()[a].num||0)-(s5Tpl()[b].num||0)); }
@@ -967,7 +947,7 @@ function s5TotalMax(){ return s5Keys().reduce((s,k)=>s+s5ItemsOf(k).length*4,0);
 
 function s5ScoreOf(rec){
   const keys=s5Keys();
-  if(!rec || !rec.s5){ 
+  if(!rec || !rec.s5){
     const per={}; keys.forEach(k=>{const m=s5ItemsOf(k).length*4;per[k]={score:0,max:m,pct:0}});
     return {total:0,max:s5TotalMax(),pct:0,per,band:'D'};
   }
@@ -1029,9 +1009,6 @@ const lvlChip=sc=>sc?'<span class="chip '+lvlClass(sc)+'">'+lvlName(sc)+' ('+nd(
 const SC={'گزارش اولیه':'b-warn','در حال بررسی':'b-info','در حال اقدام':'b-info','بسته شده':'b-ok','ثبت شده':'b-warn','در حال رسیدگی':'b-info','ارجاع به اقدام':'b-org','اصلاح شد':'b-ok','رد شده':'b-bad','باز':'b-warn','در حال انجام':'b-info','انجام شد':'b-ok','در انتظار تأیید':'b-warn','تایید و بسته شد':'b-ok','پیش‌نویس':'b-mut','تایید شده':'b-ok','در انتظار بررسی':'b-warn','تایید کارشناس':'b-info','تایید نهایی':'b-ok','خاتمه یافته':'b-mut','تحویل شد':'b-ok','مرجوع شد':'b-mut','عادی':'b-mut','مهم':'b-warn','فوری':'b-bad','معتبر':'b-ok','لغو شده':'b-mut','سالم':'b-ok','نیازمند سرویس':'b-warn','خارج از سرویس':'b-bad','کم':'b-ok','متوسط':'b-warn','بالا':'b-org','بحرانی':'b-bad','در محدوده مجاز':'b-ok','خارج از محدوده مجاز':'b-bad','منطبق':'b-ok','نامنطبق':'b-bad','عالی':'b-ok','قابل قبول':'b-warn','نیازمند بهبود':'b-bad','مطابقت':'b-ok','عدم مطابقت جزئی':'b-warn','عدم مطابقت عمده':'b-bad','مشاهده / فرصت بهبود':'b-info','کافی':'b-ok','کمبود موجودی':'b-bad','ارسال شده':'b-info','بازنگری نیاز است':'b-warn','اثربخش':'b-ok','بی‌اثر':'b-bad'};
 const chip=(t,c)=>'<span class="chip '+(c||SC[t]||'b-mut')+'">'+esc(t)+'</span>';
 
-/* ============================================================
-   LEC Helper
-============================================================ */
 function lecLevel(sc){
   if(sc<20) return 'قابل قبول';
   if(sc<70) return 'قابل تحمل با بازبینی';
@@ -1205,9 +1182,6 @@ function collectAnalyses(){
   return a;
 }
 
-/* ============================================================
-   تولید کد خودکار CAPA
-============================================================ */
 function genActionCode(){
   const yr=todayJ().slice(0,4);
   const prefix='CAPA-'+yr.slice(2)+'-';
@@ -1540,7 +1514,7 @@ function seed(){
  R('incidents',{date:jAgo(48),time:'08:30',area:'برش و جوشکاری',type:'جراحت دردسرساز (LTI)',title:'پرتاب ذره به چشم هنگام سنگ‌زنی',injured:'جواد نوری',bodyPart:'چشم',lostDays:6,immediate:'شست‌وشو و ارجاع به چشم‌پزشک',status:'بسته شده',createdBy:'سارا محمدی'});
  d.incidents.find(r=>r.id===INC1).analyses={
    fishbone:{man:'عدم آموزش کافی درباره خطر رطوبت',machine:'سیستم خشک‌کن سینی شارژ معیوب',method:'رویه شارژ بدون بازرسی رطوبت',material:'قطعات مرطوب انبار',environment:'بارش باران و نفوذ رطوبت به انبار',management:'نظارت ناکافی بر انبار شارژ'},
-   why:{w1:'چرا پاشش مذاب رخ داد؟','w1':'چون قطعات مرطوب وارد کوره شد','w2':'چرا قطعات مرطوب بود؟','w2':'چون در انبار باز نگهداری می‌شد','w3':'چرا انبار باز بود؟','w3':'سایه‌بان مناسب وجود نداشت','w4':'چرا سایه‌بان نبود؟','w4':'در طراحی اولیه پیش‌بینی نشده بود','w5':'چرا پیش‌بینی نشده بود؟','w5':'ارزیابی ریسک اولیه ناقص بود',root:'نقص در ارزیابی ریسک و طراحی انبار شارژ'},
+   why:{w1:'چون قطعات مرطوب وارد کوره شد',w2:'چون در انبار باز نگهداری می‌شد',w3:'سایه‌بان مناسب وجود نداشت',w4:'در طراحی اولیه پیش‌بینی نشده بود',w5:'ارزیابی ریسک اولیه ناقص بود',root:'نقص در ارزیابی ریسک و طراحی انبار شارژ'},
    m4m:{man:'آموزش ناکافی اپراتور',machine:'خشک‌کن معیوب',material:'قطعات مرطوب',method:'نبود چک‌لیست بازرسی رطوبت'},
    result:{rootCause:'نقص در ارزیابی ریسک و طراحی انبار شارژ',corrective:'نصب سایه‌بان و خشک‌کن',preventive:'بازنگری ارزیابی ریسک و چک‌لیست روزانه'}
  };
@@ -1941,32 +1915,52 @@ function renderTplItems(tpl,ans){const w=$('#tplWrap');if(!w)return;
   return '<div class="tri"><span>'+esc(it)+'</span><span class="opts">'+
    [['ok','✅ مناسب'],['fail','❌ مغایرت'],['na','➖ نامرتبط']].map(o=>'<label><input type="radio" name="ti'+i+'" value="'+o[0]+'" '+(a===o[0]?'checked':'')+'> '+o[1]+'</label>').join('')+'</span></div>'}).join('')+'</div>'}
 
+/* FIX: saveForm — باگ اصلی رفع شد */
 function saveForm(k,id){
  const M=MODS[k];
  let rec=id?db[k].find(r=>r.id===id):null;const isNew=!rec;
-// در saveForm، بعد از db[k].push(rec) یا ویرایش:
-if(isNew){
-  queueChange(k + '/' + rec.id, rec);
-} else {
-  queueChange(k + '/' + rec.id, rec);
-}
+
+ // FIX: دسترسی‌ها اول چک شوند
  if(isNew&&!canCreate(k)){toast('اجازه ثبت جدید ندارید');return}
  if(!isNew&&!canEdit(k,rec)){toast('اجازه ویرایش ندارید');return}
- if(isNew)rec={id:uid(PF[k]),createdBy:me.name,createdJ:todayJ(),log:[]};
+
+ // FIX: rec فقط برای رکورد جدید ساخته شود
+ if(isNew) rec={id:uid(PF[k]),createdBy:me.name,createdJ:todayJ(),log:[]};
+
  if(k==='incidents' && me.role==='worker') { rec.type='شبه‌حادثه (Near Miss)'; }
+
  let bad=null;
- $$('#mbody [data-k]').forEach(el=>{const key=el.dataset.k;const f=M.fields.find(x=>x.k===key);
-  let v;if(el.type==='checkbox')v=el.checked;else if(f&&f.t==='num')v=el.value===''?'':parseFloat(el.value);else v=el.value;
-  if(f&&f.req&&el.type!=='checkbox'&&(v===''||v==null))bad=bad||f.l;rec[key]=v});
- M.fields.filter(f=>f.t==='people').forEach(f=>{rec[f.k]=$$('#mbody input[ppi="'+f.k+'"]:checked').map(c=>c.value);if(f.req&&!rec[f.k].length)bad=bad||f.l});
+ $$('#mbody [data-k]').forEach(el=>{
+   const key=el.dataset.k;
+   const f=M.fields.find(x=>x.k===key);
+   let v;
+   if(el.type==='checkbox')v=el.checked;
+   else if(f&&f.t==='num')v=el.value===''?'':parseFloat(el.value);
+   else v=el.value;
+   if(f&&f.req&&el.type!=='checkbox'&&(v===''||v==null))bad=bad||f.l;
+   rec[key]=v
+ });
+
+ M.fields.filter(f=>f.t==='people').forEach(f=>{
+   rec[f.k]=$$('#mbody input[ppi="'+f.k+'"]:checked').map(c=>c.value);
+   if(f.req&&!rec[f.k].length)bad=bad||f.l
+ });
+
  if(k==='incidents'){ rec.analyses=collectAnalyses(); }
- if(k==='unsafe'){if(window._phData!==undefined)rec.photo=window._phData;window._phData=undefined}
+ if(k==='unsafe'){
+   if(window._phData!==undefined)rec.photo=window._phData;
+   window._phData=undefined;
+ }
  if(k==='inspections'){
   if(!rec.tpl)bad='نوع چک‌لیست';
   else if(!TPLS[rec.tpl])bad='چک‌لیست انتخاب‌شده منقضی شده — دوباره انتخاب کنید';
   else{
    const ans={},fails=[];
-   $$('#tplWrap input[type=radio]:checked').forEach(r=>{const i=r.name.slice(2);ans[i]=r.value;if(r.value==='fail')fails.push(TPLS[rec.tpl].items[+i])});
+   $$('#tplWrap input[type=radio]:checked').forEach(r=>{
+     const i=r.name.slice(2);
+     ans[i]=r.value;
+     if(r.value==='fail')fails.push(TPLS[rec.tpl].items[+i])
+   });
    rec.answers=ans;rec.fails=fails;
    rec.score=Math.round((TPLS[rec.tpl].items.length-fails.length)/TPLS[rec.tpl].items.length*100);
    if(!Object.keys(ans).length)bad='نتیجه اقلام چک‌لیست';
@@ -1974,8 +1968,13 @@ if(isNew){
  }
  if(k==='fmea'){const S=+rec.s||1,O=+rec.o||1,D=+rec.d||1;rec.rpn=S*O*D;}
  if(k==='lec'){const L=+rec.L||0,E=+rec.E||0,C=+rec.C||0;rec.score=Math.round(L*E*C*100)/100;rec.level=lecLevel(rec.score);}
- if(k==='jsa'){saveJsaValuesFromDom();const steps=_jsaSteps.filter(s=>(s.step||'').trim()||(s.hazard||'').trim());if(!steps.length){bad=bad||'حداقل یک مرحله شغلی'}else rec.steps=steps;}
+ if(k==='jsa'){
+   saveJsaValuesFromDom();
+   const steps=_jsaSteps.filter(s=>(s.step||'').trim()||(s.hazard||'').trim());
+   if(!steps.length){bad=bad||'حداقل یک مرحله شغلی'}else rec.steps=steps;
+ }
  if(bad){toast('⚠️ تکمیل الزامی است: '+bad);return}
+
  if(k==='actions'){
    if(!rec.code) rec.code = genActionCode();
    if(rec.status==='انجام شد' && (!rec.progress||+rec.progress<100)) rec.progress=100;
@@ -1985,10 +1984,25 @@ if(isNew){
      if(u){ u.capaRef=rec.code; if(u.status==='ثبت شده'||u.status==='در حال رسیدگی') u.status='ارجاع به اقدام'; }
      const inc=db.incidents.find(x=>x.id===rec.ref);
      if(inc){ inc.capaRef=rec.code; }
+     queueModule('unsafe');
+     queueModule('incidents');
    }
  }
- if(isNew){rec.log.push({u:me.name,d:todayJ(),t:'ثبت اولیه'});db[k].push(rec)}else rec.log.push({u:me.name,d:todayJ(),t:'ویرایش'});
- save();closeModal();toast('✔ با موفقیت ذخیره شد');
+
+ // FIX: push/update رکورد
+ if(isNew){
+   rec.log.push({u:me.name,d:todayJ(),t:'ثبت اولیه'});
+   db[k].push(rec);
+ } else {
+   rec.log.push({u:me.name,d:todayJ(),t:'ویرایش'});
+ }
+
+ // FIX: فقط همین ماژول را صف کن (نه قبل از تعریف rec)
+ queueModule(k);
+
+ save();
+ closeModal();
+ toast('✔ با موفقیت ذخیره شد');
  renderSidebar();
  if(curPage===k||(curPage==='risks'&&riskMethod===k)) renderRows();
  else setPage(curPage);
@@ -2121,9 +2135,14 @@ function saveS5(){
    rec.log.push({u:me.name,d:todayJ(),t:'ویرایش'});
    if(i>=0) db.s5[i]=rec; else db.s5.push(rec);
  }
- save(); closeS5Wizard(); toast('✔ ارزیابی 5S ذخیره شد');
- renderSidebar(); if(curPage==='s5') s5Page(); else setPage(curPage);
+ queueModule('s5');
+ save();
+ closeS5Wizard();
+ toast('✔ ارزیابی 5S ذخیره شد');
+ renderSidebar();
+ if(curPage==='s5') s5Page(); else setPage(curPage);
 }
+
 /* ============================================================
    داشبوردها
 ============================================================ */
@@ -2324,7 +2343,9 @@ function saveS5Tpl(){
    t[k].items=items;
  });
  if(bad)return;
- db.s5_tpls=t; save(); closeModal(); toast('✔ ذخیره شد'); if(curPage==='s5') s5Page();
+ db.s5_tpls=t;
+ queueModule('s5_tpls');
+ save(); closeModal(); toast('✔ ذخیره شد'); if(curPage==='s5') s5Page();
 }
 
 /* ---------- ریسک (تب‌دار) ---------- */
@@ -2483,7 +2504,9 @@ function ruleAdd(){
  }
  const key='rule_'+Date.now()+'_'+Math.floor(Math.random()*1000);
  scoreRules().push({key, label, src, match, pts});
- db.scoreRules = scoreRules(); save();
+ db.scoreRules = scoreRules();
+ queueModule('scoreRules');
+ save();
  toast('✔ آیتم افزوده شد');
  scoreRulesForm();
 }
@@ -2502,7 +2525,9 @@ function ruleSaveEdit(i){
  const pts=parseInt($('#er_pts').value,10);
  if(!label||isNaN(pts)||pts===0){toast('عنوان و امتیاز معتبر وارد کنید');return}
  r.label=label; r.pts=pts;
- db.scoreRules=rules; save();
+ db.scoreRules=rules;
+ queueModule('scoreRules');
+ save();
  toast('✔ ذخیره شد');
  closeModal(); scoreRulesForm();
 }
@@ -2510,7 +2535,9 @@ function ruleDel(i){
  const rules=scoreRules(); const r=rules[i]; if(!r)return;
  askConfirm('آیتم «'+r.label+'» حذف شود؟',function(){
    rules.splice(i,1);
-   db.scoreRules=rules; save();
+   db.scoreRules=rules;
+   queueModule('scoreRules');
+   save();
    toast('✔ حذف شد'); scoreRulesForm();
  });
 }
@@ -2579,13 +2606,17 @@ function togglePerm(mod,act,role){
  P[mod][act][role]=!P[mod][act][role];
  if(act==='view'&&P[mod][act][role]===false){ ['create','edit','del'].forEach(a=>{ if(P[mod][a]) P[mod][a][role]=false; }); }
  if(act!=='view'&&P[mod][act][role]===true){ if(P[mod]['view']) P[mod]['view'][role]=true; }
- db.permissions=P; save();
+ db.permissions=P;
+ queueModule('permissions');
+ save();
  toast('✔ به‌روزرسانی شد'); permsPage();
 }
 function resetPerms(){
  if(me.role!=='manager'){toast('فقط مدیر');return}
  askConfirm('همه دسترسی‌ها به پیش‌فرض بازگردد؟',function(){
-   db.permissions=defaultPerms(); save();
+   db.permissions=defaultPerms();
+   queueModule('permissions');
+   save();
    toast('✔ بازنشانی شد'); permsPage(); renderSidebar();
  });
 }
@@ -2611,10 +2642,33 @@ function importPaste(){
  openModal('📥 بازیابی','<textarea class="in" style="min-height:200px;font-family:monospace;direction:ltr" id="bkimp" placeholder="متن JSON را بچسبانید..."></textarea>',
   '<button class="btn pri" onclick="applyImport()">بازیابی</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
 }
-function applyImport(){try{const d=JSON.parse($('#bkimp').value);if(!d.personnel||!d.incidents)throw new Error('bad');db=sanitizeData(d);save();toast('✔ بازیابی شد');location.reload()}catch(e){toast('متن معتبر نیست')}}
-function doImport(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();
- r.onload=e=>{try{const d=JSON.parse(e.target.result);if(!d.personnel||!d.incidents)throw new Error('bad');db=sanitizeData(d);save();toast('بازیابی انجام شد');location.reload()}catch(x){toast('فایل معتبر نیست')}};
- r.readAsText(f)}
+function applyImport(){
+ try{
+   const d=JSON.parse($('#bkimp').value);
+   if(!d.personnel||!d.incidents)throw new Error('bad');
+   db=sanitizeData(d);
+   Object.keys(db).forEach(m=>{ _pendingModules[m]=true; });
+   save({immediate:true});
+   toast('✔ بازیابی شد');
+   setTimeout(()=>location.reload(), 800);
+ }catch(e){toast('متن معتبر نیست')}
+}
+function doImport(inp){
+ const f=inp.files[0];if(!f)return;
+ const r=new FileReader();
+ r.onload=e=>{
+   try{
+     const d=JSON.parse(e.target.result);
+     if(!d.personnel||!d.incidents)throw new Error('bad');
+     db=sanitizeData(d);
+     Object.keys(db).forEach(m=>{ _pendingModules[m]=true; });
+     save({immediate:true});
+     toast('بازیابی انجام شد');
+     setTimeout(()=>location.reload(), 800);
+   }catch(x){toast('فایل معتبر نیست')}
+ };
+ r.readAsText(f);
+}
 function doReset(){ askConfirm('همه داده‌ها به نمونه اولیه بازمی‌گردد. مطمئنید؟',function(){ try{localStorage.removeItem(LS)}catch(e){};location.reload()}); }
 function diag(){
  const res=[];
@@ -2643,13 +2697,20 @@ function saveTpl(tk){
  const title=$('#tf_t').value.trim(),per=parseInt($('#tf_p').value,10),items=$('#tf_i').value.split('\n').map(x=>x.trim()).filter(Boolean);
  if(!title||!per||per<1||!items.length){toast('عنوان، دوره و حداقل یک قلم الزامی است');return}
  const key=(tk&&TPLS[tk])?tk:'TPL-'+String(Date.now()).slice(-6);
- TPLS[key]={t:title,period:per,items:items};db.tpls=TPLS;save();closeModal();
- toast('✔ ذخیره شد');renderSidebar();if(curPage==='settings')settingsPage()}
+ TPLS[key]={t:title,period:per,items:items};
+ db.tpls=TPLS;
+ queueModule('tpls');
+ save();closeModal();
+ toast('✔ ذخیره شد');renderSidebar();if(curPage==='settings')settingsPage();
+}
 function delTpl(tk){
  if(!me||me.role!=='manager'){toast('حذف فقط توسط مدیر');return}
  if(!TPLS[tk])return;
  askConfirm('چک‌لیست «'+TPLS[tk].t+'» حذف شود؟',function(){
-  delete TPLS[tk];db.tpls=TPLS;save();toast('حذف شد');settingsPage()})}
+  delete TPLS[tk];db.tpls=TPLS;
+  queueModule('tpls');
+  save();toast('حذف شد');settingsPage()
+ })}
 
 /* ---------- تنظیمات ---------- */
 function settingsPage(){curPage='settings';
@@ -2704,17 +2765,30 @@ function personForm(i){const p=(i>=0&&db.personnel[i])?db.personnel[i]:null;
  '<div class="fgrid"><div class="ff"><label>نام <i>*</i></label><input id="pf_n" class="in" value="'+esc(p?p.name:'')+'"></div><div class="ff"><label>سمت</label><input id="pf_j" class="in" value="'+esc(p?p.job:'')+'"></div><div class="ff"><label>واحد</label><select id="pf_a" class="in">'+db.areas.map(a=>'<option '+(p&&p.area===a?'selected':'')+'>'+esc(a)+'</option>').join('')+'</select></div><div class="ff"><label>نقش <i>*</i></label><select id="pf_r" class="in">'+['worker','expert','manager'].map(r=>'<option value="'+r+'" '+((p?p.role:'worker')===r?'selected':'')+'>'+ROLE_CHIP[r][0]+'</option>').join('')+'</select></div><div class="ff"><label>نام کاربری</label><input id="pf_u" class="in" value="'+esc(p?p.u:'')+'" style="direction:ltr"></div><div class="ff"><label>رمز</label><input id="pf_p" class="in" value="'+esc(p?p.p:'')+'" style="direction:ltr"></div></div>',
  '<button class="btn pri" onclick="savePerson('+i+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
 }
-function savePerson(i){const n=$('#pf_n').value.trim(),un=$('#pf_u').value.trim(),pw=$('#pf_p').value.trim(),role=$('#pf_r').value;
+function savePerson(i){
+ const n=$('#pf_n').value.trim(),un=$('#pf_u').value.trim(),pw=$('#pf_p').value.trim(),role=$('#pf_r').value;
  if(!n){toast('نام الزامی است');return}
  if(un&&db.personnel.some((p,j)=>p.u===un&&j!==i)){toast('نام کاربری تکراری');return}
  if(i>=0&&db.personnel[i]){Object.assign(db.personnel[i],{name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un,p:pw})}
  else db.personnel.push({id:uid('USR'),name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un,p:pw});
- save();closeModal();toast('✔ ذخیره شد');settingsPage()}
+ queueModule('personnel');
+ save();closeModal();toast('✔ ذخیره شد');settingsPage()
+}
 function delPerson(i){const p=db.personnel[i];if(!p)return;
  if(p.id===me.id){toast('حساب خودتان قابل حذف نیست');return}
- askConfirm('«'+p.name+'» حذف شود؟',function(){db.personnel.splice(i,1);save();settingsPage();toast('حذف شد')})}
-function addArea(){const v=$('#newarea').value.trim();if(!v){toast('نام واحد را وارد کنید');return}db.areas.push(v);save();settingsPage();toast('افزوده شد')}
-function delArea(i){db.areas.splice(i,1);save();settingsPage()}
+ askConfirm('«'+p.name+'» حذف شود؟',function(){
+   db.personnel.splice(i,1);
+   queueModule('personnel');
+   save();settingsPage();toast('حذف شد')
+ })}
+function addArea(){const v=$('#newarea').value.trim();if(!v){toast('نام واحد را وارد کنید');return}
+ db.areas.push(v);
+ queueModule('areas');
+ save();settingsPage();toast('افزوده شد')}
+function delArea(i){
+ db.areas.splice(i,1);
+ queueModule('areas');
+ save();settingsPage()}
 
 /* ---------- موبایل ---------- */
 function toggleSide(){const sd=document.getElementById('side'),sc=document.getElementById('scrim');if(!sd)return;sd.classList.toggle('open');if(sc)sc.classList.toggle('show',sd.classList.contains('open'))}
@@ -2937,7 +3011,10 @@ function saveVerifyCapa(id){
  r.progress = eff==='اثربخش' ? 100 : r.progress;
  if(!r.log) r.log=[];
  r.log.push({u:me.name,d:todayJ(),t:'تأیید اثربخشی: '+eff});
- save();closeModal();toast('✔ تأیید ثبت شد');
+ queueModule('actions');
+ save();
+ closeModal();
+ toast('✔ تأیید ثبت شد');
  if(curPage==='actions'||(curPage==='unsafe'))renderRows();
  renderSidebar();
  openDetail('actions',id);
@@ -3079,7 +3156,9 @@ function setStat(k,id,val){
    if(val==='انجام شد'&&(!r.progress||+r.progress<100))r.progress=100;
  }
  r.log.push({u:me.name,d:todayJ(),t:'تغییر وضعیت به: '+val});
- save();toast('وضعیت به‌روزرسانی شد');
+ queueModule(k);
+ save();
+ toast('وضعیت به‌روزرسانی شد');
  openDetail(k,id);
  if(curPage===k||(curPage==='risks'&&riskMethod===k))renderRows();
  renderSidebar();
@@ -3087,7 +3166,12 @@ function setStat(k,id,val){
 function delRec(k,id){
  if(!canDel(k)){toast('اجازه حذف ندارید');return}
  askConfirm('از حذف این مورد («'+id+'») مطمئن هستید؟',function(){
-  db[k]=db[k].filter(x=>x.id!==id);save();closeCal();closeModal();toast('حذف شد');
+  db[k]=db[k].filter(x=>x.id!==id);
+  queueModule(k);
+  save();
+  closeCal();
+  closeModal();
+  toast('حذف شد');
   if(curPage===k||(curPage==='risks'&&riskMethod===k))renderRows();
   renderSidebar();
  });
@@ -3108,8 +3192,15 @@ function ptwAct(id,to){
   ||(to==='رد شده'&&['expert','manager'].includes(me.role)&&['در انتظار بررسی','تایید کارشناس'].includes(r.status))
   ||(to==='خاتمه یافته'&&r.status==='تایید نهایی');
  if(!ok){toast('این اقدام در وضعیت فعلی مجاز نیست');return}
- r.status=to;r.log.push({u:me.name,d:todayJ(),t:'مرحله: '+to});
- save();toast('✔ ثبت شد');openDetail('ptw',id);if(curPage==='ptw')renderRows();renderSidebar();
+ r.status=to;
+ if(!r.log) r.log=[];
+ r.log.push({u:me.name,d:todayJ(),t:'مرحله: '+to});
+ queueModule('ptw');
+ save();
+ toast('✔ ثبت شد');
+ openDetail('ptw',id);
+ if(curPage==='ptw')renderRows();
+ renderSidebar();
 }
 
 /* ---------- KPI ---------- */
@@ -3136,75 +3227,47 @@ function kpiPage(){const K=kpis();const jy=K.jy;
  return h}
 
 /* ============================================================
-   جستجوی سراسری هوشمند (نسخه ۲)
+   جستجوی سراسری
 ============================================================ */
 let _gsLastQuery='';
 let _gsCursor=-1;
-
-/* --- نرمال‌سازی متن فارسی برای جستجوی مقاوم --- */
 function faNormalize(s){
   if(s==null) return '';
   s=String(s);
-  // یکسان‌سازی ی/ي و ک/ك و ۀ/ه و أ/ا و إ/ا
   s=s.replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/ۀ/g,'ه').replace(/أ|إ|آ/g,'ا');
-  // حذف اعراب و تنوین
   s=s.replace(/[\u064B-\u0652\u0670]/g,'');
-  // حذف نیم‌فاصله و تبدیل به فاصله
   s=s.replace(/\u200c/g,' ');
-  // تبدیل اعداد فارسی/عربی به لاتین
   s=s.replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d));
-  // یکسان‌سازی فاصله‌ها
   s=s.replace(/\s+/g,' ').trim().toLowerCase();
   return s;
 }
-
-/* --- ساخت رشته‌ی قابل جستجو از یک رکورد (همه فیلدها + فیلدهای محاسباتی) --- */
 function buildHaystack(kind, r){
   if(!r) return {text:'', title:'', code:''};
   const M=MODS[kind]||{};
   const parts=[];
   const titleParts=[];
   const codeParts=[];
-  const labels={};
-  (M.fields||[]).forEach(f=>{ labels[f.k]=f.l; });
-
-  // عنوان ماژول
+  (M.fields||[]).forEach(f=>{});
   if(M.t) parts.push(M.t);
   if(kind) parts.push(kind);
-
-  // فیلدهای تعریف‌شده
   (M.fields||[]).forEach(f=>{
-    // فیلد gate: اگر نقش کاربر مجاز نیست، نه در های‌استک و نه در نمایش
     if(f.gate && (!me || !f.gate.includes(me.role))) return;
     const v=r[f.k];
     if(v===undefined||v===null||v==='') return;
     if(f.t==='people' && Array.isArray(v)){ parts.push(v.join(' ')); return; }
     if(f.t==='chk'){ parts.push(f.l+' '+(v?'بله':'خیر')); return; }
-    if(f.t==='tplsel'){
-      const tname=TPLS[v]?TPLS[v].t:String(v);
-      parts.push(tname); return;
-    }
-    if(typeof v==='object'){
-      // آبجکت (مثل s5 یا analyses) — بازگشتی
-      flattenObj(v, parts);
-      return;
-    }
+    if(f.t==='tplsel'){ const tname=TPLS[v]?TPLS[v].t:String(v); parts.push(tname); return; }
+    if(typeof v==='object'){ flattenObj(v, parts); return; }
     parts.push(String(v));
-    // عنوان‌های ترجیحی برای نمایش
-    if(['title','desc','act','hazard','course','job','item','name','month','topic','task','scenario','param','point','loc','equip','mode','activity','waste','title'].includes(f.k)){
+    if(['title','desc','act','hazard','course','job','item','name','month','topic','task','scenario','param','point','loc','equip','mode','activity','waste'].includes(f.k)){
       titleParts.push(String(v));
     }
   });
-
-  // فیلدهای عمومی رکورد (id، code، status، ...)
   ['id','code','status','type','effectiveness','risk','level','progress','rpn','score','createdBy','createdJ','fixedBy','verifyBy','assessor','inspBy','observer','owner','responsible','presenter','trainer','doctor','auditor','contractor','manifest','phone','hcode','std','unit','size'].forEach(kk=>{
     if(r[kk]!==undefined && r[kk]!==null && r[kk]!=='') parts.push(String(r[kk]));
   });
   if(r.code) codeParts.push(String(r.code));
-
-  // فیلدهای خاص هر ماژول که در fields نیستند
   if(kind==='incidents' && r.analyses){
-    // تحلیل حادثه
     const a=r.analyses;
     if(a.fishbone) Object.keys(a.fishbone).forEach(k=>{ if(a.fishbone[k]) parts.push('فیش‌بون '+k+' '+a.fishbone[k]); });
     if(a.why) Object.keys(a.why).forEach(k=>{ if(a.why[k]) parts.push('چرا '+k+' '+a.why[k]); });
@@ -3221,7 +3284,6 @@ function buildHaystack(kind, r){
     });
   }
   if(kind==='s5' && r.s5){
-    // نمرات 5S — فقط کلیدها و برچسب ارکان
     const tpl=(db&&db.s5_tpls)||{};
     Object.keys(r.s5).forEach(key=>{
       const t=tpl[key];
@@ -3242,23 +3304,17 @@ function buildHaystack(kind, r){
   if(r.log && Array.isArray(r.log)){
     r.log.forEach(l=>{ if(l.t) parts.push('گردش کار '+l.t); if(l.u) parts.push(l.u); });
   }
-
-  // نرمال‌سازی نهایی
   const text=faNormalize(parts.join(' '));
   const title=titleParts.length?titleParts[0]:'';
   const code=codeParts.length?codeParts[0]:'';
-  return {text, title, code, labels};
+  return {text, title, code};
 }
-
-/* --- بازگشتی: استخراج همه مقادیر از آبجکت تودرتو --- */
 function flattenObj(obj, out){
   if(obj==null) return;
   if(Array.isArray(obj)){ obj.forEach(x=>flattenObj(x,out)); return; }
   if(typeof obj==='object'){ Object.keys(obj).forEach(k=>{ out.push(k); flattenObj(obj[k],out); }); return; }
   out.push(String(obj));
 }
-
-/* --- رتبه‌بندی تطابق برای یک کوئری چندکلمه‌ای --- */
 function scoreMatch(hay, queryWords, title, code){
   if(!hay || !queryWords.length) return 0;
   let total=0;
@@ -3267,27 +3323,19 @@ function scoreMatch(hay, queryWords, title, code){
   for(const w of queryWords){
     if(!w) continue;
     const idx=hay.indexOf(w);
-    if(idx<0) return -1; // همه کلمات باید باشند (AND)
-    // امتیاز پایه
+    if(idx<0) return -1;
     let s=1;
-    // کلمه در عنوان
     if(titleNorm && titleNorm.indexOf(w)>=0) s+=10;
-    // کلمه در کد
     if(codeNorm && codeNorm.indexOf(w)>=0) s+=15;
-    // تطابق دقیق کل رشته
     if(hay===w) s+=20;
-    // تطابق ابتدای کلمه (word boundary)
     const re=new RegExp('(^|\\s)'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i');
     if(re.test(hay)) s+=5;
-    // تطابق چندباره
     const cnt=(hay.match(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'g'))||[]).length;
     if(cnt>1) s+=Math.min(cnt,5);
     total+=s;
   }
   return total;
 }
-
-/* --- برش متن اطراف محل تطابق برای پیش‌نمایش --- */
 function snippetAround(text, queryWords, len){
   len=len||90;
   if(!text) return '';
@@ -3306,8 +3354,6 @@ function snippetAround(text, queryWords, len){
   if(end<text.length) out=out+'…';
   return out;
 }
-
-/* --- فیلتر کردن فیلدهای gate در نمایش عنوان --- */
 function safeTitleOf(kind, r){
   const M=MODS[kind]||{};
   const pick=['title','desc','act','hazard','course','job','item','name','month','topic','task','scenario','param','point','loc','equip','mode','activity','waste','phone','code'];
@@ -3320,8 +3366,6 @@ function safeTitleOf(kind, r){
   if(r.code) return r.code;
   return r.id||'';
 }
-
-/* --- باز کردن پنجره جستجو --- */
 function openGlobalSearch(){
   if(!me){toast('ابتدا وارد شوید');return}
   _gsLastQuery='';
@@ -3340,63 +3384,39 @@ function openGlobalSearch(){
     '<span style="font-size:11px;color:var(--mut);margin-right:auto;align-self:center">Ctrl+K برای بازکردن • Enter برای اولین نتیجه</span>');
   setTimeout(()=>{const i=document.getElementById('gsInput');if(i){i.focus();i.select()}},80);
 }
-
 function gsQuick(term){
   const i=document.getElementById('gsInput');
   if(i){ i.value=term; globalSearchDo(term); i.focus(); }
 }
-
-/* --- ناوبری با کیبورد در نتایج --- */
 function gsKey(e){
-  if(e.key==='ArrowDown'){
-    e.preventDefault();
-    _gsCursor=Math.min(_gsResults.length-1, _gsCursor+1);
-    gsHighlight();
-  } else if(e.key==='ArrowUp'){
-    e.preventDefault();
-    _gsCursor=Math.max(-1, _gsCursor-1);
-    gsHighlight();
-  } else if(e.key==='Enter'){
-    e.preventDefault();
-    if(_gsResults.length){
-      const idx=_gsCursor>=0?_gsCursor:0;
-      gsOpen(idx);
-    }
-  } else if(e.key==='Escape'){
-    closeModal();
-  }
+  if(e.key==='ArrowDown'){ e.preventDefault(); _gsCursor=Math.min(_gsResults.length-1, _gsCursor+1); gsHighlight(); }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); _gsCursor=Math.max(-1, _gsCursor-1); gsHighlight(); }
+  else if(e.key==='Enter'){ e.preventDefault(); if(_gsResults.length){ const idx=_gsCursor>=0?_gsCursor:0; gsOpen(idx); } }
+  else if(e.key==='Escape'){ closeModal(); }
 }
-
 function gsHighlight(){
   document.querySelectorAll('#gsResults .gs-item').forEach((el,i)=>{
     el.style.background = (i===_gsCursor)?'#fff7ed':'';
     if(i===_gsCursor) el.scrollIntoView({block:'nearest'});
   });
 }
-
-/* --- موتور جستجو --- */
 function globalSearchDo(q){
   q=String(q||'').trim();
   _gsLastQuery=q;
   _gsCursor=-1;
   const w=document.getElementById('gsResults');
   if(!w) return;
-
   const normQuery=faNormalize(q);
   const queryWords=normQuery.split(' ').filter(Boolean);
-
   if(queryWords.length===0 || q.length<2){
     w.innerHTML='<div style="color:var(--mut);font-size:12.5px;padding:12px;text-align:center">حداقل ۲ کاراکتر تایپ کنید...</div>';
     _gsResults=[];
     return;
   }
-
   clearTimeout(_gsTimer);
   _gsTimer=setTimeout(function(){
     try{
       const out=[];
-
-      /* ۱) جستجو در همه رکوردهای همه ماژول‌ها */
       Object.keys(MODS).forEach(function(k){
         if(!canView(k)) return;
         const M=MODS[k];
@@ -3406,67 +3426,31 @@ function globalSearchDo(q){
           const h=buildHaystack(k, r);
           const sc=scoreMatch(h.text, queryWords, h.title, h.code);
           if(sc<0) return;
-          out.push({
-            kind:k,
-            rec:r,
-            icon:M.i,
-            moduleLabel:M.t,
-            title:safeTitleOf(k, r),
-            sub:gsSubOf(k, r),
-            snippet:snippetAround(h.text, queryWords, 110),
-            score:sc,
-            moduleHit:false,
-            type:'record'
-          });
+          out.push({kind:k,rec:r,icon:M.i,moduleLabel:M.t,title:safeTitleOf(k, r),sub:gsSubOf(k, r),snippet:snippetAround(h.text, queryWords, 110),score:sc,moduleHit:false,type:'record'});
         });
       });
-
-      /* ۲) جستجو در افراد (به‌عنوان نتیجه مرجع) */
       (db.personnel||[]).forEach(function(p){
         const hay=faNormalize([p.name,p.job,p.area,p.role,p.u].filter(Boolean).join(' '));
         const sc=scoreMatch(hay, queryWords, p.name, '');
         if(sc<0) return;
-        out.push({
-          kind:'_person',
-          rec:p,
-          icon:'👤',
-          moduleLabel:'پرسنل',
-          title:p.name,
-          sub:(p.job||'')+' • '+((ROLE_CHIP[p.role]&&ROLE_CHIP[p.role][0])||p.role||'')+' • '+(p.area||''),
-          snippet:snippetAround(hay, queryWords, 100),
-          score:sc,
-          moduleHit:false,
-          type:'person'
-        });
+        out.push({kind:'_person',rec:p,icon:'👤',moduleLabel:'پرسنل',title:p.name,sub:(p.job||'')+' • '+((ROLE_CHIP[p.role]&&ROLE_CHIP[p.role][0])||p.role||'')+' • '+(p.area||''),snippet:snippetAround(hay, queryWords, 100),score:sc,moduleHit:false,type:'person'});
       });
-
-      /* ۳) جستجو در واحدها */
       (db.areas||[]).forEach(function(a){
         const hay=faNormalize(a);
         if(queryWords.every(w=>hay.indexOf(w)>=0)){
-          out.push({
-            kind:'_area', rec:{id:'area:'+a, name:a}, icon:'🏭', moduleLabel:'واحدها',
-            title:a, sub:'واحد سازمانی', snippet:hay, score:5, moduleHit:false, type:'area'
-          });
+          out.push({kind:'_area', rec:{id:'area:'+a, name:a}, icon:'🏭', moduleLabel:'واحدها', title:a, sub:'واحد سازمانی', snippet:hay, score:5, moduleHit:false, type:'area'});
         }
       });
-
-      /* ۴) جستجو در لیست‌های پویا (گزینه‌ها) */
       if(db.lists){
         Object.keys(db.lists).forEach(function(lk){
           (db.lists[lk]||[]).forEach(function(v){
             const hay=faNormalize(v+' '+lk);
             if(queryWords.every(w=>hay.indexOf(w)>=0)){
-              out.push({
-                kind:'_list', rec:{id:'list:'+lk+':'+v, name:v, list:lk}, icon:'📚', moduleLabel:'لیست '+lk,
-                title:v, sub:'از لیست '+lk, snippet:hay, score:4, moduleHit:false, type:'list'
-              });
+              out.push({kind:'_list', rec:{id:'list:'+lk+':'+v, name:v, list:lk}, icon:'📚', moduleLabel:'لیست '+lk, title:v, sub:'از لیست '+lk, snippet:hay, score:4, moduleHit:false, type:'list'});
             }
           });
         });
       }
-
-      /* ۵) اگر کوئری با عنوان ماژول مطابقت داشت، همه رکوردهای آن ماژول هم بیایند */
       Object.keys(MODS).forEach(function(k){
         if(!canView(k)) return;
         const M=MODS[k];
@@ -3475,38 +3459,25 @@ function globalSearchDo(q){
           (db[k]||[]).forEach(function(r){
             if(!r||!r.id) return;
             if(out.some(x=>x.kind===k && x.rec.id===r.id)) return;
-            out.push({
-              kind:k, rec:r, icon:M.i, moduleLabel:M.t,
-              title:safeTitleOf(k,r), sub:gsSubOf(k,r),
-              snippet:'', score:1, moduleHit:true, type:'record'
-            });
+            out.push({kind:k, rec:r, icon:M.i, moduleLabel:M.t, title:safeTitleOf(k,r), sub:gsSubOf(k,r), snippet:'', score:1, moduleHit:true, type:'record'});
           });
         }
       });
-
-      /* مرتب‌سازی: امتیاز نزولی، سپس تاریخ نزولی */
       out.sort(function(a,b){
         if(b.score!==a.score) return b.score-a.score;
         return String(b.rec.date||b.rec.createdJ||b.rec.month||'').localeCompare(String(a.rec.date||a.rec.createdJ||a.rec.month||''));
       });
-
       _gsResults=out.slice(0,120);
-
       if(!_gsResults.length){
         w.innerHTML='<div style="color:var(--mut);font-size:12.5px;padding:16px;text-align:center">نتیجه‌ای برای «'+esc(q)+'» یافت نشد</div>';
         return;
       }
-
-      // اطلاعات
       let html='<div style="font-size:12px;color:var(--mut);margin-bottom:6px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px">'+
         '<span>'+nd(out.length)+' نتیجه'+(out.length>120?' — نمایش ۱۲۰ مورد نخست':'')+'</span>'+
         '<span>کلمات: '+queryWords.map(x=>'<span class="chip b-org" style="font-size:10px">'+esc(x)+'</span>').join(' ')+'</span>'+
       '</div>';
-
-      // گروه‌بندی بر اساس نوع
       const groups={record:[],person:[],area:[],list:[]};
       _gsResults.forEach(function(x){ groups[x.type].push(x); });
-
       const renderGroup=function(label, items, icon){
         if(!items.length) return '';
         let g='<div style="font-size:11.5px;font-weight:700;color:var(--pri2);margin:10px 4px 4px">'+icon+' '+label+' ('+nd(items.length)+')</div>';
@@ -3527,12 +3498,10 @@ function globalSearchDo(q){
         g+='</div>';
         return g;
       };
-
       html+=renderGroup('رکوردهای ماژول‌ها', groups.record, '📋');
       html+=renderGroup('پرسنل', groups.person, '👤');
       html+=renderGroup('واحدها', groups.area, '🏭');
       html+=renderGroup('گزینه‌های لیست', groups.list, '📚');
-
       w.innerHTML=html;
     }catch(err){
       w.innerHTML='<div style="color:var(--bad);font-size:12px;padding:12px;text-align:center">خطا در جستجو: '+esc(err.message)+'</div>';
@@ -3540,8 +3509,6 @@ function globalSearchDo(q){
     }
   }, 180);
 }
-
-/* --- زیرنویس نتیجه --- */
 function gsSubOf(k,r){
   const parts=[];
   if(r.code) parts.push('کد: '+r.code);
@@ -3558,18 +3525,13 @@ function gsSubOf(k,r){
   if(r.course) parts.push(r.course);
   return parts.join(' • ');
 }
-
-/* --- باز کردن نتیجه --- */
 function gsOpen(i){
   const x=_gsResults[i];
   if(!x) return;
   closeModal();
   setTimeout(function(){
     if(x.type==='person'){
-      // پروفایل شخص: جستجوی نام او در ماژول‌ها
       const name=x.rec.name;
-      const input=document.getElementById('gsInput');
-      // باز کردن صفحه‌ای که به این شخص مربوط است
       const hits=[];
       if(db.incidents.some(r=>r.createdBy===name||r.injured===name)) hits.push('incidents');
       if(db.unsafe.some(r=>r.observer===name||r.responsible===name)) hits.push('unsafe');
@@ -3581,21 +3543,11 @@ function gsOpen(i){
       else { toast('رکورد مستقیمی برای «'+name+'» یافت نشد'); }
       return;
     }
-    if(x.type==='area'){
-      setPage('settings'); toast('واحد «'+x.rec.name+'» در تنظیمات قابل مدیریت است');
-      return;
-    }
-    if(x.type==='list'){
-      toast('گزینه «'+x.rec.name+'» از لیست '+x.rec.list);
-      setPage('settings');
-      return;
-    }
-    // رکورد عادی
+    if(x.type==='area'){ setPage('settings'); toast('واحد «'+x.rec.name+'» در تنظیمات قابل مدیریت است'); return; }
+    if(x.type==='list'){ toast('گزینه «'+x.rec.name+'» از لیست '+x.rec.list); setPage('settings'); return; }
     openDetail(x.kind, x.rec.id);
   }, 80);
 }
-
-/* --- میانبر Ctrl+K --- */
 document.addEventListener('keydown',function(e){
   if((e.ctrlKey||e.metaKey)&&(e.key==='k'||e.key==='K')){
     e.preventDefault();
@@ -3674,7 +3626,43 @@ function startApp(){$('#login').classList.add('hidden');$('#app').classList.remo
  const d=new Date();$('#tdate').textContent=['یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه','شنبه'][d.getDay()]+' '+nd(todayJ());
  setPage('dash')}
 
-/* ---------- Boot ---------- */
+/* ============================================================
+   FIX: Firebase on('value') — جلوگیری از حلقه بازخورد
+============================================================ */
+dbRef.on('value', (snapshot) => {
+  if (_isSaving || _isApplyingRemote) return;
+  if (document.body.classList.contains('modal-open')) return;
+  const cloud = snapshot.val();
+  if (!cloud) return;
+  try {
+    const sanitizedCloud = sanitizeData(cloud);
+    const localJson = JSON.stringify(db);
+    const cloudJson = JSON.stringify(sanitizedCloud);
+    if (cloudJson === localJson) return;
+    _isApplyingRemote = true;
+    db = sanitizedCloud;
+    TPLS = db.tpls || defaultTPLS();
+    S5 = db.s5_tpls || defaultS5TPLS();
+    try { localStorage.setItem(LS, JSON.stringify(db)); } catch(e){}
+    if (me && !document.body.classList.contains('modal-open')) {
+      const sc = document.querySelector('.tscroll');
+      const scrollPos = sc ? sc.scrollLeft : 0;
+      setPage(curPage);
+      setTimeout(()=>{
+        const sc2 = document.querySelector('.tscroll');
+        if(sc2) sc2.scrollLeft = scrollPos;
+      }, 50);
+    }
+  } catch(e) {
+    console.warn('خطا در همگام‌سازی remote:', e);
+  } finally {
+    setTimeout(()=>{ _isApplyingRemote = false; }, 300);
+  }
+});
+
+/* ============================================================
+   FIX: boot — ترتیب صحیح
+============================================================ */
 (async function boot(){
  let loaded=false;
  try{
@@ -3682,16 +3670,19 @@ function startApp(){$('#login').classList.add('hidden');$('#app').classList.remo
   const data = snapshot.val();
   if(data && data.personnel){ db = sanitizeData(data); loaded = true; }
  }catch(e){ console.warn('Firebase در دسترس نیست.'); }
+
  if(!loaded){
   try{
     const local = JSON.parse(localStorage.getItem(LS));
     if(local && local.personnel) db = sanitizeData(local);
   }catch(e){ db=null }
  }
+
  if(!db || !db.personnel || db.personnel.length === 0){
    db = seed();
    db = sanitizeData(db);
  }
+
  if(!db.scoreArch) db.scoreArch = [];
  (db.personnel||[]).forEach(p=>{if(!p.id)p.id=uid('USR');if(!p.role)p.role='worker'});
  if(!db.tpls) db.tpls=defaultTPLS();
@@ -3700,26 +3691,31 @@ function startApp(){$('#login').classList.add('hidden');$('#app').classList.remo
  db = sanitizePermissions(db);
  TPLS=db.tpls;
  S5=db.s5_tpls;
- if(!loaded){ try{ await dbRef.set(db); }catch(e){} }
+
+ if(!loaded){
+   try{
+     const payload = {};
+     Object.keys(db).forEach(k => {
+       if(Array.isArray(db[k])){
+         const obj={};
+         db[k].forEach((it,i)=>{ obj[i]=it; });
+         payload[k]=obj;
+       } else {
+         payload[k]=db[k];
+       }
+     });
+     await dbRef.set(payload);
+   }catch(e){ console.warn('ارسال seed به Firebase ناموفق:', e); }
+ }
+
  try{localStorage.setItem(LS,JSON.stringify(db))}catch(e){}
  try{ensureArchives()}catch(e){}
+
  try{me=JSON.parse(sessionStorage.getItem('hse_me')||'null')}catch(e){me=null}
  if(me&&(!db.personnel.find(x=>x.id===me.id)))me=null;
  if(me)startApp();
- dbRef.on('value', (snapshot) => {
-   if(document.body.classList.contains('modal-open')) return;
-   const cloud = snapshot.val();
-   if(cloud) {
-     const sanitizedCloud = sanitizeData(cloud);
-     if(JSON.stringify(sanitizedCloud) !== JSON.stringify(db)){
-       db = sanitizedCloud;
-       TPLS = db.tpls || defaultTPLS();
-       S5 = db.s5_tpls || defaultS5TPLS();
-       try{localStorage.setItem(LS,JSON.stringify(db))}catch(e){}
-       if(me) setPage(curPage);
-     }
-   }
- });
+
+ setTimeout(()=>{ try{ checkConnection(); }catch(e){} }, 500);
 })();
 </script>
 </body>
