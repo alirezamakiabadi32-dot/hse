@@ -2011,7 +2011,7 @@ function openForm(k,id,pre){
  }
  if(k==='unsafe'){
   b='<div class="qchips"><span class="qc-t">⚡ پرتکرار:</span>'+QUICK_ANOMALY.map(q=>'<button type="button" class="qc" onclick="quickAnomaly(this)">'+esc(q)+'</button>').join('')+'</div>'+b;
-  b+='<div class="ff wide"><label>🖼️ عکس آنومالی (اختیاری — دوربین گوشی)</label><div id="phWrap">'+photoBlock(rec&&rec.photo?rec.photo:null)+'</div></div>';
+  b+='<div class="ff wide"><label>🖼️ عکس آنومالی (اختیاری — دوربین یا انتخاب از دستگاه)</label><div id="phWrap">'+photoBlock(rec&&rec.photo?rec.photo:null)+'</div></div>';
  }
  if(k==='inspections')b+='<div id="tplWrap" style="margin-top:12px"></div>';
  if(k==='risks')b+='<div class="lvprev" id="lvprev"></div>';
@@ -2945,7 +2945,10 @@ function quickAnomaly(btn){const t=$('#f_desc');if(!t)return;t.value=t.value?t.v
 function pickRisk(btn,k,val){const h=$('#f_'+k);if(h)h.value=val;const seg=btn.parentElement;[].forEach.call(seg.querySelectorAll('.rsk'),b=>b.classList.remove('on'));btn.classList.add('on')}
 function photoBlock(p){
  if(p)return '<div class="phprev"><img src="'+p+'" alt="عکس" onclick="viewPhoto(this.src)"><button type="button" class="btn danger sm" onclick="delPhoto()">🗑️ حذف</button></div>';
- return '<input type="file" accept="image/*" capture="environment" class="in" style="padding:7px;background:#fff" onchange="pickPhoto(this)">';
+ return '<div class="phpick" style="display:flex;gap:8px;flex-wrap:wrap">'
+  +'<label class="btn ghost" style="cursor:pointer">📷 گرفتن عکس با دوربین<input type="file" accept="image/*" capture="environment" style="display:none" onchange="pickPhoto(this)"></label>'
+  +'<label class="btn ghost" style="cursor:pointer">🖼️ انتخاب از دستگاه (گالری/فایل)<input type="file" accept="image/*" style="display:none" onchange="pickPhoto(this)"></label>'
+  +'</div>';
 }
 function delPhoto(){window._phData='';const w=$('#phWrap');if(w)w.innerHTML=photoBlock(null);toast('عکس حذف شد')}
 function pickPhoto(inp){
