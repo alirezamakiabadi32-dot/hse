@@ -3007,38 +3007,83 @@ function globalSearchDo(q){
   _gsTimer=setTimeout(function(){
     try{
       const out=[];
+      // 1) جستجو در عنوان ماژول‌ها — اگر کاربر "آنومالی" زد، همه رکوردهای unsafe را نشان بده
+      const moduleMatches=[];
       Object.keys(MODS).forEach(function(k){
+        if(!canView(k)) return;
+        const M=MODS[k];
+        const modText=(M.t+' '+M.i+' '+k).toLowerCase();
+        if(modText.indexOf(q)>=0){
+          moduleMatches.push(k);
+        }
+      });
+      // 2) جستجو در محتوای رکوردها (با احتساب نام فیلدها)
+      Object.keys(MODS).forEach(function(k){
+        if(!canView(k)) return;
+        const M=MODS[k];
+        const list=db[k]||[];
+        const fieldLabels={};
+        (M.fields||[]).forEach(function(f){ fieldLabels[f.k]=f.l; });
+        list.forEach(function(r){
+          if(!r) return;
+          // ساخت متن قابل جستجو: مقادیر + نام فیلدها + عنوان ماژول
+          const parts=[];
+          parts.push(M.t); // عنوان ماژول
+          (M.fields||[]).forEach(function(f){
+            const v=r[f.k];
+            if(v===undefined||v===null||v==='') return;
+            if(f.t==='people' && Array.isArray(v)){ parts.push(v.join(' ')); return; }
+            if(f.t==='chk'){ parts.push(f.l+' '+(v?'بله':'خیر')); return; }
+            parts.push(String(v));
+          });
+          // فیلدهای خاص
+          ['id','code','status','type','effectiveness','risk','level','progress','rpn','score'].forEach(function(kk){
+            if(r[kk]!==undefined && r[kk]!==null && r[kk]!=='') parts.push(String(r[kk]));
+          });
+          const hay=parts.join(' ').toLowerCase();
+          if(hay.indexOf(q)>=0){
+            out.push({kind:k, rec:r, label:M.i+' '+M.t, icon:M.i, moduleHit:moduleMatches.indexOf(k)>=0});
+          }
+        });
+      });
+      // 3) اگر جستجو با عنوان ماژول مطابقت داشت، همه رکوردهای آن ماژول را هم اضافه کن (بدون تکرار)
+      moduleMatches.forEach(function(k){
         if(!canView(k)) return;
         const M=MODS[k];
         const list=db[k]||[];
         list.forEach(function(r){
           if(!r) return;
-          const clean=Object.assign({},r);
-          delete clean.log;
-          delete clean.answers;
-          delete clean.photo;
-          delete clean.s5;
-          const hay=JSON.stringify(clean).toLowerCase();
-          if(hay.indexOf(q)>=0){
-            out.push({kind:k, rec:r, label:M.i+' '+M.t, icon:M.i});
-          }
+          if(out.some(function(x){return x.kind===k && x.rec.id===r.id;})) return;
+          out.push({kind:k, rec:r, label:M.i+' '+M.t, icon:M.i, moduleHit:true});
         });
       });
-      out.sort(function(a,b){return String(b.rec.date||b.rec.createdJ||'').localeCompare(String(a.rec.date||a.rec.createdJ||''))});
-      _gsResults=out.slice(0,60);
+      // مرتب‌سازی: ابتدا مواردی که در ماژول مطابقت دارند یا جدیدترند
+      out.sort(function(a,b){
+        if(a.moduleHit!==b.moduleHit) return a.moduleHit?-1:1;
+        return String(b.rec.date||b.rec.createdJ||'').localeCompare(String(a.rec.date||a.rec.createdJ||''));
+      });
+      _gsResults=out.slice(0,80);
       if(!_gsResults.length){
         w.innerHTML='<div style="color:var(--mut);font-size:12.5px;padding:12px;text-align:center">نتیجه‌ای یافت نشد</div>';
         return;
       }
-      let html='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">'+nd(out.length)+' نتیجه'+(out.length>60?' — نمایش ۶۰ مورد نخست':'')+'</div>';
+      // اگر فقط با عنوان ماژول مطابقت داشت، پیام توضیحی نشان بده
+      let infoMsg='';
+      if(moduleMatches.length && !_gsResults.some(function(x){return !x.moduleHit;})){
+        const modNames=moduleMatches.map(function(k){return MODS[k].i+' '+MODS[k].t;}).join('، ');
+        infoMsg='<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px;font-size:11.5px;color:#7c2d12;margin-bottom:8px">📌 نتایج شامل همه موارد ماژول: <b>'+esc(modNames)+'</b></div>';
+      }
+      let html='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">'+nd(out.length)+' نتیجه'+(out.length>80?' — نمایش ۸۰ مورد نخست':'')+'</div>';
+      html+=infoMsg;
       html+='<div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:10px">';
       _gsResults.forEach(function(x,i){
         const title=gsTitleOf(x.kind,x.rec);
         const sub=gsSubOf(x.kind,x.rec);
+        const badge=x.moduleHit?'<span class="chip b-org" style="font-size:9.5px">ماژول</span>':'';
         html+='<div class="list-row" style="padding:10px 12px;flex-wrap:wrap;row-gap:2px" onclick="gsOpen('+i+')">';
         html+='<span style="flex:0 0 auto;font-size:18px">'+x.icon+'</span>';
         html+='<div style="flex:1;min-width:0">';
-        html+='<div class="lt" style="white-space:normal;line-height:1.6"><b style="font-size:12.5px">'+esc(title)+'</b></div>';
+        html+='<div class="lt" style="white-space:normal;line-height:1.6"><b style="font-size:12.5px">'+esc(title)+'</b> '+badge+'</div>';
         html+='<div style="font-size:11px;color:var(--mut)">'+esc(sub)+'</div>';
         html+='</div>';
         html+='<span class="chip b-mut" style="direction:ltr;font-family:monospace;font-size:10.5px">'+esc(x.rec.id||'')+'</span>';
