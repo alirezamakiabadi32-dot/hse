@@ -2125,7 +2125,7 @@ function saveForm(k,id){
  toast('✔ با موفقیت ذخیره شد');
  renderSidebar();
  if(curPage===k||(curPage==='risks'&&riskMethod===k)) renderRows();
- else setPage(curPage);
+ else refreshCurrent();
 }
 
 /* ============================================================
@@ -2263,7 +2263,7 @@ function saveS5(){
  closeS5Wizard();
  toast('✔ ارزیابی 5S ذخیره شد');
  renderSidebar();
- if(curPage==='s5') s5Page(); else setPage(curPage);
+ refreshCurrent();
 }
 
 /* ============================================================
@@ -2468,7 +2468,7 @@ function saveS5Tpl(){
  if(bad)return;
  db.s5_tpls=t;
  queueModule('s5_tpls');
- save(); closeModal(); toast('✔ ذخیره شد'); if(curPage==='s5') s5Page();
+ save(); closeModal(); toast('✔ ذخیره شد'); if(curPage==='s5') refreshCurrent();
 }
 
 /* ---------- ریسک (تب‌دار) ---------- */
@@ -2735,7 +2735,7 @@ function togglePerm(mod,act,role){
  db.permissions=P;
  queueModule('permissions');
  save();
- toast('✔ به‌روزرسانی شد'); permsPage();
+ toast('✔ به‌روزرسانی شد'); refreshCurrent();
 }
 function resetPerms(){
  if(me.role!=='manager'){toast('فقط مدیر');return}
@@ -2743,7 +2743,7 @@ function resetPerms(){
    db.permissions=defaultPerms();
    queueModule('permissions');
    save();
-   toast('✔ بازنشانی شد'); permsPage(); renderSidebar();
+   toast('✔ بازنشانی شد'); refreshCurrent(); renderSidebar();
  });
 }
 
@@ -2834,7 +2834,7 @@ function saveTpl(tk){
  db.tpls=TPLS;
  queueModule('tpls');
  save();closeModal();
- toast('✔ ذخیره شد');renderSidebar();if(curPage==='settings')settingsPage();
+ toast('✔ ذخیره شد');renderSidebar();if(curPage==='settings')refreshCurrent();
 }
 function delTpl(tk){
  if(!me||me.role!=='manager'){toast('حذف فقط توسط مدیر');return}
@@ -2842,7 +2842,7 @@ function delTpl(tk){
  askConfirm('چک‌لیست «'+TPLS[tk].t+'» حذف شود؟',function(){
   delete TPLS[tk];db.tpls=TPLS;
   queueModule('tpls');
-  save();toast('حذف شد');settingsPage()
+  save();toast('حذف شد');refreshCurrent()
  })}
 
 /* ---------- تنظیمات ---------- */
@@ -2885,14 +2885,14 @@ function quickAddToList(listKey){
  openModal('➕ افزودن گزینه به «'+esc(listKey)+'»','<div class="ff"><label>مقدار جدید</label><input id="qa_val2" class="in" style="font-size:15px"></div>','<button class="btn pri" id="qa_btn2">➕ افزودن</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
  setTimeout(()=>{const i=$('#qa_val2');if(i)i.focus()},80);
  const b=$('#qa_btn2');
- function doAdd(){const v=$('#qa_val2').value;if(addListItem(listKey,v)){closeModal();settingsPage();toast('✔ افزوده شد')}}
+ function doAdd(){const v=$('#qa_val2').value;if(addListItem(listKey,v)){closeModal();refreshCurrent();toast('✔ افزوده شد')}}
  if(b)b.onclick=doAdd;
  setTimeout(()=>{const i=$('#qa_val2');if(i)i.onkeydown=function(e){if(e.key==='Enter')doAdd()}},100);
 }
 function askDelListItem(listKey,encVal){
  const val=decodeURIComponent(encVal);
  if(!canManageLists()){toast('دسترسی ندارید');return}
- askConfirm('گزینه «'+val+'» حذف شود؟',function(){delListItem(listKey,val);settingsPage();toast('حذف شد')});
+ askConfirm('گزینه «'+val+'» حذف شود؟',function(){delListItem(listKey,val);refreshCurrent();toast('حذف شد')});
 }
 function personForm(i){const p=(i>=0&&db.personnel[i])?db.personnel[i]:null;
  openModal(p?'✏️ ویرایش پرسنل':'➕ تعریف شخص جدید',
@@ -2912,23 +2912,23 @@ function savePerson(i){
  if(old){ Object.assign(old,rec); id=old.id; }
  else { id=uid('USR'); db.personnel.push(Object.assign({id:id},rec)); }
  queueRec('personnel', id);
- save();closeModal();toast('✔ ذخیره شد');settingsPage()
+ save();closeModal();toast('✔ ذخیره شد');refreshCurrent()
 }
 function delPerson(i){const p=db.personnel[i];if(!p)return;
  if(p.id===me.id){toast('حساب خودتان قابل حذف نیست');return}
  askConfirm('«'+p.name+'» حذف شود؟',function(){
    db.personnel.splice(i,1);
    queueRec('personnel', p.id);
-   save();settingsPage();toast('حذف شد')
+   save();refreshCurrent();toast('حذف شد')
  })}
 function addArea(){const v=$('#newarea').value.trim();if(!v){toast('نام واحد را وارد کنید');return}
  db.areas.push(v);
  queueModule('areas');
- save();settingsPage();toast('افزوده شد')}
+ save();refreshCurrent();toast('افزوده شد')}
 function delArea(i){
  db.areas.splice(i,1);
  queueModule('areas');
- save();settingsPage()}
+ save();refreshCurrent()}
 
 /* ---------- موبایل ---------- */
 function toggleSide(){const sd=document.getElementById('side'),sc=document.getElementById('scrim');if(!sd)return;sd.classList.toggle('open');if(sc)sc.classList.toggle('show',sd.classList.contains('open'))}
@@ -3795,6 +3795,21 @@ function renderSidebar(){let h='';
   h+='<div class="sgrp">'+g.g+'</div>'+items.map(k=>{const Pg=pageOf(k);const n=navBadge(k);return '<div class="sitem'+(curPage===k?' on':'')+'" onclick="setPage(\''+k+'\')"><span>'+Pg.i+'</span><span>'+Pg.t+'</span>'+(n?'<span class="nb">'+nd(n)+'</span>':'')+'</div>'}).join('')});
  $('#snav').innerHTML=h;
  try{renderBell()}catch(e){}}
+/* مقایسه‌ی پایدار داده‌ها: ترتیب کلیدها و ساختارهای خالی را نادیده می‌گیرد (Firebase آن‌ها را برمی‌گرداند یا مرتب می‌کند) */
+function stableJson(v){
+  if(Array.isArray(v)) return '['+v.map(x=>stableJson(x===undefined?null:x)).join(',')+']';
+  if(v&&typeof v==='object'){
+    const ks=Object.keys(v).filter(k=>{const x=v[k];if(x===undefined)return false;if(Array.isArray(x))return x.length>0;if(x&&typeof x==='object')return Object.keys(x).length>0;return true;}).sort();
+    return '{'+ks.map(k=>JSON.stringify(k)+':'+stableJson(v[k])).join(',')+'}';
+  }
+  return JSON.stringify(v===undefined?null:v);
+}
+/* بازرسم صفحه‌ی جاری بدون پرش به بالا */
+function refreshCurrent(){
+  const sy=window.scrollY||0; const sc=document.querySelector('.tscroll'); const sx=sc?sc.scrollLeft:0;
+  setPage(curPage);
+  requestAnimationFrame(()=>{ window.scrollTo(0,sy); const s2=document.querySelector('.tscroll'); if(s2) s2.scrollLeft=sx; });
+}
 function setPage(k){const Pg=pageOf(k);
  if(!Pg || !canView(k)){ k='dash'; }
  if(!canView(k)){ toast('دسترسی به این بخش غیرفعال است'); return; }
@@ -3807,7 +3822,7 @@ function setPage(k){const Pg=pageOf(k);
  try{renderBell()}catch(e){}
 }
 function openModal(t,b,f){closeCal();closeBell();$('#mtitle').textContent=t;$('#mbody').innerHTML=b;$('#mfoot').innerHTML=f||'';$('#modal').classList.add('open');document.body.classList.add('modal-open')}
-function closeModal(){closeCal();$('#modal').classList.remove('open');document.body.classList.remove('modal-open');if(_renderAfterModal&&me){_renderAfterModal=false;setTimeout(()=>{if(!document.body.classList.contains('modal-open'))setPage(curPage)},0)}}
+function closeModal(){closeCal();$('#modal').classList.remove('open');document.body.classList.remove('modal-open');if(_renderAfterModal&&me){_renderAfterModal=false;setTimeout(()=>{if(!document.body.classList.contains('modal-open'))refreshCurrent()},0)}}
 (function(){const m=$('#modal');if(m)m.addEventListener('click',e=>{if(e.target.id==='modal')closeModal()})})();
 function showHelp(){openModal('ℹ️ راهنمای سامانه','<div style="font-size:13px;line-height:2.1"><b>سامانه جامع HSE فولاد تنبور</b><br>• <b>پرسنل اجرایی:</b> ثبت شبه‌حادثه، امتیاز، 5S واحد، PPE و آموزش.<br>• <b>کارشناس:</b> بررسی حوادث، آنومالی و CAPA، تحلیل، ارزیابی ریسک، مجوز کار، بازرسی، 5S، BBS.<br>• <b>مدیر:</b> تعریف کاربران، تأیید مجوزها، کنترل دسترسی، گزارش‌ها.<br><br>🔍 <b>جستجوی سراسری:</b> با دکمه 🔍 در نوار بالا یا میانبر <b>Ctrl+K</b> می‌توانید در تمام ماژول‌ها جستجو کنید.<br>🔗 <b>ارجاع به CAPA:</b> در جزئیات آنومالی یا حادثه، دکمه «ارجاع به CAPA» را بزنید.<br>✅ <b>تأیید اثربخشی:</b> پس از اجرا، مسئول تأییدکننده در جزئیات CAPA دکمه «تأیید اثربخشی» را می‌بیند.</div>','<button class="btn pri" onclick="closeModal()">متوجه شدم</button>')}
 
@@ -3855,9 +3870,9 @@ dbRef.on('value', (snapshot) => {
   if (!cloud) return;
   try {
     const sanitizedCloud = sanitizeData(cloud);
-    const localJson = JSON.stringify(db);
-    const cloudJson = JSON.stringify(sanitizedCloud);
-    if (cloudJson === localJson) return;
+    const localNorm = stableJson(sanitizeData(JSON.parse(JSON.stringify(db))));
+    const cloudNorm = stableJson(sanitizedCloud);
+    if (cloudNorm === localNorm) return;
     _isApplyingRemote = true;
     db = sanitizedCloud;
     TPLS = db.tpls || defaultTPLS();
@@ -3866,13 +3881,7 @@ dbRef.on('value', (snapshot) => {
     if (me && document.body.classList.contains('modal-open')) {
       _renderAfterModal = true;
     } else if (me) {
-      const sc = document.querySelector('.tscroll');
-      const scrollPos = sc ? sc.scrollLeft : 0;
-      setPage(curPage);
-      setTimeout(()=>{
-        const sc2 = document.querySelector('.tscroll');
-        if(sc2) sc2.scrollLeft = scrollPos;
-      }, 50);
+      refreshCurrent();
     }
   } catch(e) {
     console.warn('خطا در همگام‌سازی remote:', e);
