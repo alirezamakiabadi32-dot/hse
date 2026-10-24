@@ -2981,149 +2981,466 @@ function kpiPage(){const K=kpis();const jy=K.jy;
  return h}
 
 /* ============================================================
-   جستجوی سراسری (Global Search)
+   جستجوی سراسری هوشمند (نسخه ۲)
 ============================================================ */
+let _gsLastQuery='';
+let _gsCursor=-1;
+
+/* --- نرمال‌سازی متن فارسی برای جستجوی مقاوم --- */
+function faNormalize(s){
+  if(s==null) return '';
+  s=String(s);
+  // یکسان‌سازی ی/ي و ک/ك و ۀ/ه و أ/ا و إ/ا
+  s=s.replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/ۀ/g,'ه').replace(/أ|إ|آ/g,'ا');
+  // حذف اعراب و تنوین
+  s=s.replace(/[\u064B-\u0652\u0670]/g,'');
+  // حذف نیم‌فاصله و تبدیل به فاصله
+  s=s.replace(/\u200c/g,' ');
+  // تبدیل اعداد فارسی/عربی به لاتین
+  s=s.replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+  // یکسان‌سازی فاصله‌ها
+  s=s.replace(/\s+/g,' ').trim().toLowerCase();
+  return s;
+}
+
+/* --- ساخت رشته‌ی قابل جستجو از یک رکورد (همه فیلدها + فیلدهای محاسباتی) --- */
+function buildHaystack(kind, r){
+  if(!r) return {text:'', title:'', code:''};
+  const M=MODS[kind]||{};
+  const parts=[];
+  const titleParts=[];
+  const codeParts=[];
+  const labels={};
+  (M.fields||[]).forEach(f=>{ labels[f.k]=f.l; });
+
+  // عنوان ماژول
+  if(M.t) parts.push(M.t);
+  if(kind) parts.push(kind);
+
+  // فیلدهای تعریف‌شده
+  (M.fields||[]).forEach(f=>{
+    // فیلد gate: اگر نقش کاربر مجاز نیست، نه در های‌استک و نه در نمایش
+    if(f.gate && (!me || !f.gate.includes(me.role))) return;
+    const v=r[f.k];
+    if(v===undefined||v===null||v==='') return;
+    if(f.t==='people' && Array.isArray(v)){ parts.push(v.join(' ')); return; }
+    if(f.t==='chk'){ parts.push(f.l+' '+(v?'بله':'خیر')); return; }
+    if(f.t==='tplsel'){
+      const tname=TPLS[v]?TPLS[v].t:String(v);
+      parts.push(tname); return;
+    }
+    if(typeof v==='object'){
+      // آبجکت (مثل s5 یا analyses) — بازگشتی
+      flattenObj(v, parts);
+      return;
+    }
+    parts.push(String(v));
+    // عنوان‌های ترجیحی برای نمایش
+    if(['title','desc','act','hazard','course','job','item','name','month','topic','task','scenario','param','point','loc','equip','mode','activity','waste','title'].includes(f.k)){
+      titleParts.push(String(v));
+    }
+  });
+
+  // فیلدهای عمومی رکورد (id، code، status، ...)
+  ['id','code','status','type','effectiveness','risk','level','progress','rpn','score','createdBy','createdJ','fixedBy','verifyBy','assessor','inspBy','observer','owner','responsible','presenter','trainer','doctor','auditor','contractor','manifest','phone','hcode','std','unit','size'].forEach(kk=>{
+    if(r[kk]!==undefined && r[kk]!==null && r[kk]!=='') parts.push(String(r[kk]));
+  });
+  if(r.code) codeParts.push(String(r.code));
+
+  // فیلدهای خاص هر ماژول که در fields نیستند
+  if(kind==='incidents' && r.analyses){
+    // تحلیل حادثه
+    const a=r.analyses;
+    if(a.fishbone) Object.keys(a.fishbone).forEach(k=>{ if(a.fishbone[k]) parts.push('فیش‌بون '+k+' '+a.fishbone[k]); });
+    if(a.why) Object.keys(a.why).forEach(k=>{ if(a.why[k]) parts.push('چرا '+k+' '+a.why[k]); });
+    if(a.m4m) Object.keys(a.m4m).forEach(k=>{ if(a.m4m[k]) parts.push('۴M '+k+' '+a.m4m[k]); });
+    if(a.result){ Object.keys(a.result).forEach(k=>{ if(a.result[k]) parts.push(a.result[k]); }); }
+  }
+  if(kind==='jsa' && Array.isArray(r.steps)){
+    r.steps.forEach((s,i)=>{
+      parts.push('مرحله '+(i+1));
+      if(s.step) parts.push(s.step);
+      if(s.hazard) parts.push(s.hazard);
+      if(s.ctrl) parts.push(s.ctrl);
+      if(s.risk) parts.push(s.risk);
+    });
+  }
+  if(kind==='s5' && r.s5){
+    // نمرات 5S — فقط کلیدها و برچسب ارکان
+    const tpl=(db&&db.s5_tpls)||{};
+    Object.keys(r.s5).forEach(key=>{
+      const t=tpl[key];
+      if(t){ parts.push('S'+t.num+' '+t.name+' '+t.en); }
+      parts.push(key);
+      const vals=r.s5[key];
+      if(vals && typeof vals==='object'){ Object.values(vals).forEach(v=>parts.push(String(v))); }
+    });
+  }
+  if(kind==='inspections' && r.answers && r.tpl && TPLS[r.tpl]){
+    const t=TPLS[r.tpl];
+    Object.keys(r.answers).forEach(i=>{
+      const it=t.items[+i]; const a=r.answers[i];
+      if(it) parts.push(it+' '+(a==='ok'?'مناسب':a==='fail'?'مغایرت':'نامرتبط'));
+    });
+    if(r.fails) r.fails.forEach(f=>parts.push('مغایرت '+f));
+  }
+  if(r.log && Array.isArray(r.log)){
+    r.log.forEach(l=>{ if(l.t) parts.push('گردش کار '+l.t); if(l.u) parts.push(l.u); });
+  }
+
+  // نرمال‌سازی نهایی
+  const text=faNormalize(parts.join(' '));
+  const title=titleParts.length?titleParts[0]:'';
+  const code=codeParts.length?codeParts[0]:'';
+  return {text, title, code, labels};
+}
+
+/* --- بازگشتی: استخراج همه مقادیر از آبجکت تودرتو --- */
+function flattenObj(obj, out){
+  if(obj==null) return;
+  if(Array.isArray(obj)){ obj.forEach(x=>flattenObj(x,out)); return; }
+  if(typeof obj==='object'){ Object.keys(obj).forEach(k=>{ out.push(k); flattenObj(obj[k],out); }); return; }
+  out.push(String(obj));
+}
+
+/* --- رتبه‌بندی تطابق برای یک کوئری چندکلمه‌ای --- */
+function scoreMatch(hay, queryWords, title, code){
+  if(!hay || !queryWords.length) return 0;
+  let total=0;
+  const titleNorm=faNormalize(title||'');
+  const codeNorm=faNormalize(code||'');
+  for(const w of queryWords){
+    if(!w) continue;
+    const idx=hay.indexOf(w);
+    if(idx<0) return -1; // همه کلمات باید باشند (AND)
+    // امتیاز پایه
+    let s=1;
+    // کلمه در عنوان
+    if(titleNorm && titleNorm.indexOf(w)>=0) s+=10;
+    // کلمه در کد
+    if(codeNorm && codeNorm.indexOf(w)>=0) s+=15;
+    // تطابق دقیق کل رشته
+    if(hay===w) s+=20;
+    // تطابق ابتدای کلمه (word boundary)
+    const re=new RegExp('(^|\\s)'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i');
+    if(re.test(hay)) s+=5;
+    // تطابق چندباره
+    const cnt=(hay.match(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'g'))||[]).length;
+    if(cnt>1) s+=Math.min(cnt,5);
+    total+=s;
+  }
+  return total;
+}
+
+/* --- برش متن اطراف محل تطابق برای پیش‌نمایش --- */
+function snippetAround(text, queryWords, len){
+  len=len||90;
+  if(!text) return '';
+  const lower=text;
+  let bestIdx=-1, bestW='';
+  for(const w of queryWords){
+    if(!w) continue;
+    const i=lower.indexOf(w);
+    if(i>=0 && (bestIdx<0 || i<bestIdx)){ bestIdx=i; bestW=w; }
+  }
+  if(bestIdx<0) return text.slice(0,len);
+  const start=Math.max(0, bestIdx-Math.floor(len/3));
+  const end=Math.min(text.length, bestIdx+len);
+  let out=text.slice(start,end);
+  if(start>0) out='…'+out;
+  if(end<text.length) out=out+'…';
+  return out;
+}
+
+/* --- فیلتر کردن فیلدهای gate در نمایش عنوان --- */
+function safeTitleOf(kind, r){
+  const M=MODS[kind]||{};
+  const pick=['title','desc','act','hazard','course','job','item','name','month','topic','task','scenario','param','point','loc','equip','mode','activity','waste','phone','code'];
+  for(const key of pick){
+    const f=(M.fields||[]).find(x=>x.k===key);
+    if(f && f.gate && (!me || !f.gate.includes(me.role))) continue;
+    const v=r[key];
+    if(v && String(v).trim()) return String(v).slice(0,120);
+  }
+  if(r.code) return r.code;
+  return r.id||'';
+}
+
+/* --- باز کردن پنجره جستجو --- */
 function openGlobalSearch(){
   if(!me){toast('ابتدا وارد شوید');return}
-  openModal('🔍 جستجوی سراسری',
+  _gsLastQuery='';
+  _gsCursor=-1;
+  _gsResults=[];
+  openModal('🔍 جستجوی سراسری هوشمند',
     '<div class="ff wide" style="margin-bottom:8px">'+
-    '<input id="gsInput" class="in" style="font-size:16px;padding:12px" placeholder="نام، کد، شرح، واحد، مسئول..." autocomplete="off" oninput="globalSearchDo(this.value)">'+
+    '<input id="gsInput" class="in" style="font-size:16px;padding:12px" placeholder="نام، کد، شرح، واحد، مسئول، تحلیل، مرحله JSA، نمره 5S..." autocomplete="off" oninput="globalSearchDo(this.value)" onkeydown="gsKey(event)">'+
     '</div>'+
-    '<div id="gsResults" style="margin-top:6px"><div style="color:var(--mut);font-size:12.5px;padding:12px;text-align:center">حداقل ۲ کاراکتر تایپ کنید...</div></div>',
-    '<button class="btn ghost" onclick="closeModal()">بستن</button>');
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+
+    '<span style="font-size:11px;color:var(--mut)">جستجوی سریع:</span>'+
+    ['حادثه','آنومالی','CAPA','مجوز کار','ریسک','FMEA','JSA','LEC','بازرسی','5S','آموزش','TBT','BBS'].map(t=>'<button type="button" class="qc" style="padding:4px 10px;font-size:10.5px" onclick="gsQuick(\''+t+'\')">'+t+'</button>').join('')+
+    '</div>'+
+    '<div id="gsResults" style="margin-top:6px"><div style="color:var(--mut);font-size:12.5px;padding:12px;text-align:center">حداقل ۲ کاراکتر تایپ کنید — جستجو در همه ماژول‌ها و فیلدها انجام می‌شود</div></div>',
+    '<button class="btn ghost" onclick="closeModal()">بستن</button>'+
+    '<span style="font-size:11px;color:var(--mut);margin-right:auto;align-self:center">Ctrl+K برای بازکردن • Enter برای اولین نتیجه</span>');
   setTimeout(()=>{const i=document.getElementById('gsInput');if(i){i.focus();i.select()}},80);
 }
 
+function gsQuick(term){
+  const i=document.getElementById('gsInput');
+  if(i){ i.value=term; globalSearchDo(term); i.focus(); }
+}
+
+/* --- ناوبری با کیبورد در نتایج --- */
+function gsKey(e){
+  if(e.key==='ArrowDown'){
+    e.preventDefault();
+    _gsCursor=Math.min(_gsResults.length-1, _gsCursor+1);
+    gsHighlight();
+  } else if(e.key==='ArrowUp'){
+    e.preventDefault();
+    _gsCursor=Math.max(-1, _gsCursor-1);
+    gsHighlight();
+  } else if(e.key==='Enter'){
+    e.preventDefault();
+    if(_gsResults.length){
+      const idx=_gsCursor>=0?_gsCursor:0;
+      gsOpen(idx);
+    }
+  } else if(e.key==='Escape'){
+    closeModal();
+  }
+}
+
+function gsHighlight(){
+  document.querySelectorAll('#gsResults .gs-item').forEach((el,i)=>{
+    el.style.background = (i===_gsCursor)?'#fff7ed':'';
+    if(i===_gsCursor) el.scrollIntoView({block:'nearest'});
+  });
+}
+
+/* --- موتور جستجو --- */
 function globalSearchDo(q){
-  q=String(q||'').trim().toLowerCase();
+  q=String(q||'').trim();
+  _gsLastQuery=q;
+  _gsCursor=-1;
   const w=document.getElementById('gsResults');
   if(!w) return;
-  if(q.length<2){
+
+  const normQuery=faNormalize(q);
+  const queryWords=normQuery.split(' ').filter(Boolean);
+
+  if(queryWords.length===0 || q.length<2){
     w.innerHTML='<div style="color:var(--mut);font-size:12.5px;padding:12px;text-align:center">حداقل ۲ کاراکتر تایپ کنید...</div>';
     _gsResults=[];
     return;
   }
+
   clearTimeout(_gsTimer);
   _gsTimer=setTimeout(function(){
     try{
       const out=[];
-      // 1) جستجو در عنوان ماژول‌ها — اگر کاربر "آنومالی" زد، همه رکوردهای unsafe را نشان بده
-      const moduleMatches=[];
+
+      /* ۱) جستجو در همه رکوردهای همه ماژول‌ها */
       Object.keys(MODS).forEach(function(k){
         if(!canView(k)) return;
         const M=MODS[k];
-        const modText=(M.t+' '+M.i+' '+k).toLowerCase();
-        if(modText.indexOf(q)>=0){
-          moduleMatches.push(k);
+        const list=(db[k]||[]);
+        list.forEach(function(r){
+          if(!r || !r.id) return;
+          const h=buildHaystack(k, r);
+          const sc=scoreMatch(h.text, queryWords, h.title, h.code);
+          if(sc<0) return;
+          out.push({
+            kind:k,
+            rec:r,
+            icon:M.i,
+            moduleLabel:M.t,
+            title:safeTitleOf(k, r),
+            sub:gsSubOf(k, r),
+            snippet:snippetAround(h.text, queryWords, 110),
+            score:sc,
+            moduleHit:false,
+            type:'record'
+          });
+        });
+      });
+
+      /* ۲) جستجو در افراد (به‌عنوان نتیجه مرجع) */
+      (db.personnel||[]).forEach(function(p){
+        const hay=faNormalize([p.name,p.job,p.area,p.role,p.u].filter(Boolean).join(' '));
+        const sc=scoreMatch(hay, queryWords, p.name, '');
+        if(sc<0) return;
+        out.push({
+          kind:'_person',
+          rec:p,
+          icon:'👤',
+          moduleLabel:'پرسنل',
+          title:p.name,
+          sub:(p.job||'')+' • '+((ROLE_CHIP[p.role]&&ROLE_CHIP[p.role][0])||p.role||'')+' • '+(p.area||''),
+          snippet:snippetAround(hay, queryWords, 100),
+          score:sc,
+          moduleHit:false,
+          type:'person'
+        });
+      });
+
+      /* ۳) جستجو در واحدها */
+      (db.areas||[]).forEach(function(a){
+        const hay=faNormalize(a);
+        if(queryWords.every(w=>hay.indexOf(w)>=0)){
+          out.push({
+            kind:'_area', rec:{id:'area:'+a, name:a}, icon:'🏭', moduleLabel:'واحدها',
+            title:a, sub:'واحد سازمانی', snippet:hay, score:5, moduleHit:false, type:'area'
+          });
         }
       });
-      // 2) جستجو در محتوای رکوردها (با احتساب نام فیلدها)
+
+      /* ۴) جستجو در لیست‌های پویا (گزینه‌ها) */
+      if(db.lists){
+        Object.keys(db.lists).forEach(function(lk){
+          (db.lists[lk]||[]).forEach(function(v){
+            const hay=faNormalize(v+' '+lk);
+            if(queryWords.every(w=>hay.indexOf(w)>=0)){
+              out.push({
+                kind:'_list', rec:{id:'list:'+lk+':'+v, name:v, list:lk}, icon:'📚', moduleLabel:'لیست '+lk,
+                title:v, sub:'از لیست '+lk, snippet:hay, score:4, moduleHit:false, type:'list'
+              });
+            }
+          });
+        });
+      }
+
+      /* ۵) اگر کوئری با عنوان ماژول مطابقت داشت، همه رکوردهای آن ماژول هم بیایند */
       Object.keys(MODS).forEach(function(k){
         if(!canView(k)) return;
         const M=MODS[k];
-        const list=db[k]||[];
-        const fieldLabels={};
-        (M.fields||[]).forEach(function(f){ fieldLabels[f.k]=f.l; });
-        list.forEach(function(r){
-          if(!r) return;
-          // ساخت متن قابل جستجو: مقادیر + نام فیلدها + عنوان ماژول
-          const parts=[];
-          parts.push(M.t); // عنوان ماژول
-          (M.fields||[]).forEach(function(f){
-            const v=r[f.k];
-            if(v===undefined||v===null||v==='') return;
-            if(f.t==='people' && Array.isArray(v)){ parts.push(v.join(' ')); return; }
-            if(f.t==='chk'){ parts.push(f.l+' '+(v?'بله':'خیر')); return; }
-            parts.push(String(v));
+        const modText=faNormalize(M.t+' '+k);
+        if(queryWords.every(w=>modText.indexOf(w)>=0)){
+          (db[k]||[]).forEach(function(r){
+            if(!r||!r.id) return;
+            if(out.some(x=>x.kind===k && x.rec.id===r.id)) return;
+            out.push({
+              kind:k, rec:r, icon:M.i, moduleLabel:M.t,
+              title:safeTitleOf(k,r), sub:gsSubOf(k,r),
+              snippet:'', score:1, moduleHit:true, type:'record'
+            });
           });
-          // فیلدهای خاص
-          ['id','code','status','type','effectiveness','risk','level','progress','rpn','score'].forEach(function(kk){
-            if(r[kk]!==undefined && r[kk]!==null && r[kk]!=='') parts.push(String(r[kk]));
-          });
-          const hay=parts.join(' ').toLowerCase();
-          if(hay.indexOf(q)>=0){
-            out.push({kind:k, rec:r, label:M.i+' '+M.t, icon:M.i, moduleHit:moduleMatches.indexOf(k)>=0});
-          }
-        });
+        }
       });
-      // 3) اگر جستجو با عنوان ماژول مطابقت داشت، همه رکوردهای آن ماژول را هم اضافه کن (بدون تکرار)
-      moduleMatches.forEach(function(k){
-        if(!canView(k)) return;
-        const M=MODS[k];
-        const list=db[k]||[];
-        list.forEach(function(r){
-          if(!r) return;
-          if(out.some(function(x){return x.kind===k && x.rec.id===r.id;})) return;
-          out.push({kind:k, rec:r, label:M.i+' '+M.t, icon:M.i, moduleHit:true});
-        });
-      });
-      // مرتب‌سازی: ابتدا مواردی که در ماژول مطابقت دارند یا جدیدترند
+
+      /* مرتب‌سازی: امتیاز نزولی، سپس تاریخ نزولی */
       out.sort(function(a,b){
-        if(a.moduleHit!==b.moduleHit) return a.moduleHit?-1:1;
-        return String(b.rec.date||b.rec.createdJ||'').localeCompare(String(a.rec.date||a.rec.createdJ||''));
+        if(b.score!==a.score) return b.score-a.score;
+        return String(b.rec.date||b.rec.createdJ||b.rec.month||'').localeCompare(String(a.rec.date||a.rec.createdJ||a.rec.month||''));
       });
-      _gsResults=out.slice(0,80);
+
+      _gsResults=out.slice(0,120);
+
       if(!_gsResults.length){
-        w.innerHTML='<div style="color:var(--mut);font-size:12.5px;padding:12px;text-align:center">نتیجه‌ای یافت نشد</div>';
+        w.innerHTML='<div style="color:var(--mut);font-size:12.5px;padding:16px;text-align:center">نتیجه‌ای برای «'+esc(q)+'» یافت نشد</div>';
         return;
       }
-      // اگر فقط با عنوان ماژول مطابقت داشت، پیام توضیحی نشان بده
-      let infoMsg='';
-      if(moduleMatches.length && !_gsResults.some(function(x){return !x.moduleHit;})){
-        const modNames=moduleMatches.map(function(k){return MODS[k].i+' '+MODS[k].t;}).join('، ');
-        infoMsg='<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px;font-size:11.5px;color:#7c2d12;margin-bottom:8px">📌 نتایج شامل همه موارد ماژول: <b>'+esc(modNames)+'</b></div>';
-      }
-      let html='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">'+nd(out.length)+' نتیجه'+(out.length>80?' — نمایش ۸۰ مورد نخست':'')+'</div>';
-      html+=infoMsg;
-      html+='<div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:10px">';
-      _gsResults.forEach(function(x,i){
-        const title=gsTitleOf(x.kind,x.rec);
-        const sub=gsSubOf(x.kind,x.rec);
-        const badge=x.moduleHit?'<span class="chip b-org" style="font-size:9.5px">ماژول</span>':'';
-        html+='<div class="list-row" style="padding:10px 12px;flex-wrap:wrap;row-gap:2px" onclick="gsOpen('+i+')">';
-        html+='<span style="flex:0 0 auto;font-size:18px">'+x.icon+'</span>';
-        html+='<div style="flex:1;min-width:0">';
-        html+='<div class="lt" style="white-space:normal;line-height:1.6"><b style="font-size:12.5px">'+esc(title)+'</b> '+badge+'</div>';
-        html+='<div style="font-size:11px;color:var(--mut)">'+esc(sub)+'</div>';
-        html+='</div>';
-        html+='<span class="chip b-mut" style="direction:ltr;font-family:monospace;font-size:10.5px">'+esc(x.rec.id||'')+'</span>';
-        html+='</div>';
-      });
-      html+='</div>';
+
+      // اطلاعات
+      let html='<div style="font-size:12px;color:var(--mut);margin-bottom:6px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px">'+
+        '<span>'+nd(out.length)+' نتیجه'+(out.length>120?' — نمایش ۱۲۰ مورد نخست':'')+'</span>'+
+        '<span>کلمات: '+queryWords.map(x=>'<span class="chip b-org" style="font-size:10px">'+esc(x)+'</span>').join(' ')+'</span>'+
+      '</div>';
+
+      // گروه‌بندی بر اساس نوع
+      const groups={record:[],person:[],area:[],list:[]};
+      _gsResults.forEach(function(x){ groups[x.type].push(x); });
+
+      const renderGroup=function(label, items, icon){
+        if(!items.length) return '';
+        let g='<div style="font-size:11.5px;font-weight:700;color:var(--pri2);margin:10px 4px 4px">'+icon+' '+label+' ('+nd(items.length)+')</div>';
+        g+='<div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">';
+        items.forEach(function(x){
+          const globalIdx=_gsResults.indexOf(x);
+          const histChip=x.moduleHit?'<span class="chip b-org" style="font-size:9.5px">ماژول</span>':'';
+          g+='<div class="list-row gs-item" data-idx="'+globalIdx+'" style="padding:10px 12px;flex-wrap:wrap;row-gap:2px;border-bottom:1px solid #f1f5f9;cursor:pointer" onclick="gsOpen('+globalIdx+')">';
+          g+='<span style="flex:0 0 auto;font-size:18px">'+x.icon+'</span>';
+          g+='<div style="flex:1;min-width:0">';
+          g+='<div style="white-space:normal;line-height:1.6"><b style="font-size:12.5px">'+esc(x.title||'')+'</b> '+histChip+' <span class="chip b-mut" style="font-size:9.5px">'+esc(x.moduleLabel||'')+'</span></div>';
+          if(x.sub) g+='<div style="font-size:11px;color:var(--mut);margin-top:2px">'+esc(x.sub)+'</div>';
+          if(x.snippet && x.type==='record') g+='<div style="font-size:10.5px;color:#64748b;margin-top:3px;background:#f8fafc;padding:3px 6px;border-radius:5px;direction:ltr;text-align:left;max-height:38px;overflow:hidden">'+esc(x.snippet)+'</div>';
+          g+='</div>';
+          g+='<span class="chip b-mut" style="direction:ltr;font-family:monospace;font-size:10.5px;flex:0 0 auto">'+esc(x.rec.id||'')+'</span>';
+          g+='</div>';
+        });
+        g+='</div>';
+        return g;
+      };
+
+      html+=renderGroup('رکوردهای ماژول‌ها', groups.record, '📋');
+      html+=renderGroup('پرسنل', groups.person, '👤');
+      html+=renderGroup('واحدها', groups.area, '🏭');
+      html+=renderGroup('گزینه‌های لیست', groups.list, '📚');
+
       w.innerHTML=html;
     }catch(err){
       w.innerHTML='<div style="color:var(--bad);font-size:12px;padding:12px;text-align:center">خطا در جستجو: '+esc(err.message)+'</div>';
+      console.error(err);
     }
-  },180);
+  }, 180);
 }
 
-function gsTitleOf(k,r){
-  const pick=['title','desc','act','hazard','course','job','item','name','month','code','topic','task','type','scenario','param','point'];
-  for(const key of pick){
-    if(r[key]&&String(r[key]).trim()) return String(r[key]).slice(0,120);
-  }
-  if(r.code) return r.code+' — '+(r.desc||'');
-  return (r.id||'');
-}
-
+/* --- زیرنویس نتیجه --- */
 function gsSubOf(k,r){
   const parts=[];
   if(r.code) parts.push('کد: '+r.code);
   if(r.date) parts.push('تاریخ: '+r.date);
+  if(r.month) parts.push('ماه: '+r.month);
   if(r.area) parts.push(r.area);
   if(r.owner) parts.push('مسئول: '+r.owner);
   if(r.person) parts.push(r.person);
+  if(r.assessor) parts.push('ارزیاب: '+r.assessor);
   if(r.status) parts.push('وضعیت: '+r.status);
+  if(r.risk) parts.push('خطر: '+r.risk);
+  if(r.type) parts.push(r.type);
+  if(r.job) parts.push(r.job);
+  if(r.course) parts.push(r.course);
   return parts.join(' • ');
 }
 
+/* --- باز کردن نتیجه --- */
 function gsOpen(i){
   const x=_gsResults[i];
   if(!x) return;
   closeModal();
-  setTimeout(()=>openDetail(x.kind,x.rec.id),80);
+  setTimeout(function(){
+    if(x.type==='person'){
+      // پروفایل شخص: جستجوی نام او در ماژول‌ها
+      const name=x.rec.name;
+      const input=document.getElementById('gsInput');
+      // باز کردن صفحه‌ای که به این شخص مربوط است
+      const hits=[];
+      if(db.incidents.some(r=>r.createdBy===name||r.injured===name)) hits.push('incidents');
+      if(db.unsafe.some(r=>r.observer===name||r.responsible===name)) hits.push('unsafe');
+      if(db.actions.some(r=>r.owner===name||r.verify===name)) hits.push('actions');
+      if(db.ppeTx.some(r=>r.person===name)) hits.push('ppeTx');
+      if(db.trainings.some(r=>(r.people||[]).includes(name))) hits.push('trainings');
+      if(db.medical.some(r=>r.person===name)) hits.push('medical');
+      if(hits.length){ setPage(hits[0]); toast('نخستین بخش مرتبط با «'+name+'»: '+MODS[hits[0]].t); }
+      else { toast('رکورد مستقیمی برای «'+name+'» یافت نشد'); }
+      return;
+    }
+    if(x.type==='area'){
+      setPage('settings'); toast('واحد «'+x.rec.name+'» در تنظیمات قابل مدیریت است');
+      return;
+    }
+    if(x.type==='list'){
+      toast('گزینه «'+x.rec.name+'» از لیست '+x.rec.list);
+      setPage('settings');
+      return;
+    }
+    // رکورد عادی
+    openDetail(x.kind, x.rec.id);
+  }, 80);
 }
 
+/* --- میانبر Ctrl+K --- */
 document.addEventListener('keydown',function(e){
   if((e.ctrlKey||e.metaKey)&&(e.key==='k'||e.key==='K')){
     e.preventDefault();
