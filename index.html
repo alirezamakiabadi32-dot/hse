@@ -397,6 +397,7 @@ html{-webkit-text-size-adjust:100%}
 </style>
 </head>
 <body>
+<body>
 
 <div id="login">
  <div class="lbox">
@@ -511,8 +512,33 @@ function _sha256Hex(str){
   }
   return H.map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
 }
-function hashPw(username, pw){ return _sha256Hex(String(username||'').toLowerCase()+':'+String(pw||'')); }
+const PW_ITER = 210000;
+function _pwCryptoOk(){ return !!(window.crypto && crypto.subtle); }
+function _b64(u){ let s=''; u.forEach(b=>s+=String.fromCharCode(b)); return btoa(s); }
+function _unb64(str){ return Uint8Array.from(atob(str), c=>c.charCodeAt(0)); }
+async function _pbkdf2(text, salt, iter){
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(text), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({name:'PBKDF2', salt, iterations:iter, hash:'SHA-256'}, key, 256);
+  return new Uint8Array(bits);
+}
+function _pwText(username, pw){ return String(username||'').toLowerCase()+':'+String(pw||''); }
+/* فرمت ذخیره: pbkdf2$<iterations>$<salt>$<hash> */
+async function hashPw(username, pw){
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const h = await _pbkdf2(_pwText(username,pw), salt, PW_ITER);
+  return 'pbkdf2$'+PW_ITER+'$'+_b64(salt)+'$'+_b64(h);
+}
+async function verifyPw(stored, username, pw){
+  const parts = String(stored).split('$');
+  if(parts.length!==4 || parts[0]!=='pbkdf2') return false;
+  const iter = parseInt(parts[1],10);
+  const h = await _pbkdf2(_pwText(username,pw), _unb64(parts[2]), iter);
+  return _b64(h) === parts[3];
+}
+function isPbkdf2(v){ return String(v||'').startsWith('pbkdf2$'); }
+/* قالب قدیمی SHA-256 (فقط برای تأیید و مهاجرت حساب‌های قدیمی) */
 function isHashedPw(v){ return /^[0-9a-f]{64}$/.test(String(v||'')); }
+function legacyHashPw(username, pw){ return _sha256Hex(_pwText(username,pw)); }
 
 /* ---------- لیست‌های پویا ---------- */
 const DEFAULT_LISTS = {
@@ -771,7 +797,7 @@ let _saveRetryCount = 0;
 let _lastCloudSync = 0;
 let _cloudConnected = false;
 const SAVE_DEBOUNCE_MS = 800;
-const RETRY_DELAYS = [1000, 3000, 8000, 20000];
+const RETRY_DELAYS = [1000, 3000, 8000, 20000, 60000];
 
 const RECORD_MODS=['personnel','incidents','unsafe','actions','risks','fmea','jsa','lec','inspections','ptw','ppeCat','ppeTx','trainings','hours','healthExp','medical','envWaste','envMon','chem','contacts','drills','emgEquip','toolbox','tbm','bbs','audits','docs','announce','s5','loto','moc','equipCert','confined','heightWork','legalReport','legalReg'];
 let _seqCounter = 0;
@@ -781,6 +807,7 @@ let _dirtyRecs = {};
 function queueModule(moduleName){
   if(!moduleName) return;
   _pendingModules[moduleName] = ++_seqCounter;
+  _persistSync();
 }
 /* ثبت تغییر فقط یک رکورد — جلوی بازنویسی تغییرات همکاران را می‌گیرد */
 function queueRec(moduleName, id){
@@ -788,6 +815,7 @@ function queueRec(moduleName, id){
   if(!id || RECORD_MODS.indexOf(moduleName)<0) return queueModule(moduleName);
   if(!_dirtyRecs[moduleName]) _dirtyRecs[moduleName] = {};
   _dirtyRecs[moduleName][id] = ++_seqCounter;
+  _persistSync();
 }
 function queueDelete(moduleName){ queueModule(moduleName); }
 function hasPendingChanges(){
@@ -800,28 +828,85 @@ function _idMap(arr){
 }
 function _clean(v){ return JSON.parse(JSON.stringify(v===undefined?null:v)); }
 
+const SYNC_KEY = LS+'_sync';
+const SENSITIVE_MODS = ['medical','healthExp'];   // داده‌های پزشکی هرگز در کش مرورگر نمی‌مانند
+let _cacheErrShown = false;
+function cacheDb(){
+  try{
+    const c = Object.assign({}, db);
+    SENSITIVE_MODS.forEach(m=>{ delete c[m]; });
+    localStorage.setItem(LS, JSON.stringify(c));
+    _cacheErrShown = false;
+  }catch(e){
+    console.warn('کش محلی ذخیره نشد:', e);
+    if(!_cacheErrShown){ _cacheErrShown = true; toast('⚠️ حافظهٔ مرورگر پر است؛ داده‌ها فقط در ابر ذخیره می‌شوند'); }
+  }
+}
+let _base = {};   // آخرین وضعیت شناخته‌شدهٔ ابر برای ماژول‌های رکوردی: {ماژول:{id:json}}
+let _lastCloudNorm = null;
+let _missedRemote = false;
+function _newId(p){ return p+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8).toUpperCase(); }
+function _recMap(m){
+  const o={};
+  (db[m]||[]).forEach(r=>{
+    if(!r || typeof r!=='object') return;
+    if(!r.id) r.id=_newId(m);
+    o[r.id]=JSON.stringify(r);
+  });
+  return o;
+}
+function _baseFrom(data){
+  const b={};
+  RECORD_MODS.forEach(m=>{
+    const arr = Array.isArray(data[m]) ? data[m] : Object.values(data[m]||{});
+    const o={};
+    arr.forEach(r=>{ if(r && r.id) o[r.id]=JSON.stringify(r); });
+    b[m]=o;
+  });
+  return b;
+}
+function _persistSync(){
+  try{
+    // تغییرات داده‌های پزشکی روی دستگاه ذخیره نمی‌شوند (در همین نشست ارسال می‌شوند)
+    const keep = m => SENSITIVE_MODS.indexOf(m)<0;
+    const pm={}, dr={}, base={};
+    Object.keys(_pendingModules).filter(keep).forEach(m=>{ pm[m]=_pendingModules[m]; });
+    Object.keys(_dirtyRecs).filter(keep).forEach(m=>{ dr[m]=_dirtyRecs[m]; });
+    const mods = [...Object.keys(pm), ...Object.keys(dr)];
+    if(!mods.length){ localStorage.removeItem(SYNC_KEY); return; }
+    mods.forEach(m=>{ if(_base[m]) base[m]=_base[m]; });
+    localStorage.setItem(SYNC_KEY, JSON.stringify({pm, dr, base}));
+  }catch(e){console.warn(e)}
+}
+
 function _buildUpdatePayload(snapP, snapD){
   const updates={};
+  const cur={};
   Object.keys(snapP).forEach(m=>{
     if(db[m]===undefined) return;
-    if(Array.isArray(db[m])){
+    if(RECORD_MODS.indexOf(m)>=0){
+      // فقط رکوردهایی ارسال می‌شوند که با آخرین وضعیت شناخته‌شدهٔ ابر فرق دارند
+      // تا رکوردهای جدیدتر همکاران بازنویسی نشوند
+      const now=_recMap(m); cur[m]=now;
+      const base=_base[m]||{};
+      Object.keys(now).forEach(id=>{ if(base[id]!==now[id]) updates[m+'/'+id]=JSON.parse(now[id]); });
+      Object.keys(base).forEach(id=>{ if(!(id in now)) updates[m+'/'+id]=null; });
+    } else if(Array.isArray(db[m])){
       if(!db[m].length) updates[m]=null;
-      else if(RECORD_MODS.indexOf(m)>=0) updates[m]=_clean(_idMap(db[m]));
       else { const obj={}; db[m].forEach((it,i)=>{ obj[i]=it; }); updates[m]=_clean(obj); }
     } else {
       updates[m]=_clean(db[m]);
     }
   });
   Object.keys(snapD).forEach(m=>{
-    if(updates[m]!==undefined) return;
-    const rows=db[m]||[];
+    if(RECORD_MODS.indexOf(m)<0 || cur[m]) return;
+    const now=_recMap(m); cur[m]=now;
     Object.keys(snapD[m]).forEach(id=>{
-      const rec=rows.find(x=>x&&x.id===id);
-      updates[m+'/'+id] = rec ? _clean(rec) : null;
+      updates[m+'/'+id] = (id in now) ? JSON.parse(now[id]) : null;
     });
   });
   if(Object.keys(updates).length) updates.seq=_clean(db.seq||{});
-  return updates;
+  return {updates, cur};
 }
 
 async function _flushDelta(){
@@ -836,11 +921,14 @@ async function _flushDelta(){
 
   const snapP = Object.assign({}, _pendingModules);
   const snapD = JSON.parse(JSON.stringify(_dirtyRecs));
+  let cur={};
   try {
-    const updates = _buildUpdatePayload(snapP, snapD);
-    if(Object.keys(updates).length){
-      await dbRef.update(updates);
+    const built = _buildUpdatePayload(snapP, snapD);
+    cur = built.cur;
+    if(Object.keys(built.updates).length){
+      await dbRef.update(built.updates);
     }
+    Object.keys(cur).forEach(m=>{ _base[m]=cur[m]; });
     /* فقط مواردی پاک می‌شوند که همین‌جا ارسال شده‌اند؛ تغییراتی که در حین ارسال ثبت شدند می‌مانند */
     Object.keys(snapP).forEach(m=>{ if(_pendingModules[m]===snapP[m]) delete _pendingModules[m]; });
     Object.keys(snapD).forEach(m=>{
@@ -850,6 +938,8 @@ async function _flushDelta(){
     });
     ok=true;
     _saveRetryCount = 0;
+    _persistSync();
+    if(!hasPendingChanges() && _missedRemote){ _missedRemote=false; _pullCloud(); }
     _cloudConnected = true;
     _lastCloudSync = Date.now();
     if(indicator) indicator.className = 'sync-indicator ok';
@@ -870,7 +960,7 @@ async function _flushDelta(){
 
 function save(opts){
   opts = opts || {};
-  try { localStorage.setItem(LS, JSON.stringify(db)); } catch(e){}
+  cacheDb();
   clearTimeout(_saveTimer);
   if(opts.immediate){
     _flushDelta();
@@ -996,7 +1086,7 @@ function drawCal(){
 }
 function calNav(dm,dy){calJm+=dm;calJy+=dy;if(calJm>12){calJm=1;calJy++}if(calJm<1){calJm=12;calJy--}drawCal()}
 function calToday(){const j=jParts(todayJ())||g2j(new Date().getFullYear(),new Date().getMonth()+1,new Date().getDate());calJy=j.jy;calJm=j.jm;drawCal()}
-function calPick(d){if(calInput){calInput.value=calJy+'/'+p2(calJm)+'/'+p2(d);try{calInput.dispatchEvent(new Event('input'))}catch(e){}}closeCal()}
+function calPick(d){if(calInput){calInput.value=calJy+'/'+p2(calJm)+'/'+p2(d);try{calInput.dispatchEvent(new Event('input'))}catch(e){console.warn(e)}}closeCal()}
 document.addEventListener('mousedown',function(e){if(calEl&&calInput&&e.target!==calInput&&!calInput.contains(e.target)&&!calEl.contains(e.target))closeCal()},true);
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeCal();closeBell()}});
 window.addEventListener('resize',function(){calRepos()});
@@ -1099,7 +1189,7 @@ function s5GlobalStats(){
   return {latest, avg, bands, perS, trend, total:rows.length, monthCount: rows.filter(r=>mKey(r.date)===curMonth).length};
 }
 
-function uid(p){db.seq[p]=(db.seq[p]||0)+1;return p+'-'+String(db.seq[p]).padStart(4,'0')+'-'+Math.random().toString(36).slice(2,5).toUpperCase()}
+function uid(p){db.seq[p]=(db.seq[p]||0)+1;return p+'-'+String(db.seq[p]).padStart(4,'0')+'-'+Math.random().toString(36).slice(2,8).toUpperCase()}
 function lvlName(sc){return sc<=4?'کم':sc<=9?'متوسط':sc<=15?'بالا':'بحرانی'}
 function lvlClass(sc){return sc<=4?'b-ok':sc<=9?'b-warn':sc<=15?'b-org':'b-bad'}
 const lvlChip=sc=>sc?'<span class="chip '+lvlClass(sc)+'">'+lvlName(sc)+' ('+nd(sc)+')</span>':'—';
@@ -1681,7 +1771,15 @@ s5:{t:'ارزیابی 5S (نظام آراستگی محیط کار)',i:'🏭',
 const FN={
  level:r=>lvlChip((+r.s||0)*(+r.p||0)),
  level2:r=>{const s=+r.rs||0,p=+r.rp||0;return (s&&p)?lvlChip(s*p):'—'},
- score:r=>(r.fails&&r.fails.length)?'<span class="chip b-bad">'+nd(r.fails.length)+' مغایرت</span>':'<span class="chip b-ok">منطبق ۱۰۰٪</span>',
+  score:r=>{
+   if(r.answers && typeof inspStats==='function'){
+    const st=inspStats(r);
+    if(st.critFail) return '<span class="chip b-bad">ناقص — مغایرت بحرانی</span>';
+    const c=st.score>=90?'b-ok':st.score>=70?'b-warn':'b-bad';
+    return '<span class="chip '+c+'">'+nd(st.score)+'٪'+(st.fail?' — '+nd(st.fail)+' مغایرت':'')+'</span>';
+   }
+   return (r.fails&&r.fails.length)?'<span class="chip b-bad">'+nd(r.fails.length)+' مغایرت</span>':'<span class="chip b-ok">منطبق ۱۰۰٪</span>';
+  },
  cnt:r=>'<span class="chip b-info">'+nd((r.people||[]).length)+' نفر</span>',
  due:r=>{if(!r.val||r.val==='0')return '<span class="chip b-mut">دائمی</span>';const d=jAddM(r.date,r.val);if(!d)return '—';const left=-jDaysAgo(d);return left<0?'<span class="chip b-bad">منقضی</span>':left<45?'<span class="chip b-warn">'+nd(left)+' روز مانده</span>':'<span class="chip b-ok">'+d+'</span>'},
  stockchip:r=>(+r.stock||0)<=(+r.min||0)?'<span class="chip b-bad">کمبود موجودی</span>':'<span class="chip b-ok">کافی</span>',
@@ -1747,7 +1845,7 @@ function seed(){
  const d={areas:DEFAULT_LISTS.AREAS0.slice(),tpls:defaultTPLS(),s5_tpls:defaultS5TPLS(),scoreArch:[],scoreRules:defaultScoreRules(),permissions:defaultPerms(),lists:{},s5:[],fmea:[],jsa:[],lec:[]};
  Object.keys(DEFAULT_LISTS).forEach(k=>d.lists[k]=DEFAULT_LISTS[k].slice());
  const PS=[['علی رضایی','اپراتور کوره','سالن ذوب','worker','worker'],['حسین کریمی','قالب‌ساز','قالب‌سازی و مولر','worker','hossein'],['مهدی احمدی','ریخته‌گر','ریخته‌گری مذاب','worker','mehdi'],['رضا موسوی','اپراتور سندبلاست','سندبلاست و تمیزکاری','worker','reza'],['جواد نوری','جوشکار','برش و جوشکاری','worker','javad'],['سعید قاسمی','اپراتور مولر','قالب‌سازی و مولر','worker','saeed'],['امیر حیدری','اپراتور جرثقیل','سالن ذوب','worker','amir'],['محمد صادقی','انباردار','انبار مواد و کک','worker','mohammad'],['نرگس شریفی','کارشناس آزمایشگاه','آزمایشگاه','worker','narges'],['فاطمه یوسفی','مسئول اداری','اداری و رفاهی','worker','fateme'],['حسن عباسی','تعمیرکار مکانیک','تأسیسات','worker','hasan'],['ایمان توکلی','برقکار','تأسیسات','worker','iman'],['سارا محمدی','کارشناس HSE','اداری و رفاهی','expert','expert'],['رضا کریمی','مدیر کارخانه','اداری و رفاهی','manager','manager']];
- d.personnel=PS.map(x=>({id:uid('USR'),name:x[0],job:x[1],area:x[2],role:x[3],u:x[4],p:hashPw(x[4],'1234')}));
+ d.personnel=PS.map(x=>({id:uid('USR'),name:x[0],job:x[1],area:x[2],role:x[3],u:x[4],p:'1234'}));
  Object.keys(PF).forEach(k=>{d[k]=[]});
  const R=(m,o)=>{const base={id:uid(PF[m]),createdBy:'سامانه',createdJ:o.date||todayJ(),log:[{u:'سامانه',d:o.date||todayJ(),t:'ثبت اولیه'}]};d[m].push(Object.assign(base,o));return base.id};
  const INC1=R('incidents',{date:jAgo(3),time:'10:15',area:'ریخته‌گری مذاب',type:'شبه‌حادثه (Near Miss)',title:'پاشش مذاب هنگام شارژ کوره',desc:'قطعات مرطوب همراه شارژ وارد کوره شد و پاشش مذاب رخ داد؛ فرد در فاصله امن بود.',injured:'خیر',immediate:'توقف شارژ و خشک‌سازی قطعات',rootCause:'ورود قطعات مرطوب به خط شارژ',corrective:'ساختن سایه‌بان انبار شارژ و کنترل رطوبت',status:'در حال بررسی',createdBy:'علی رضایی'});
@@ -1838,9 +1936,9 @@ function reportCSSForWord(){
 }
 function saveBlob(blob, name, mime){
   let file=null;
-  try{ file=new File([blob], name, {type:mime}); }catch(e){}
+  try{ file=new File([blob], name, {type:mime}); }catch(e){console.warn(e)}
   if(file && navigator.canShare && navigator.share){
-    let can=false; try{ can=navigator.canShare({files:[file]}); }catch(e){}
+    let can=false; try{ can=navigator.canShare({files:[file]}); }catch(e){console.warn(e)}
     if(can){
       navigator.share({files:[file], title:name}).then(()=>toast('✔ فایل آماده شد'), err=>{
         if(err && err.name==='AbortError') return;
@@ -1930,6 +2028,7 @@ function exportRecord(k,id,format){
   const M=MODS[k];
   const r=db[k].find(x=>x.id===id);
   if(!r){toast('رکورد یافت نشد');return}
+  if(k==='inspections'){ exportInspectionReport(r,format); return; }
   let h='<h1>'+M.i+' '+esc(M.t)+'</h1>';
   h+='<p>کد: <b>'+esc(r.id)+'</b>'+(r.code?' — کد CAPA: <b>'+esc(r.code)+'</b>':'')+' — ثبت: '+esc(r.createdBy||'')+' / '+esc(r.createdJ||'')+'</p>';
   if(M.status&&r.status) h+='<p>وضعیت: <b>'+esc(r.status)+'</b></p>';
@@ -2142,6 +2241,7 @@ function modPage(k){curPage=k;const M=MODS[k];
  if(canCreate(k))h+='<button class="btn pri" onclick="openForm(\''+k+'\')">➕ ثبت جدید</button>';
  h+='<button class="btn ghost sm" onclick="exportModuleTable(\''+k+'\',\'word\')" title="خروجی Word">📄 Word</button>';
  h+='<button class="btn ghost sm" onclick="exportModuleTable(\''+k+'\',\'pdf\')" title="خروجی PDF">📄 PDF</button>';
+  if(k==='inspections'){ h+='<button class="btn ghost sm" onclick="exportInspectionsCSV()" title="جدول همه اقلام همه بازرسی‌ها برای Excel">📊 Excel</button>'+'<button class="btn ghost sm" onclick="exportInspectionsSummary(\'word\')">📈 گزارش تجمیعی Word</button>'+'<button class="btn ghost sm" onclick="exportInspectionsSummary(\'pdf\')">📈 گزارش تجمیعی PDF</button>'; }
  if(M.fields&&canCreate(k))h+='<button class="btn ghost sm" onclick="exportBlankForm(\''+k+'\',\'word\')" title="فرم خالی برای چاپ و تکمیل دستی">📝 فرم خالی Word</button>';
  h+='</div></div><div class="mstats" id="mstats"></div>';
  if(k==='unsafe')h+=unsafeStats();
@@ -2264,7 +2364,7 @@ function openForm(k,id,pre){
 function renderTplItems(tpl,ans){const w=$('#tplWrap');if(!w)return;
  if(!tpl||!TPLS[tpl]){w.innerHTML='<div class="lvprev">ابتدا نوع چک‌لیست را انتخاب کنید.</div>';return}
  w.innerHTML='<h4 class="msh">نتایج اقلام چک‌لیست: '+TPLS[tpl].t+'</h4><div class="tplres">'+TPLS[tpl].items.map((it,i)=>{const a=(ans||{})[i]||'';
-  return '<div class="tri"><span>'+esc(it)+'</span><span class="opts">'+
+  return '<div class="tri"><span>'+(inspIsCritical(it)?'⭐ ':'')+esc(inspItemText(it))+'</span><span class="opts">'+
    [['ok','✅ مناسب'],['fail','❌ مغایرت'],['na','➖ نامرتبط']].map(o=>'<label><input type="radio" name="ti'+i+'" value="'+o[0]+'" '+(a===o[0]?'checked':'')+'> '+o[1]+'</label>').join('')+'</span></div>'}).join('')+'</div>'}
 
 /* FIX: saveForm — باگ اصلی رفع شد */
@@ -2315,6 +2415,7 @@ function saveForm(k,id){
      if(r.value==='fail')fails.push(TPLS[rec.tpl].items[+i])
    });
    rec.answers=ans;rec.fails=fails;
+    rec.tplTitle=TPLS[rec.tpl].t; rec.tplItems=TPLS[rec.tpl].items.slice(); rec.tplPeriod=TPLS[rec.tpl].period;
    const applic=Object.keys(ans).filter(i=>ans[i]!=='na').length;
    rec.score=applic?Math.round((applic-fails.length)/applic*100):100;
    if(!Object.keys(ans).length)bad='نتیجه اقلام چک‌لیست';
@@ -2989,7 +3090,8 @@ function doExport(){
   const b=new Blob([JSON.stringify(db,null,1)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='HSE-Backup-'+todayJ().replace(/\//g,'-')+'.json';
   document.body.appendChild(a);a.click();a.remove();
-  toast('دانلود آغاز شد');
+  try{localStorage.setItem('hse_last_backup',String(Date.now()))}catch(e){}
+   toast('دانلود آغاز شد');
  }catch(e){showBackupText()}
 }
 function showBackupText(){
@@ -2997,7 +3099,7 @@ function showBackupText(){
   '<button class="btn pri" onclick="copyBackup()">📋 کپی</button><button class="btn ghost" onclick="closeModal()">بستن</button>');
 }
 function copyBackup(){const t=$('#bk');t.focus();t.select();let ok=false;
- try{ok=document.execCommand('copy')}catch(e){}
+ try{ok=document.execCommand('copy')}catch(e){console.warn(e)}
  if(!ok&&navigator.clipboard){navigator.clipboard.writeText(t.value).then(function(){toast('✔ کپی شد')},function(){toast('متن انتخاب شد')})}
  else toast(ok?'✔ کپی شد':'متن انتخاب شد')}
 function importPaste(){
@@ -3031,8 +3133,10 @@ function doImport(inp){
  };
  r.readAsText(f);
 }
-function doReset(){ askConfirm('همه داده‌ها (برای همه کاربران) به نمونه اولیه بازمی‌گردد. مطمئنید؟',function(){
- try{localStorage.removeItem(LS)}catch(e){}
+function doReset(){
+ if(!me||me.role!=='manager'){toast('فقط مدیر می‌تواند بازنشانی کند');return}
+ askConfirm('همه داده‌ها (برای همه کاربران) به نمونه اولیه بازمی‌گردد. مطمئنید؟',function(){
+ try{localStorage.removeItem(LS)}catch(e){console.warn(e)}
  db=sanitizeData(seed());
  Object.keys(db).forEach(m=>queueModule(m));
  save({immediate:true});
@@ -3135,14 +3239,14 @@ function personForm(i){const p=(i>=0&&db.personnel[i])?db.personnel[i]:null;
  '<div class="fgrid"><div class="ff"><label>نام <i>*</i></label><input id="pf_n" class="in" value="'+esc(p?p.name:'')+'"></div><div class="ff"><label>سمت</label><input id="pf_j" class="in" value="'+esc(p?p.job:'')+'"></div><div class="ff"><label>واحد</label><select id="pf_a" class="in">'+db.areas.map(a=>'<option '+(p&&p.area===a?'selected':'')+'>'+esc(a)+'</option>').join('')+'</select></div><div class="ff"><label>نقش <i>*</i></label><select id="pf_r" class="in">'+['worker','expert','manager'].map(r=>'<option value="'+r+'" '+((p?p.role:'worker')===r?'selected':'')+'>'+ROLE_CHIP[r][0]+'</option>').join('')+'</select></div><div class="ff"><label>نام کاربری</label><input id="pf_u" class="in" value="'+esc(p?p.u:'')+'" style="direction:ltr"></div><div class="ff"><label>رمز '+(p?'(برای تغییر، رمز جدید را وارد کنید)':'')+'</label><input id="pf_p" type="password" class="in" value="" autocomplete="new-password" style="direction:ltr"></div></div>',
  '<button class="btn pri" onclick="savePerson('+i+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
 }
-function savePerson(i){
+async function savePerson(i){
  const n=$('#pf_n').value.trim(),un=$('#pf_u').value.trim(),pw=$('#pf_p').value.trim(),role=$('#pf_r').value;
  if(!n){toast('نام الزامی است');return}
  if(un&&db.personnel.some((p,j)=>p.u===un&&j!==i)){toast('نام کاربری تکراری');return}
  const old=(i>=0&&db.personnel[i])?db.personnel[i]:null;
  if(old && un!==(old.u||'') && !pw){toast('با تغییر نام کاربری، رمز جدید را وارد کنید');return}
  if(!old && un && !pw){toast('برای حساب جدید رمز وارد کنید');return}
- const passField = pw ? (un? hashPw(un,pw) : '') : (old? old.p : '');
+ const passField = pw ? (un? await hashPw(un,pw) : '') : (old? old.p : '');
  const rec={name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un,p:passField};
  let id;
  if(old){ Object.assign(old,rec); id=old.id; }
@@ -3151,6 +3255,7 @@ function savePerson(i){
  save();closeModal();toast('✔ ذخیره شد');refreshCurrent()
 }
 function delPerson(i){const p=db.personnel[i];if(!p)return;
+ if(!can('personnel','del')){toast('اجازه حذف ندارید');return}
  if(p.id===me.id){toast('حساب خودتان قابل حذف نیست');return}
  askConfirm('«'+p.name+'» حذف شود؟',function(){
    db.personnel.splice(i,1);
@@ -3162,6 +3267,10 @@ function addArea(){const v=$('#newarea').value.trim();if(!v){toast('نام وا�
  queueModule('areas');
  save();refreshCurrent();toast('افزوده شد')}
 function delArea(i){
+ if(!me||me.role!=='manager'){toast('فقط مدیر می‌تواند واحد حذف کند');return}
+ askConfirm('واحد «'+((db.areas||[])[i]||'')+'» حذف شود؟', function(){ _delAreaNow(i); });
+}
+function _delAreaNow(i){
  db.areas.splice(i,1);
  queueModule('areas');
  save();refreshCurrent()}
@@ -3177,7 +3286,7 @@ function fabMenu(){
  openModal('⚡ ثبت سریع','<div style="display:grid;gap:10px">'+acts.map(a=>'<button class="btn ghost" style="text-align:right;padding:14px;font-size:14px" onclick="closeModal();'+(a[0]==='s5'?'openS5Wizard()':'openForm(\''+a[0]+'\')')+'"><span style="font-size:20px;margin-left:8px">'+a[1]+'</span><b>'+a[2]+'</b> <small style="color:var(--mut)">'+a[3]+'</small></button>').join('')+'</div>','');
 }
 const QUICK_ANOMALY=['انباشت مواد و بسته شدن مسیر عبور','عدم استفاده از PPE','سیم‌کشی برق لخت','نشتی روغن و لغزندگی کف','فقدان حفاظ قطعات متحرک','تهویه ناکافی / بوی گاز','نامرتبی و پرت بودن کف سالن','گرمای شدید و کمبود آب'];
-function quickAnomaly(btn){const t=$('#f_desc');if(!t)return;t.value=t.value?t.value.replace(/\s+$/,'')+' — '+btn.textContent:btn.textContent;try{t.dispatchEvent(new Event('input'))}catch(e){}}
+function quickAnomaly(btn){const t=$('#f_desc');if(!t)return;t.value=t.value?t.value.replace(/\s+$/,'')+' — '+btn.textContent:btn.textContent;try{t.dispatchEvent(new Event('input'))}catch(e){console.warn(e)}}
 function pickRisk(btn,k,val){const h=$('#f_'+k);if(h)h.value=val;const seg=btn.parentElement;[].forEach.call(seg.querySelectorAll('.rsk'),b=>b.classList.remove('on'));btn.classList.add('on')}
 function photoBlock(p){
  if(p)return '<div class="phprev"><img src="'+p+'" alt="عکس" onclick="viewPhoto(this.src)"><button type="button" class="btn danger sm" onclick="delPhoto()">🗑️ حذف</button></div>';
@@ -3208,7 +3317,7 @@ function pickPhoto(inp){
  };
  rd.readAsDataURL(f);
 }
-function viewPhoto(src){const o=document.createElement('div');o.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.93);z-index:300;display:flex;align-items:center;justify-content:center;padding:14px;cursor:zoom-out';o.innerHTML='<img src="'+src+'" style="max-width:100%;max-height:100%;border-radius:10px" alt="عکس">';o.onclick=function(){o.remove()};document.body.appendChild(o)}
+function viewPhoto(src){const o=document.createElement('div');o.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.93);z-index:300;display:flex;align-items:center;justify-content:center;padding:14px;cursor:zoom-out';o.innerHTML='<img src="'+esc(src)+'" style="max-width:100%;max-height:100%;border-radius:10px" alt="عکس">';o.onclick=function(){o.remove()};document.body.appendChild(o)}
 
 function unsafeStats(){
  const rows=db.unsafe;
@@ -4104,7 +4213,7 @@ function renderSidebar(){let h='';
  NAV.forEach(g=>{const items=g.items.filter(k=>canView(k));if(!items.length)return;
   h+='<div class="sgrp">'+g.g+'</div>'+items.map(k=>{const Pg=pageOf(k);const n=navBadge(k);return '<div class="sitem'+(curPage===k?' on':'')+'" onclick="setPage(\''+k+'\')"><span>'+Pg.i+'</span><span>'+Pg.t+'</span>'+(n?'<span class="nb">'+nd(n)+'</span>':'')+'</div>'}).join('')});
  $('#snav').innerHTML=h;
- try{renderBell()}catch(e){}}
+ try{renderBell()}catch(e){console.warn(e)}}
 /* مقایسه‌ی پایدار داده‌ها: ترتیب کلیدها و ساختارهای خالی را نادیده می‌گیرد (Firebase آن‌ها را برمی‌گرداند یا مرتب می‌کند) */
 function stableJson(v){
   if(Array.isArray(v)) return '['+v.map(x=>stableJson(x===undefined?null:x)).join(',')+']';
@@ -4129,7 +4238,7 @@ function setPage(k){const Pg=pageOf(k);
  const sc=document.getElementById('scrim');if(sc)sc.classList.remove('show');
  renderSidebar();
  if(SPECIAL[k]){const out=SPECIAL[k].ren();if(typeof out==='string')$('#content').innerHTML=out;}else modPage(k);
- try{renderBell()}catch(e){}
+ try{renderBell()}catch(e){console.warn(e)}
 }
 function openModal(t,b,f){closeCal();closeBell();$('#mtitle').textContent=t;$('#mbody').innerHTML=b;$('#mfoot').innerHTML=f||'';$('#modal').classList.add('open');document.body.classList.add('modal-open')}
 function closeModal(){closeCal();$('#modal').classList.remove('open');document.body.classList.remove('modal-open');if(_renderAfterModal&&me){_renderAfterModal=false;setTimeout(()=>{if(!document.body.classList.contains('modal-open'))refreshCurrent()},0)}}
@@ -4144,28 +4253,53 @@ function roleLogin(role){loginRole=role;closeCal();
  $('#lroles').classList.add('hidden');$('#lformBox').classList.remove('hidden');
  $('#lformTtl').textContent='ورود '+ROLEINFO[role][1]+' '+ROLEINFO[role][0];
  $('#lu').value='';$('#lp').value='';setLerr('');
- try{$('#lu').focus()}catch(e){}}
+ try{$('#lu').focus()}catch(e){console.warn(e)}}
 function roleBack(){loginRole=null;$('#lformBox').classList.add('hidden');$('#lroles').classList.remove('hidden');setLerr('')}
-function doLogin(){
+let _failCount = 0, _lockUntil = 0;
+async function doLogin(){
  if(!loginRole)return;
  if(!db||!Array.isArray(db.personnel)){setLerr('داده‌ها هنوز بارگذاری نشده‌اند، لطفاً چند لحظه صبر کنید');return}
- const u=$('#lu').value.trim(),p=$('#lp').value;
+ if(Date.now() < _lockUntil){
+   const m = Math.ceil((_lockUntil-Date.now())/60000);
+   setLerr('تلاش‌های ناموفق زیاد؛ '+nd(m)+' دقیقهٔ دیگر دوباره تلاش کنید');
+   return;
+ }
+ if(!_pwCryptoOk()){setLerr('ورود فقط از طریق HTTPS یا localhost امکان‌پذیر است');return}
+ const u=$('#lu').value.trim(), p=$('#lp').value;
  if(!u||!p){setLerr('نام کاربری و رمز را وارد کنید');return}
- const hit=(x)=>{
+ const hit=async(x)=>{
    if(!x.u||String(x.u).toLowerCase()!==u.toLowerCase()) return false;
-   if(isHashedPw(x.p)) return x.p===hashPw(x.u,p);
+   if(isPbkdf2(x.p)) return verifyPw(x.p, x.u, p);
+   if(isHashedPw(x.p)) return x.p===legacyHashPw(x.u,p);
    return x.p===p; /* رمز قدیمی متنی */
  };
- const f=db.personnel.find(x=>hit(x)&&x.role===loginRole);
+ let f=null, ex=false;
+ for(const x of db.personnel){
+   if(!(await hit(x))) continue;
+   ex=true;
+   if(x.role===loginRole){ f=x; break; }
+ }
  if(f){
-   if(!isHashedPw(f.p)){ f.p=hashPw(f.u,p); queueRec('personnel',f.id); save(); }
+   _failCount=0;
+   if(!isPbkdf2(f.p)){ f.p=await hashPw(f.u,p); queueRec('personnel',f.id); save(); }
    login(f); return;
  }
- const ex=db.personnel.find(x=>hit(x));
+ _failCount++;
+ if(_failCount>=5){ _lockUntil=Date.now()+5*60000; _failCount=0; }
  setLerr(ex?'این حساب با نقش «'+ROLEINFO[loginRole][1]+'» هم‌خوانی ندارد':'نام کاربری یا رمز اشتباه است');
 }
-function login(p){me={name:p.name,role:p.role,id:p.id,area:p.area||''};try{sessionStorage.setItem('hse_me',JSON.stringify(me))}catch(e){};startApp()}
-function logout(){ askConfirm('از حساب کاربری خارج می‌شوید؟',function(){ try{sessionStorage.removeItem('hse_me')}catch(e){} me=null;location.reload(); }); }
+function login(p){me={name:p.name,role:p.role,id:p.id,area:p.area||''};try{sessionStorage.setItem('hse_me',JSON.stringify(me))}catch(e){console.warn(e)};startApp()}
+function logout(){ askConfirm('از حساب کاربری خارج می‌شوید؟', async function(){
+  if(hasPendingChanges()){
+    toast('در حال ذخیرهٔ تغییرات...');
+    _flushDelta();
+    await waitForFlush(10000);
+    if(hasPendingChanges()){ toast('⚠️ ذخیره نشد؛ اتصال را بررسی کنید و دوباره خارج شوید'); return; }
+  }
+  try{ sessionStorage.removeItem('hse_me'); localStorage.removeItem(LS); localStorage.removeItem(SYNC_KEY); }catch(e){ console.warn(e); }
+  me=null; location.reload();
+}); }
+window.addEventListener('beforeunload', function(e){ if(hasPendingChanges()){ e.preventDefault(); e.returnValue=''; } });
 function startApp(){$('#login').classList.add('hidden');$('#app').classList.remove('hidden');
  $('#uname').textContent=me.name;$('#urole').textContent=ROLEINFO[me.role][1];$('#uav').textContent=ROLEINFO[me.role][0];
  const d=new Date();$('#tdate').textContent=['یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه','شنبه'][d.getDay()]+' '+nd(todayJ());
@@ -4174,20 +4308,18 @@ function startApp(){$('#login').classList.add('hidden');$('#app').classList.remo
 /* ============================================================
    FIX: Firebase on('value') — جلوگیری از حلقه بازخورد
 ============================================================ */
-dbRef.on('value', (snapshot) => {
-  if (_isSaving || hasPendingChanges()) return;
-  const cloud = snapshot.val();
-  if (!cloud) return;
-  try {
-    const sanitizedCloud = sanitizeData(cloud);
-    const localNorm = stableJson(sanitizeData(JSON.parse(JSON.stringify(db))));
-    const cloudNorm = stableJson(sanitizedCloud);
-    if (cloudNorm === localNorm) return;
+function applyCloud(cloud){
+  try{
+    const sc = sanitizeData(cloud);
+    const norm = stableJson(sc);
+    if(norm===_lastCloudNorm) return;
+    _lastCloudNorm = norm;
     _isApplyingRemote = true;
-    db = sanitizedCloud;
+    db = sc;
+    _base = _baseFrom(sc);
     TPLS = db.tpls || defaultTPLS();
     S5 = db.s5_tpls || defaultS5TPLS();
-    try { localStorage.setItem(LS, JSON.stringify(db)); } catch(e){}
+    cacheDb();
     if (me && document.body.classList.contains('modal-open')) {
       _renderAfterModal = true;
     } else if (me) {
@@ -4198,21 +4330,52 @@ dbRef.on('value', (snapshot) => {
   } finally {
     setTimeout(()=>{ _isApplyingRemote = false; }, 300);
   }
+}
+async function _pullCloud(){
+  try{
+    const snap = await dbRef.once('value');
+    const c = snap.val();
+    if(c && !_isSaving && !hasPendingChanges()) applyCloud(c);
+  }catch(e){ _missedRemote=true; }
+}
+window.addEventListener('offline',()=>{ toast('⚠️ اتصال قطع است؛ تغییرات در صف محلی نگه داشته می‌شوند'); });
+window.addEventListener('online',()=>{ toast('اتصال برقرار شد'); if(hasPendingChanges()) _flushDelta(); });
+dbRef.on('value', (snapshot) => {
+  const c = snapshot.val();
+  if(!c) return;
+  if(_isSaving || hasPendingChanges()){ _missedRemote=true; return; }
+  applyCloud(c);
 });
 
 /* ============================================================
    FIX: boot — ترتیب صحیح
 ============================================================ */
 (async function boot(){
- let loaded=false, legacyStore=false;
+ let loaded=false, legacyStore=false, readOk=false, cloudRaw=null;
  try{
   const snapshot = await dbRef.once('value');
   const data = snapshot.val();
+  readOk = true; cloudRaw = data;
+  if(data){ const sc = sanitizeData(data); _lastCloudNorm = stableJson(sc); _base = _baseFrom(sc); }
   if(data && data.personnel){
     db = sanitizeData(data); loaded = true;
     legacyStore = RECORD_MODS.some(m=>data[m] && typeof data[m]==='object' && Object.keys(data[m]).some(k=>/^\d+$/.test(k)));
   }
  }catch(e){ console.warn('Firebase در دسترس نیست.'); }
+
+ /* بازیابی تغییرات ثبت‌نشدهٔ قبلی (اگر صفحه قبل از ارسال بسته شده باشد) */
+ try{
+   const sy = JSON.parse(localStorage.getItem(SYNC_KEY)||'null');
+   const cache = JSON.parse(localStorage.getItem(LS)||'null');
+   if(sy && cache && cache.personnel){
+     _pendingModules = sy.pm||{};
+     _dirtyRecs = sy.dr||{};
+     const seqs = [...Object.values(_pendingModules), ...Object.values(_dirtyRecs).flatMap(o=>Object.values(o))];
+     _seqCounter = Math.max(0, ...seqs);
+     _base = Object.assign(_base, sy.base||{});
+     if(hasPendingChanges()){ db = sanitizeData(cache); loaded = true; }
+   }
+ }catch(e){console.warn(e)}
 
  if(!loaded){
   try{
@@ -4232,10 +4395,19 @@ dbRef.on('value', (snapshot) => {
  if(!db.s5_tpls) db.s5_tpls=defaultS5TPLS();
  if(!db.scoreRules || !Array.isArray(db.scoreRules) || !db.scoreRules.length) db.scoreRules=defaultScoreRules();
  db = sanitizePermissions(db);
+ /* مهاجرت: همه رمزهای متنی (از جمله 1234) به هش SHA-256 تبدیل می‌شوند */
+ let _pwMigrated=false;
+ if(_pwCryptoOk()){
+   for(const p of (db.personnel||[])){
+     if(p.u && p.p && !isPbkdf2(p.p) && !isHashedPw(p.p)){
+       try{ p.p = await hashPw(p.u, p.p); queueRec('personnel',p.id); _pwMigrated=true; }catch(e){console.warn(e)}
+     }
+   }
+ }
  TPLS=db.tpls;
  S5=db.s5_tpls;
 
- if(!loaded){
+ if(!loaded && readOk && cloudRaw===null){
    try{
      const payload = {};
      Object.keys(db).forEach(k => {
@@ -4250,16 +4422,38 @@ dbRef.on('value', (snapshot) => {
    }catch(e){ console.warn('ارسال seed به Firebase ناموفق:', e); }
  }
 
+ if(hasPendingChanges()) setTimeout(_flushDelta, 1000);
  if(legacyStore){ RECORD_MODS.forEach(m=>{ if(db[m]) queueModule(m); }); queueModule('seq'); }
- try{localStorage.setItem(LS,JSON.stringify(db))}catch(e){}
- try{ensureArchives()}catch(e){}
+ cacheDb();
+ try{ensureArchives()}catch(e){console.warn(e)}
  if(legacyStore) save({immediate:true});
+ if(_pwMigrated && !legacyStore) save();
 
  try{me=JSON.parse(sessionStorage.getItem('hse_me')||'null')}catch(e){me=null}
  if(me){const pp=db.personnel.find(x=>x.id===me.id);if(!pp)me=null;else{me.area=pp.area||'';me.name=pp.name;me.role=pp.role}}
  if(me)startApp();
 
- setTimeout(()=>{ try{ checkConnection(); }catch(e){} }, 500);
+ setTimeout(()=>{ try{ checkConnection(); }catch(e){console.warn(e)} }, 500);
+})();
+
+/* دسترس‌پذیری: ردیف‌های قابل کلیک با کیبورد هم قابل استفاده‌اند */
+(function(){
+ let pend=false;
+ function mark(){
+  pend=false;
+  document.querySelectorAll('tr[onclick],.list-row[onclick]').forEach(el=>{
+    if(!el.hasAttribute('tabindex')) el.tabIndex=0;
+    if(!el.hasAttribute('role')) el.setAttribute('role','button');
+  });
+ }
+ new MutationObserver(()=>{ if(!pend){ pend=true; requestAnimationFrame(mark); } })
+   .observe(document.body,{childList:true,subtree:true});
+ document.addEventListener('keydown',e=>{
+   const t=e.target;
+   if((e.key==='Enter'||e.key===' ') && t && t.matches && t.matches('tr[onclick],.list-row[onclick]')){
+     e.preventDefault(); t.click();
+   }
+ });
 })();
 
 /* ============================================================
@@ -4348,6 +4542,348 @@ dbRef.on('value', (snapshot) => {
  mo.observe(document.body,{childList:true,subtree:true});
  scan();
 })();
+
+/* ============================================================
+   افزونه‌ها: گزارش چک‌لیست، گزارش تجمیعی، بازرسی‌های عقب‌افتاده،
+   خروجی Excel، ایجاد CAPA از مغایرت و یادآور پشتیبان.
+   این فایل بعد از app.js بارگذاری می‌شود.
+============================================================ */
+
+/* ---------- کمک‌ها: بحرانی، اقلام، تاریخ ---------- */
+const INSP_CRIT_TAG = '[بحرانی]';   // اگر در متن قلم چک‌لیست این برچسب باشد، قلم بحرانی است
+function inspItemText(t){ return String(t||'').split(INSP_CRIT_TAG).join('').trim(); }
+function inspIsCritical(t){ return String(t||'').indexOf(INSP_CRIT_TAG) >= 0; }
+
+// اولویت با نسخهٔ ذخیره‌شدهٔ اقلام در زمان بازرسی است (snapshot)
+function inspItemsOf(rec){
+  if(Array.isArray(rec.tplItems)) return rec.tplItems;
+  const t = (typeof TPLS !== 'undefined') ? TPLS[rec.tpl] : null;
+  return t ? t.items : [];
+}
+function inspTitleOf(rec){
+  if(rec.tplTitle) return rec.tplTitle;
+  const t = (typeof TPLS !== 'undefined') ? TPLS[rec.tpl] : null;
+  return t ? t.t : 'نوع نامشخص';
+}
+function inspStats(rec){
+  const items = inspItemsOf(rec), ans = rec.answers || {};
+  let ok=0, fail=0, na=0, none=0, critFail=0;
+  items.forEach((t,i)=>{
+    const v = ans[i];
+    if(v==='ok') ok++;
+    else if(v==='fail'){ fail++; if(inspIsCritical(t)) critFail++; }
+    else if(v==='na') na++;
+    else none++;
+  });
+  const applic = ok + fail;
+  const score = (typeof rec.score==='number') ? rec.score : (applic ? Math.round(ok/applic*100) : 100);
+  return {items, ans, ok, fail, na, none, critFail, score};
+}
+
+// تاریخ شمسی «YYYY/MM/DD» ↔ شماره روز (JDN-like) با تبدیل‌های موجود در برنامه
+function jalStrToDay(s){
+  const m = String(s||'').match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+  if(!m) return null;
+  const g = j2g(+m[1], +m[2], +m[3]);
+  return g2d(g.gy, g.gm, g.gd);
+}
+function todayDay(){ const n=new Date(); return g2d(n.getFullYear(), n.getMonth()+1, n.getDate()); }
+function dayToJalStr(day){
+  const g = d2g(day);
+  const j = g2j(g.gy, g.gm, g.gd);
+  return j.jy + '/' + p2(j.jm) + '/' + p2(j.jd);
+}
+
+/* ---------- بازرسی‌های عقب‌افتاده ---------- */
+// برای هر چک‌لیست: آخرین بازرسی، سررسید بعدی و میزان تأخیر (روز)
+function inspOverdue(){
+  const today = todayDay();
+  const recs = db.inspections || [];
+  return Object.keys(TPLS).map(tk=>{
+    const t = TPLS[tk];
+    const mine = recs.filter(r=>r.tpl===tk)
+      .map(r=>({r, d:jalStrToDay(r.date)}))
+      .filter(x=>x.d!==null)
+      .sort((a,b)=>b.d-a.d);
+    if(!mine.length) return {tk, title:t.t, never:true, late:null, due:null, last:null};
+    const last = mine[0];
+    const due = last.d + (+t.period || 0);
+    return {tk, title:t.t, never:false, last:last.r.date, due:dayToJalStr(due), late: today - due};
+  });
+}
+
+/* ---------- گزارش یک بازرسی (جایگزین نسخهٔ قبلی) ---------- */
+function exportInspectionReport(rec, format){
+  const st = inspStats(rec);
+  const verdict = st.critFail
+    ? '<span style="color:#dc2626;font-weight:700">ناقص — مغایرت در ' + nd(st.critFail) + ' قلم بحرانی</span>'
+    : st.fail
+      ? '<span style="color:#d97706;font-weight:700">نیاز به اقدام اصلاحی — ' + nd(st.fail) + ' مغایرت</span>'
+      : '<span style="color:#16a34a;font-weight:700">مطابق — بدون مغایرت</span>';
+  const scoreColor = st.score>=90 ? '#16a34a' : st.score>=70 ? '#d97706' : '#dc2626';
+
+  let h = '<style>tr{page-break-inside:avoid}thead{display:table-header-group}</style>';
+  h += '<h1>📋 گزارش چک‌لیست: ' + esc(inspTitleOf(rec)) + '</h1>';
+  h += '<p>کد: <b>' + esc(rec.id) + '</b> — تاریخ بازرسی: <b>' + nd(rec.date||'—') + '</b> — بازرس: <b>' + esc(rec.inspBy||'—') + '</b></p>';
+  if(!st.items.length) h += '<p style="color:#dc2626">⚠️ اقلام این بازرسی در دسترس نیست؛ فقط امتیاز ثبت‌شده نمایش داده می‌شود.</p>';
+  else if(!rec.tplItems) h += '<p style="color:#92400e;background:#fef3c7;padding:6px 10px;border-radius:6px">ℹ️ این بازرسی قبل از ذخیرهٔ نسخهٔ اقلام ثبت شده است؛ اقلام بر اساس چک‌لیست فعلی نمایش داده می‌شوند و ممکن است با زمان بازرسی یکسان نباشند.</p>';
+
+  h += '<div class="kpi-row">'
+    + '<div class="kpi-box">امتیاز انطباق<b style="color:'+scoreColor+'">' + nd(st.score) + '٪</b></div>'
+    + '<div class="kpi-box">مناسب<b style="color:#16a34a">' + nd(st.ok) + '</b></div>'
+    + '<div class="kpi-box">مغایرت<b style="color:#dc2626">' + nd(st.fail) + '</b></div>'
+    + '<div class="kpi-box">بحرانی با مغایرت<b style="color:#dc2626">' + nd(st.critFail) + '</b></div>'
+    + '<div class="kpi-box">نامرتبط<b>' + nd(st.na) + '</b></div>'
+    + '</div>';
+  h += '<p><b>نتیجه کلی: </b>' + verdict + '</p>';
+
+  if(st.items.length){
+    h += '<h2>نتایج اقلام</h2><table><thead><tr><th style="width:7%">ردیف</th><th>مورد بازرسی</th><th style="width:18%">نتیجه</th></tr></thead><tbody>';
+    st.items.forEach((t,i)=>{
+      const v = st.ans[i];
+      const res = v==='ok' ? '<span style="color:#16a34a;font-weight:700">✔ مناسب</span>'
+                : v==='fail' ? '<span style="color:#dc2626;font-weight:700">✘ مغایرت</span>'
+                : v==='na' ? '<span style="color:#64748b">— نامرتبط</span>'
+                : '<span style="color:#94a3b8">بدون پاسخ</span>';
+      const bg = v==='fail' ? 'background:#fee2e2;' : '';
+      const crit = inspIsCritical(t) ? '⭐ ' : '';
+      h += '<tr style="'+bg+'"><td style="text-align:center">'+nd(i+1)+'</td><td>'+crit+esc(inspItemText(t))+'</td><td style="text-align:center">'+res+'</td></tr>';
+    });
+    h += '</tbody></table>';
+    h += '<p style="font-size:9pt;color:#64748b">⭐ = قلم بحرانی؛ مغایرت در این اقلام نتیجه را «ناقص» می‌کند.</p>';
+  }
+
+  if(st.fail){
+    h += '<h2>پیگیری مغایرت‌ها</h2><table><thead><tr><th style="width:7%">ردیف</th><th>شرح مغایرت</th><th style="width:30%">اقدام اصلاحی لازم</th><th style="width:14%">مسئول</th><th style="width:12%">مهلت</th></tr></thead><tbody>';
+    st.items.forEach((t,i)=>{
+      if(st.ans[i]==='fail') h += '<tr><td style="text-align:center">'+nd(i+1)+'</td><td>'+esc(inspItemText(t))+'</td><td>&nbsp;<br>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+
+  if(rec.note) h += '<h2>توضیحات بازرس</h2><p>' + esc(rec.note) + '</p>';
+  h += '<h2>امضاها</h2>' + (hasSigns(rec.signs) ? signDisplayHTML(rec.signs) : blankSignHTML());
+
+  const fn = 'HSE-checklist-' + rec.id + '-' + todayJ().replace(/\//g,'-');
+  if(format==='word') exportWord(h, fn); else exportPDF(h, fn);
+}
+
+/* ---------- گزارش تجمیعی (سال جاری) ---------- */
+function exportInspectionsSummary(format){
+  const yr = todayJ().slice(0,4);
+  const all = db.inspections || [];
+  const recs = all.filter(r=>String(r.date||'').slice(0,4)===yr);
+  const od = inspOverdue();
+
+  let h = '<style>tr{page-break-inside:avoid}thead{display:table-header-group}</style>';
+  h += '<h1>📊 گزارش تجمیعی چک‌لیست‌ها — سال '+nd(yr)+'</h1>';
+  h += '<p>تاریخ تهیه: '+nd(todayJ())+' — تهیه‌کننده: '+esc(me.name)+' — بازرسی‌های امسال: <b>'+nd(recs.length)+'</b></p>';
+
+  // ۱. خلاصه هر چک‌لیست + وضعیت سررسید
+  h += '<h2>۱. خلاصه هر چک‌لیست (بازرسی‌های سال جاری)</h2>';
+  h += '<table><thead><tr><th>چک‌لیست</th><th>دوره</th><th>تعداد بازرسی</th><th>میانگین امتیاز</th><th>کمترین امتیاز</th><th>آخرین بازرسی</th><th>وضعیت سررسید</th></tr></thead><tbody>';
+  Object.keys(TPLS).forEach(tk=>{
+    const t = TPLS[tk];
+    const mine = recs.filter(r=>r.tpl===tk);
+    const scores = mine.map(r=>inspStats(r).score);
+    const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : null;
+    const min = scores.length ? Math.min(...scores) : null;
+    const last = mine.map(r=>r.date).sort().pop() || '—';
+    const row = od.find(x=>x.tk===tk);
+    let status;
+    if(!row || row.never) status = '<span style="color:#dc2626">هنوز بازرسی ثبت نشده</span>';
+    else if(row.late>0) status = '<span style="color:#dc2626;font-weight:700">⚠️ '+nd(row.late)+' روز تأخیر (سررسید: '+nd(row.due)+')</span>';
+    else status = '<span style="color:#16a34a">به‌موقع — سررسید بعدی: '+nd(row.due)+'</span>';
+    h += '<tr><td>'+esc(t.t)+'</td><td>هر '+nd(t.period)+' روز</td><td style="text-align:center">'+nd(mine.length)+'</td>'
+       + '<td style="text-align:center">'+(avg===null?'—':nd(avg)+'٪')+'</td>'
+       + '<td style="text-align:center">'+(min===null?'—':nd(min)+'٪')+'</td>'
+       + '<td>'+nd(last)+'</td><td>'+status+'</td></tr>';
+  });
+  h += '</tbody></table>';
+
+  // ۲. اقلامی که بیشتر شکست خورده‌اند
+  const failCount = {};
+  recs.forEach(r=>{
+    const st = inspStats(r);
+    st.items.forEach((t,i)=>{
+      if(st.ans[i]==='fail'){
+        const key = inspItemText(t);
+        failCount[key] = (failCount[key]||0) + 1;
+      }
+    });
+  });
+  const top = Object.keys(failCount).map(k=>({k, n:failCount[k]})).sort((a,b)=>b.n-a.n).slice(0,10);
+  h += '<h2>۲. کنترل‌هایی که بیشتر مغایرت داشته‌اند</h2>';
+  if(!top.length) h += '<p>در این سال مغایرتی ثبت نشده است.</p>';
+  else {
+    h += '<table><thead><tr><th style="width:7%">ردیف</th><th>مورد بازرسی</th><th style="width:15%">تعداد مغایرت</th></tr></thead><tbody>';
+    top.forEach((x,i)=>{ h += '<tr><td style="text-align:center">'+nd(i+1)+'</td><td>'+esc(x.k)+'</td><td style="text-align:center">'+nd(x.n)+'</td></tr>'; });
+    h += '</tbody></table>';
+  }
+
+  // ۳. روند ماهانه امتیاز
+  const byMonth = {};
+  recs.forEach(r=>{
+    const mk = String(r.date||'').slice(0,7);
+    if(!mk) return;
+    (byMonth[mk] = byMonth[mk] || []).push(inspStats(r).score);
+  });
+  const months = Object.keys(byMonth).sort();
+  h += '<h2>۳. روند ماهانه امتیاز انطباق</h2>';
+  if(!months.length) h += '<p>داده‌ای برای نمایش روند وجود ندارد.</p>';
+  else {
+    h += '<table><thead><tr><th style="width:18%">ماه</th><th style="width:12%">تعداد</th><th style="width:12%">میانگین</th><th>نمودار</th></tr></thead><tbody>';
+    months.forEach(mk=>{
+      const arr = byMonth[mk];
+      const avg = Math.round(arr.reduce((a,b)=>a+b,0)/arr.length);
+      const barColor = avg>=90 ? '#16a34a' : avg>=70 ? '#d97706' : '#dc2626';
+      h += '<tr><td>'+nd(mk)+'</td><td style="text-align:center">'+nd(arr.length)+'</td><td style="text-align:center">'+nd(avg)+'٪</td>'
+         + '<td><div style="background:#f1f5f9;border-radius:6px;height:12px;width:100%"><div style="background:'+barColor+';height:12px;border-radius:6px;width:'+avg+'%"></div></div></td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+
+  // ۴. بازرسی‌های عقب‌افتاده
+  h += '<h2>۴. بازرسی‌های عقب‌افتاده و سررسیدها (بر اساس آخرین بازرسی در همه سال‌ها)</h2>';
+  h += '<table><thead><tr><th>چک‌لیست</th><th>آخرین بازرسی</th><th>سررسید بعدی</th><th>وضعیت</th></tr></thead><tbody>';
+  od.forEach(x=>{
+    const st = x.never ? '<span style="color:#dc2626">هرگز بازرسی نشده</span>'
+      : x.late>0 ? '<span style="color:#dc2626;font-weight:700">عقب‌افتاده — '+nd(x.late)+' روز</span>'
+      : '<span style="color:#16a34a">به‌موقع</span>';
+    h += '<tr><td>'+esc(x.title)+'</td><td>'+(x.last?nd(x.last):'—')+'</td><td>'+(x.due?nd(x.due):'—')+'</td><td>'+st+'</td></tr>';
+  });
+  h += '</tbody></table>';
+
+  const fn = 'HSE-checklist-summary-'+yr+'-'+todayJ().replace(/\//g,'-');
+  if(format==='word') exportWord(h, fn); else exportPDF(h, fn);
+}
+
+/* ---------- خروجی Excel (CSV با BOM برای نمایش درست فارسی) ---------- */
+function csvCell(v){ return '"' + String(v==null?'':v).replace(/"/g,'""') + '"'; }
+function exportInspectionsCSV(){
+  const recs = (db.inspections || []).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  if(!recs.length){ toast('بازرسی ثبت‌شده‌ای وجود ندارد'); return; }
+  const RES = {ok:'مناسب', fail:'مغایرت', na:'نامرتبط'};
+  const head = ['کد بازرسی','تاریخ','بازرس','نوع چک‌لیست','ردیف','مورد بازرسی','نتیجه','بحرانی','امتیاز بازرسی','توضیحات'];
+  const lines = [head.map(csvCell).join(',')];
+  recs.forEach(r=>{
+    const st = inspStats(r);
+    st.items.forEach((t,i)=>{
+      lines.push([
+        r.id, r.date, r.inspBy, inspTitleOf(r), i+1, inspItemText(t),
+        RES[st.ans[i]] || 'بدون پاسخ', inspIsCritical(t) ? 'بله' : 'خیر', st.score, r.note || ''
+      ].map(csvCell).join(','));
+    });
+  });
+  const blob = new Blob(['\ufeff' + lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
+  saveBlob(blob, 'HSE-inspections-' + todayJ().replace(/\//g,'-') + '.csv', 'text/csv');
+}
+
+/* ---------- ایجاد CAPA از یک مغایرت ---------- */
+function capaFromInspection(id, i){
+  const r = (db.inspections || []).find(x=>x.id===id);
+  if(!r) return;
+  const st = inspStats(r);
+  const item = st.items[i] || '';
+  closeModal();
+  openForm('actions', null, {
+    src:'بازرسی', ref:r.id, type:'اصلاحی (Corrective)', prio:'بالا',
+    startD: todayJ(),
+    desc:'رفع مغایرت در '+inspTitleOf(r)+': '+inspItemText(item)
+  });
+}
+
+// در صفحهٔ جزئیات بازرسی، برای هر مغایرت دکمهٔ ایجاد CAPA اضافه می‌شود
+(function(){
+  const orig = window.openDetail;
+  if(typeof orig !== 'function') return;
+  window.openDetail = function(k, id){
+    orig.apply(this, arguments);
+    if(k !== 'inspections') return;
+    const r = (db.inspections || []).find(x=>x.id===id);
+    if(!r) return;
+    const st = inspStats(r);
+    if(!st.fail) return;
+    const body = document.getElementById('mbody');
+    if(!body) return;
+    let h = '<div class="msh">🛠️ اقدام اصلاحی برای مغایرت‌ها</div>';
+    st.items.forEach((t,i)=>{
+      if(st.ans[i]==='fail'){
+        h += '<div class="list-row"><span class="lt">'+esc(inspItemText(t))+'</span>'
+           + '<button class="btn sm pri" onclick="capaFromInspection(\''+esc(id)+'\','+i+')">➕ ایجاد CAPA</button></div>';
+      }
+    });
+    body.insertAdjacentHTML('beforeend', h);
+  };
+})();
+
+/* ============================================================
+   یادآور پشتیبان‌گیری دوره‌ای
+============================================================ */
+(function(){
+  const KEY = 'hse_last_backup';
+  const WARN_AFTER_DAYS = 7;
+  const SESSION_FLAG = 'hse_bk_warned';
+  function daysSinceBackup(){
+    try{
+      const t = Number(localStorage.getItem(KEY) || 0);
+      if(!t) return Infinity;
+      return (Date.now() - t) / 86400000;
+    }catch(e){ return 0; }
+  }
+  function maybeRemind(){
+    try{
+      if(sessionStorage.getItem(SESSION_FLAG)) return;
+      if(typeof me === 'undefined' || !me) return;
+      const d = daysSinceBackup();
+      if(d < WARN_AFTER_DAYS) return;
+      sessionStorage.setItem(SESSION_FLAG, '1');
+      const msg = d === Infinity
+        ? 'هنوز هیچ پشتیبانی تهیه نشده است. از منوی تنظیمات یک پشتیبان بگیرید.'
+        : 'بیش از ' + Math.floor(d) + ' روز از آخرین پشتیبان می‌گذرد. لطفاً یک پشتیبان تازه بگیرید.';
+      if(typeof toast === 'function') toast('💾 ' + msg);
+    }catch(e){ console.warn('یادآور پشتیبان:', e); }
+  }
+  window.addEventListener('load', function(){ setTimeout(maybeRemind, 4000); });
+})();
+
+/* ============================================================
+   برچسب‌گذاری یک‌باره اقلام بحرانی پیش‌فرض (فقط توسط مدیر و فقط یک بار روی هر دستگاه)
+   اقلامی که کلیدواژه‌هایشان در فهرست زیر است و هنوز برچسب ندارند، [بحرانی] می‌گیرند.
+============================================================ */
+(function(){
+  const FLAG = 'hse_crit_v1';
+  const CRIT_KEYWORDS = [
+    'عدم نشتی آب خنک','خشک بودن محوطه','عملکرد صحیح سیستم سوخت','دسترسی آزاد به کلید اضطراری',
+    'لیمیت','سالم بودن سیم','ترمزهای بالا','سالم بودن قلاب',
+    'ترمز سرویس','عدم نشتی گاز LPG','ROPS',
+    'وجود کپسول در محل',
+    'سالم بودن حفاظ','باز بودن خروجی','استفاده صحیح PPE',
+    'ماسک تنفسی'
+  ];
+  function run(){
+    try{
+      if(localStorage.getItem(FLAG)) return;
+      if(!me || me.role!=='manager' || typeof TPLS==='undefined' || !TPLS || typeof queueModule!=='function') return;
+      let changed = 0;
+      Object.keys(TPLS).forEach(tk=>{
+        const t = TPLS[tk];
+        if(!t || !Array.isArray(t.items)) return;
+        t.items = t.items.map(it=>{
+          if(inspIsCritical(it)) return it;
+          const txt = String(it);
+          if(CRIT_KEYWORDS.some(k=>txt.indexOf(k)>=0)){ changed++; return txt + ' ' + INSP_CRIT_TAG; }
+          return it;
+        });
+      });
+      if(changed){ db.tpls = TPLS; queueModule('tpls'); save({immediate:true}); }
+      localStorage.setItem(FLAG, '1');
+      if(changed && typeof toast==='function') toast('✔ '+changed+' قلم بحرانی پیش‌فرض برچسب‌گذاری شد');
+    }catch(e){ console.warn('برچسب‌گذاری اقلام بحرانی:', e); }
+  }
+  window.addEventListener('load', function(){ setTimeout(run, 6000); });
+})();
+
 </script>
 </body>
 </html>
