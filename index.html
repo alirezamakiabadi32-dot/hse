@@ -1049,14 +1049,13 @@ function s5ScoreOf(rec){
     const per={}; keys.forEach(k=>{const m=s5ItemsOf(k).length*4;per[k]={score:0,max:m,pct:0}});
     return {total:0,max:s5TotalMax(),pct:0,per,band:'D'};
   }
-  let total=0, per={};
+  let total=0, max=0, per={};
   keys.forEach(k=>{
-    const items=s5ItemsOf(k), vals=rec.s5[k]||{}, mx=items.length*4;
-    let s=0; items.forEach((_,i)=>{ s+=(+vals[i]||0); });
+    const items=s5ItemsOf(k), vals=rec.s5[k]||{};
+    let s=0, mx=0; items.forEach((_,i)=>{ if(vals[i]==='na') return; mx+=4; s+=(+vals[i]||0); });
     per[k]={score:s, max:mx, pct: mx? Math.round(s/mx*100):0};
-    total+=s;
+    total+=s; max+=mx;
   });
-  const max=s5TotalMax();
   const pct= max? Math.round(total/max*100):0;
   const band = pct>=85?'A': pct>=70?'B': pct>=50?'C':'D';
   return {total, max, pct, per, band};
@@ -2316,7 +2315,8 @@ function saveForm(k,id){
      if(r.value==='fail')fails.push(TPLS[rec.tpl].items[+i])
    });
    rec.answers=ans;rec.fails=fails;
-   rec.score=Math.round((TPLS[rec.tpl].items.length-fails.length)/TPLS[rec.tpl].items.length*100);
+   const applic=Object.keys(ans).filter(i=>ans[i]!=='na').length;
+   rec.score=applic?Math.round((applic-fails.length)/applic*100):100;
    if(!Object.keys(ans).length)bad='نتیجه اقلام چک‌لیست';
   }
  }
@@ -2408,17 +2408,18 @@ function drawS5Wizard(){
    body='<div class="s5-hero"><b>'+esc(t.num)+'. '+esc(t.name)+' ('+esc(t.en)+')</b><br><small>'+esc(t.hint||'')+'</small></div>';
    body+='<div style="border:1px solid var(--line);border-radius:10px;overflow:hidden">';
    t.items.forEach((it,i)=>{
-     const v=+vals[i]||0;
+     const isNa=vals[i]==='na';
+     const v=isNa?-1:(+vals[i]||0);
      let opts='';
      const labels=['۰ اجرا نشده','۱ شروع','۲ ناقص','۳ انجام','۴ کامل'];
      for(let s=0;s<=MAX;s++){
        opts+='<button type="button" class="btn sm '+(v===s?'pri':'ghost')+'" style="padding:4px 8px;font-size:11px" onclick="s5SetItem(\''+k+'\','+i+','+s+')">'+labels[s]+'</button>';
      }
+     opts+='<button type="button" class="btn sm '+(isNa?'pri':'ghost')+'" style="padding:4px 8px;font-size:11px" onclick="s5SetItem(\''+k+'\','+i+',\'na\')">➖ نامرتبط</button>';
      body+='<div class="s5row" style="padding:10px 12px"><span style="flex:1;font-size:12.5px">'+esc(it)+'</span><span style="display:flex;gap:4px;flex-wrap:wrap">'+opts+'</span></div>';
    });
    body+='</div>';
-   const mx=t.items.length*MAX;
-   let s=0; t.items.forEach((_,i)=>{ s+=(+vals[i]||0) });
+   let mx=0, s=0; t.items.forEach((_,i)=>{ if(vals[i]==='na') return; mx+=MAX; s+=(+vals[i]||0) });
    const pct=mx?Math.round(s/mx*100):0;
    const col=pct>=85?'var(--ok)':pct>=70?'#2563eb':pct>=50?'var(--warn)':'var(--bad)';
    body+='<div style="margin-top:12px;padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><b>امتیاز این رکن: '+nd(s)+' از '+nd(mx)+' ('+nd(pct)+'٪)</b>'+s5BandChip(pct>=85?'A':pct>=70?'B':pct>=50?'C':'D')+'<div class="s5-bar" style="width:100%;margin-top:6px"><i style="width:'+pct+'%;background:'+col+'"></i></div></div>';
