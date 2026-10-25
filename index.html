@@ -10,7 +10,6 @@
 <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -451,7 +450,6 @@ html{-webkit-text-size-adjust:100%}
     <div id="bellpop" class="bellpop hidden"></div>
    </div>
    <div class="uchip" id="uchip" title="حساب کاربری"><span id="uav">🦺</span><div><b id="uname"></b><small id="urole"></small></div></div>
-   <button class="tbtn" onclick="pwForm()" title="تغییر رمز" aria-label="تغییر رمز">🔑</button>
    <button class="tbtn" onclick="logout()" title="خروج" aria-label="خروج">🚪<span class="tghide"> خروج</span></button>
   </div>
   <div id="content"></div>
@@ -467,31 +465,9 @@ html{-webkit-text-size-adjust:100%}
 /* ============================================================
    سامانه جامع HSE فولاد تنبور — نسخه ۴.۳ (اصلاح باگ‌ها)
 ============================================================ */
-const firebaseConfig = {
-  apiKey: "AIzaSyDjc0YZJye8Y8opAOdRWFwKS9Ica0M3h_s",            /* ← از Firebase Console > Project settings > General > Web API Key */
-  authDomain: "hseta-58036.firebaseapp.com",
-  projectId: "hseta-58036",
-  databaseURL: "https://hseta-58036-default-rtdb.firebaseio.com/"
-};
+const firebaseConfig = { databaseURL: "https://hseta-58036-default-rtdb.firebaseio.com/" };
 firebase.initializeApp(firebaseConfig);
-let fbAuth = null, AUTH_ERR = '';
-const AUTH_ENV_OK = /^https?:$/.test(location.protocol);
-try{
-  if(!AUTH_ENV_OK) throw new Error('file-protocol');
-  fbAuth = firebase.auth();
-  try{ fbAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION); }catch(e){}
-}catch(e){ fbAuth = null; AUTH_ERR = AUTH_ENV_OK ? 'کتابخانه Firebase Auth بارگذاری نشد (اینترنت/فیلترشکن را بررسی کنید)' : 'این نسخه باید از طریق آدرس https باز شود، نه مستقیم از فایل گوشی/کامپیوتر'; }
-const rootRef = firebase.database().ref();
-const dbRef = rootRef.child('hse_data');
-const AUTH_READY = !/^PASTE/.test(firebaseConfig.apiKey);
-window.addEventListener('DOMContentLoaded',function(){ if(AUTH_ERR){ var n=document.querySelector('.lnote'); if(n){ n.textContent='⚠️ '+AUTH_ERR; n.style.color='#b91c1c'; n.style.fontWeight='700'; } } });
-let _secApp=null;
-function fbSec(){
-  if(!_secApp){ _secApp=firebase.initializeApp(firebaseConfig,'secondary'); }
-  const a=_secApp.auth();
-  try{ a.setPersistence(firebase.auth.Auth.Persistence.NONE); }catch(e){}
-  return a;
-}
+const dbRef = firebase.database().ref('hse_data');
 
 const LS='hse_foundry_cloud';
 let db=null, me=null, curPage='dash', riskFilter=null, riskMethod='matrix';
@@ -537,31 +513,6 @@ function _sha256Hex(str){
 }
 function hashPw(username, pw){ return _sha256Hex(String(username||'').toLowerCase()+':'+String(pw||'')); }
 function isHashedPw(v){ return /^[0-9a-f]{64}$/.test(String(v||'')); }
-
-/* ---------- ورود با Firebase Authentication ----------
-   ایمیل مصنوعی از نام کاربری ساخته می‌شود و رمز Auth همان هش SHA-256 است
-   (رمزهای قبلی کاربران بدون تغییر کار می‌کنند و محدودیت ۶ نویسه Firebase دور زده می‌شود). */
-const AUTH_MAIL_DOMAIN='hse-tanbour.app';
-function authKey(u){ return String(u||'').trim().toLowerCase().replace(/[^a-z0-9._-]/g,function(c){return '_x'+c.charCodeAt(0).toString(16)+'_'}); }
-function genKey(u){ return authKey(u).replace(/\./g,'~'); }
-function authEmail(u,gen){ return authKey(u)+(gen>0?'+g'+gen:'')+'@'+AUTH_MAIL_DOMAIN; }
-function authPass(u,pw){ return hashPw(u,pw); }
-async function getGen(u){
-  try{ const s=await rootRef.child('auth_gen/'+genKey(u)).once('value'); return +s.val()||0; }catch(e){ return 0; }
-}
-function authErrText(e){
-  const c=(e&&e.code)||'';
-  if(c==='auth/invalid-credential'||c==='auth/wrong-password'||c==='auth/user-not-found'||c==='auth/invalid-email'||c==='auth/invalid-login-credentials') return 'نام کاربری یا رمز اشتباه است';
-  if(c==='auth/too-many-requests') return 'تلاش‌های ناموفق زیاد بود؛ چند دقیقه بعد دوباره تلاش کنید';
-  if(c==='auth/network-request-failed') return 'ارتباط با اینترنت برقرار نیست';
-  if(c==='auth/operation-not-allowed') return 'ورود با ایمیل/رمز در Firebase فعال نشده است';
-  if(c==='auth/api-key-not-valid'||c==='auth/invalid-api-key') return 'apiKey نامعتبر است';
-  if(c==='auth/email-already-in-use') return 'این نام کاربری قبلاً حساب دارد';
-  if(c==='auth/requires-recent-login') return 'برای این کار دوباره وارد شوید';
-  if(c==='hse/no-profile') return 'برای این حساب دسترسی/پروفایل تعریف نشده است';
-  if(/permission_denied|PERMISSION_DENIED/i.test(String(e&&e.message||c))) return 'دسترسی این حساب به داده‌ها مجاز نیست';
-  return 'خطا: '+(c||(e&&e.message)||'نامشخص');
-}
 
 /* ---------- لیست‌های پویا ---------- */
 const DEFAULT_LISTS = {
@@ -1796,7 +1747,7 @@ function seed(){
  const d={areas:DEFAULT_LISTS.AREAS0.slice(),tpls:defaultTPLS(),s5_tpls:defaultS5TPLS(),scoreArch:[],scoreRules:defaultScoreRules(),permissions:defaultPerms(),lists:{},s5:[],fmea:[],jsa:[],lec:[]};
  Object.keys(DEFAULT_LISTS).forEach(k=>d.lists[k]=DEFAULT_LISTS[k].slice());
  const PS=[['علی رضایی','اپراتور کوره','سالن ذوب','worker','worker'],['حسین کریمی','قالب‌ساز','قالب‌سازی و مولر','worker','hossein'],['مهدی احمدی','ریخته‌گر','ریخته‌گری مذاب','worker','mehdi'],['رضا موسوی','اپراتور سندبلاست','سندبلاست و تمیزکاری','worker','reza'],['جواد نوری','جوشکار','برش و جوشکاری','worker','javad'],['سعید قاسمی','اپراتور مولر','قالب‌سازی و مولر','worker','saeed'],['امیر حیدری','اپراتور جرثقیل','سالن ذوب','worker','amir'],['محمد صادقی','انباردار','انبار مواد و کک','worker','mohammad'],['نرگس شریفی','کارشناس آزمایشگاه','آزمایشگاه','worker','narges'],['فاطمه یوسفی','مسئول اداری','اداری و رفاهی','worker','fateme'],['حسن عباسی','تعمیرکار مکانیک','تأسیسات','worker','hasan'],['ایمان توکلی','برقکار','تأسیسات','worker','iman'],['سارا محمدی','کارشناس HSE','اداری و رفاهی','expert','expert'],['رضا کریمی','مدیر کارخانه','اداری و رفاهی','manager','manager']];
- d.personnel=PS.map(x=>({id:uid('USR'),name:x[0],job:x[1],area:x[2],role:x[3],u:x[4]}));
+ d.personnel=PS.map(x=>({id:uid('USR'),name:x[0],job:x[1],area:x[2],role:x[3],u:x[4],p:hashPw(x[4],'1234')}));
  Object.keys(PF).forEach(k=>{d[k]=[]});
  const R=(m,o)=>{const base={id:uid(PF[m]),createdBy:'سامانه',createdJ:o.date||todayJ(),log:[{u:'سامانه',d:o.date||todayJ(),t:'ثبت اولیه'}]};d[m].push(Object.assign(base,o));return base.id};
  const INC1=R('incidents',{date:jAgo(3),time:'10:15',area:'ریخته‌گری مذاب',type:'شبه‌حادثه (Near Miss)',title:'پاشش مذاب هنگام شارژ کوره',desc:'قطعات مرطوب همراه شارژ وارد کوره شد و پاشش مذاب رخ داد؛ فرد در فاصله امن بود.',injured:'خیر',immediate:'توقف شارژ و خشک‌سازی قطعات',rootCause:'ورود قطعات مرطوب به خط شارژ',corrective:'ساختن سایه‌بان انبار شارژ و کنترل رطوبت',status:'در حال بررسی',createdBy:'علی رضایی'});
@@ -3181,57 +3132,29 @@ function askDelListItem(listKey,encVal){
 }
 function personForm(i){const p=(i>=0&&db.personnel[i])?db.personnel[i]:null;
  openModal(p?'✏️ ویرایش پرسنل':'➕ تعریف شخص جدید',
- '<div class="fgrid"><div class="ff"><label>نام <i>*</i></label><input id="pf_n" class="in" value="'+esc(p?p.name:'')+'"></div><div class="ff"><label>سمت</label><input id="pf_j" class="in" value="'+esc(p?p.job:'')+'"></div><div class="ff"><label>واحد</label><select id="pf_a" class="in">'+db.areas.map(a=>'<option '+(p&&p.area===a?'selected':'')+'>'+esc(a)+'</option>').join('')+'</select></div><div class="ff"><label>نقش <i>*</i></label><select id="pf_r" class="in">'+['worker','expert','manager'].map(r=>'<option value="'+r+'" '+((p?p.role:'worker')===r?'selected':'')+'>'+ROLE_CHIP[r][0]+'</option>').join('')+'</select></div><div class="ff"><label>نام کاربری</label><input id="pf_u" class="in" value="'+esc(p?p.u:'')+'" style="direction:ltr"></div><div class="ff"><label>رمز '+(p?'(برای تغییر، رمز جدید را وارد کنید)':'(حداقل ۶ نویسه)')+'</label><input id="pf_p" type="password" class="in" value="" autocomplete="new-password" style="direction:ltr"></div></div>',
+ '<div class="fgrid"><div class="ff"><label>نام <i>*</i></label><input id="pf_n" class="in" value="'+esc(p?p.name:'')+'"></div><div class="ff"><label>سمت</label><input id="pf_j" class="in" value="'+esc(p?p.job:'')+'"></div><div class="ff"><label>واحد</label><select id="pf_a" class="in">'+db.areas.map(a=>'<option '+(p&&p.area===a?'selected':'')+'>'+esc(a)+'</option>').join('')+'</select></div><div class="ff"><label>نقش <i>*</i></label><select id="pf_r" class="in">'+['worker','expert','manager'].map(r=>'<option value="'+r+'" '+((p?p.role:'worker')===r?'selected':'')+'>'+ROLE_CHIP[r][0]+'</option>').join('')+'</select></div><div class="ff"><label>نام کاربری</label><input id="pf_u" class="in" value="'+esc(p?p.u:'')+'" style="direction:ltr"></div><div class="ff"><label>رمز '+(p?'(برای تغییر، رمز جدید را وارد کنید)':'')+'</label><input id="pf_p" type="password" class="in" value="" autocomplete="new-password" style="direction:ltr"></div></div>',
  '<button class="btn pri" onclick="savePerson('+i+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
 }
-async function savePerson(i){
- if(!me||me.role!=='manager'){toast('فقط مدیریت مجاز است');return}
+function savePerson(i){
  const n=$('#pf_n').value.trim(),un=$('#pf_u').value.trim(),pw=$('#pf_p').value.trim(),role=$('#pf_r').value;
  if(!n){toast('نام الزامی است');return}
  if(un&&db.personnel.some((p,j)=>p.u===un&&j!==i)){toast('نام کاربری تکراری');return}
  const old=(i>=0&&db.personnel[i])?db.personnel[i]:null;
- if(pw&&pw.length<6){toast('رمز باید حداقل ۶ نویسه باشد');return}
- const hadAcct=!!(old&&old.uid);
- const renamed=!!(old&&un!==(old.u||''));
- const needAcct=!!un&&(!hadAcct||renamed||!!pw);
- if(needAcct&&!pw){toast(hadAcct?'با تغییر نام کاربری، رمز جدید را وارد کنید':'برای حساب جدید رمز وارد کنید');return}
- if(needAcct&&hadAcct&&old.uid===me.uid){toast('رمز یا نام کاربری حساب خودتان را از دکمه 🔑 بالای صفحه تغییر دهید');return}
- let uidNew=old?(old.uid||''):'', gen=old?(old.pg||0):0;
- try{
-   if(needAcct){
-     const base=await getGen(un);
-     let g=base+((hadAcct&&!renamed)?1:0), made=null;
-     for(let k=0;k<4&&!made;k++){
-       try{ made=await fbSec().createUserWithEmailAndPassword(authEmail(un,g),authPass(un,pw)); }
-       catch(e){ if(e&&e.code==='auth/email-already-in-use'){ g++; continue } throw e }
-     }
-     if(!made) throw new Error('create-failed');
-     try{ await fbSec().signOut(); }catch(e){}
-     uidNew=made.user.uid; gen=g;
-     const upd={}; upd['roles/'+uidNew]={role:role};
-     if(hadAcct) upd['roles/'+old.uid]=null;
-     if(g>0) upd['auth_gen/'+genKey(un)]=g;
-     await rootRef.update(upd);
-   } else if(hadAcct&&!un){
-     await rootRef.child('roles/'+old.uid).remove(); uidNew=''; gen=0;
-   } else if(hadAcct&&old.role!==role){
-     await rootRef.child('roles/'+old.uid).update({role:role});
-   }
- }catch(e){ toast('خطا: '+authErrText(e)); return }
- const rec={name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un,uid:uidNew,pg:gen};
+ if(old && un!==(old.u||'') && !pw){toast('با تغییر نام کاربری، رمز جدید را وارد کنید');return}
+ if(!old && un && !pw){toast('برای حساب جدید رمز وارد کنید');return}
+ const passField = pw ? (un? hashPw(un,pw) : '') : (old? old.p : '');
+ const rec={name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un,p:passField};
  let id;
- if(old){ Object.assign(old,rec); delete old.p; id=old.id; }
+ if(old){ Object.assign(old,rec); id=old.id; }
  else { id=uid('USR'); db.personnel.push(Object.assign({id:id},rec)); }
  queueRec('personnel', id);
  save();closeModal();toast('✔ ذخیره شد');refreshCurrent()
 }
 function delPerson(i){const p=db.personnel[i];if(!p)return;
- if(me.role!=='manager'){toast('فقط مدیریت مجاز است');return}
  if(p.id===me.id){toast('حساب خودتان قابل حذف نیست');return}
  askConfirm('«'+p.name+'» حذف شود؟',function(){
    db.personnel.splice(i,1);
    queueRec('personnel', p.id);
-   if(p.uid){ rootRef.child('roles/'+p.uid).remove().catch(function(){}); }
    save();refreshCurrent();toast('حذف شد')
  })}
 function addArea(){const v=$('#newarea').value.trim();if(!v){toast('نام واحد را وارد کنید');return}
@@ -4223,69 +4146,27 @@ function roleLogin(role){loginRole=role;closeCal();
  $('#lu').value='';$('#lp').value='';setLerr('');
  try{$('#lu').focus()}catch(e){}}
 function roleBack(){loginRole=null;$('#lformBox').classList.add('hidden');$('#lroles').classList.remove('hidden');setLerr('')}
-let _loginBusy=false, _appStarted=false;
-async function signOutClean(){
-  try{dbRef.off()}catch(e){}
-  _rtAttached=false; _bootP=null; _appStarted=false;
-  try{localStorage.removeItem(LS)}catch(e){}
-  try{sessionStorage.removeItem('hse_me')}catch(e){}
-  db=null; me=null;
-  try{ if(fbAuth) await fbAuth.signOut() }catch(e){}
-}
-async function doLogin(){
- if(!loginRole||_loginBusy)return;
+function doLogin(){
+ if(!loginRole)return;
+ if(!db||!Array.isArray(db.personnel)){setLerr('داده‌ها هنوز بارگذاری نشده‌اند، لطفاً چند لحظه صبر کنید');return}
  const u=$('#lu').value.trim(),p=$('#lp').value;
  if(!u||!p){setLerr('نام کاربری و رمز را وارد کنید');return}
- if(!fbAuth){setLerr(AUTH_ERR||'Firebase Auth در دسترس نیست');return}
- if(!AUTH_READY){setLerr('تنظیم Firebase کامل نیست: apiKey را در بخش firebaseConfig وارد کنید');return}
- _loginBusy=true; setLerr('');
- try{
-   const gen=await getGen(u);
-   await fbAuth.signInWithEmailAndPassword(authEmail(u,gen),authPass(u,p));
-   await ensureBoot();
-   if(!me){ const e=new Error('no-profile'); e.code='hse/no-profile'; throw e; }
-   if(me.role!==loginRole){
-     const r=me.role;
-     await signOutClean();
-     setLerr('این حساب با نقش «'+ROLEINFO[loginRole][1]+'» هم‌خوانی ندارد (نقش حساب: '+ROLEINFO[r][1]+')');
-     return;
-   }
-   startApp();
- }catch(e){
-   await signOutClean();
-   setLerr(authErrText(e));
- }finally{ _loginBusy=false; }
+ const hit=(x)=>{
+   if(!x.u||String(x.u).toLowerCase()!==u.toLowerCase()) return false;
+   if(isHashedPw(x.p)) return x.p===hashPw(x.u,p);
+   return x.p===p; /* رمز قدیمی متنی */
+ };
+ const f=db.personnel.find(x=>hit(x)&&x.role===loginRole);
+ if(f){
+   if(!isHashedPw(f.p)){ f.p=hashPw(f.u,p); queueRec('personnel',f.id); save(); }
+   login(f); return;
+ }
+ const ex=db.personnel.find(x=>hit(x));
+ setLerr(ex?'این حساب با نقش «'+ROLEINFO[loginRole][1]+'» هم‌خوانی ندارد':'نام کاربری یا رمز اشتباه است');
 }
-function logout(){ askConfirm('از حساب کاربری خارج می‌شوید؟',async function(){ await signOutClean(); location.reload(); }); }
-if(fbAuth) fbAuth.onAuthStateChanged(async function(user){
-  if(!user||_loginBusy) return;
-  try{ await ensureBoot(); }catch(e){}
-  if(_loginBusy) return;
-  if(me) startApp(); else await signOutClean();
-});
-
-/* ---------- تغییر رمز خود کاربر ---------- */
-function pwForm(){
- openModal('🔑 تغییر رمز من',
-  '<div class="fgrid"><div class="ff wide"><label>رمز فعلی</label><input id="cp_o" type="password" class="in" autocomplete="current-password" style="direction:ltr"></div>'
-  +'<div class="ff"><label>رمز جدید (حداقل ۶ نویسه)</label><input id="cp_n" type="password" class="in" autocomplete="new-password" style="direction:ltr"></div>'
-  +'<div class="ff"><label>تکرار رمز جدید</label><input id="cp_n2" type="password" class="in" autocomplete="new-password" style="direction:ltr"></div></div>',
-  '<button class="btn pri" onclick="changeMyPw()">💾 تغییر رمز</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
-}
-async function changeMyPw(){
- const o=$('#cp_o').value,n=$('#cp_n').value,n2=$('#cp_n2').value;
- if(!o||!n){toast('همه فیلدها را پر کنید');return}
- if(n.length<6){toast('رمز جدید حداقل ۶ نویسه باشد');return}
- if(n!==n2){toast('تکرار رمز یکسان نیست');return}
- const user=fbAuth&&fbAuth.currentUser; if(!user||!me||!me.u){toast('ابتدا وارد شوید');return}
- try{
-   const cred=firebase.auth.EmailAuthProvider.credential(user.email,authPass(me.u,o));
-   await user.reauthenticateWithCredential(cred);
-   await user.updatePassword(authPass(me.u,n));
-   closeModal(); toast('✔ رمز تغییر کرد');
- }catch(e){ toast(authErrText(e)); }
-}
-function startApp(){if(_appStarted)return;_appStarted=true;$('#login').classList.add('hidden');$('#app').classList.remove('hidden');
+function login(p){me={name:p.name,role:p.role,id:p.id,area:p.area||''};try{sessionStorage.setItem('hse_me',JSON.stringify(me))}catch(e){};startApp()}
+function logout(){ askConfirm('از حساب کاربری خارج می‌شوید؟',function(){ try{sessionStorage.removeItem('hse_me')}catch(e){} me=null;location.reload(); }); }
+function startApp(){$('#login').classList.add('hidden');$('#app').classList.remove('hidden');
  $('#uname').textContent=me.name;$('#urole').textContent=ROLEINFO[me.role][1];$('#uav').textContent=ROLEINFO[me.role][0];
  const d=new Date();$('#tdate').textContent=['یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه','شنبه'][d.getDay()]+' '+nd(todayJ());
  setPage('dash')}
@@ -4293,10 +4174,7 @@ function startApp(){if(_appStarted)return;_appStarted=true;$('#login').classList
 /* ============================================================
    FIX: Firebase on('value') — جلوگیری از حلقه بازخورد
 ============================================================ */
-let _rtAttached=false;
-function _attachRealtime(){
-  if(_rtAttached) return; _rtAttached=true;
-  dbRef.on('value', (snapshot) => {
+dbRef.on('value', (snapshot) => {
   if (_isSaving || hasPendingChanges()) return;
   const cloud = snapshot.val();
   if (!cloud) return;
@@ -4320,19 +4198,15 @@ function _attachRealtime(){
   } finally {
     setTimeout(()=>{ _isApplyingRemote = false; }, 300);
   }
-}, (err)=>{ console.warn('Realtime listener:', err&&err.code); });
-}
+});
 
 /* ============================================================
    FIX: boot — ترتیب صحیح
 ============================================================ */
-let _bootP=null;
-function ensureBoot(){ return _bootP||(_bootP=_bootImpl()); }
-async function _bootImpl(){
- let loaded=false, legacyStore=false, readOK=false;
+(async function boot(){
+ let loaded=false, legacyStore=false;
  try{
   const snapshot = await dbRef.once('value');
-  readOK = true;
   const data = snapshot.val();
   if(data && data.personnel){
     db = sanitizeData(data); loaded = true;
@@ -4361,7 +4235,7 @@ async function _bootImpl(){
  TPLS=db.tpls;
  S5=db.s5_tpls;
 
- if(!loaded && readOK){
+ if(!loaded){
    try{
      const payload = {};
      Object.keys(db).forEach(k => {
@@ -4381,18 +4255,12 @@ async function _bootImpl(){
  try{ensureArchives()}catch(e){}
  if(legacyStore) save({immediate:true});
 
- me=null;
- try{
-   const au=fbAuth.currentUser;
-   if(au){
-     const rs=await rootRef.child('roles/'+au.uid).once('value');
-     const rl=rs.val()&&rs.val().role;
-     const pp=db.personnel.find(x=>x.uid===au.uid);
-     if(pp && rl && ROLEINFO[rl]) me={name:pp.name,role:rl,id:pp.id,area:pp.area||'',uid:au.uid,u:pp.u};
-   }
- }catch(e){ me=null }
- if(me){ _attachRealtime(); setTimeout(()=>{ try{ checkConnection(); }catch(e){} }, 500); }
-}
+ try{me=JSON.parse(sessionStorage.getItem('hse_me')||'null')}catch(e){me=null}
+ if(me){const pp=db.personnel.find(x=>x.id===me.id);if(!pp)me=null;else{me.area=pp.area||'';me.name=pp.name;me.role=pp.role}}
+ if(me)startApp();
+
+ setTimeout(()=>{ try{ checkConnection(); }catch(e){} }, 500);
+})();
 
 /* ============================================================
    فیلتر کشویی زیر عنوان هر ستون برای همه جداول (.tbl)
