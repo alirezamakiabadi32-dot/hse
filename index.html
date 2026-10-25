@@ -4260,6 +4260,93 @@ dbRef.on('value', (snapshot) => {
 
  setTimeout(()=>{ try{ checkConnection(); }catch(e){} }, 500);
 })();
+
+/* ============================================================
+   فیلتر کشویی زیر عنوان هر ستون برای همه جداول (.tbl)
+   مقادیر هر کشویی از خود ستون ساخته می‌شود و با تغییر داده‌ها به‌روز می‌شود
+============================================================ */
+(function(){
+ const FLT_STATE={};
+ const st=document.createElement('style');
+ st.textContent='.tbl tr.cflt-row th{background:#fff;padding:4px 6px;font-weight:400}.tbl select.cflt{width:100%;min-width:90px;max-width:260px;border:1px solid #cbd5e1;border-radius:7px;padding:4px 6px;font-size:11.5px;background:#fff;font-weight:400;color:var(--ink)}';
+ document.head.appendChild(st);
+ const norm=s=>String(s||'')
+   .replace(/[يى]/g,'ی').replace(/ك/g,'ک')
+   .replace(/[۰-۹]/g,d=>String(d.charCodeAt(0)-0x6F0))
+   .replace(/[٠-٩]/g,d=>String(d.charCodeAt(0)-0x660))
+   .replace(/\s+/g,' ').trim().toLowerCase();
+ const cellText=c=>c?String(c.textContent||'').replace(/\s+/g,' ').trim():'';
+ // فقط ردیف‌های داده (ردیف پیام «موردی نیست» که colspan دارد کنار گذاشته می‌شود)
+ function dataRows(t,n){
+  return Array.from(t.tBodies[0].rows).filter(r=>r.cells.length>=n);
+ }
+ function fillSel(t,i){
+  const sel=t._cflt[i]; if(!sel) return;
+  const n=t._cflt.length;
+  const vals=new Set();
+  dataRows(t,n).forEach(r=>{ const v=cellText(r.cells[i]); if(v) vals.add(v); });
+  const list=Array.from(vals).sort((a,b)=>a.localeCompare(b,'fa'));
+  const sig=list.join('\u0001');
+  if(sel._sig===sig) return;
+  const cur=sel.value||sel._want||'';
+  sel._want='';
+  sel._sig=sig;
+  const opts=list.slice();
+  if(cur && !opts.some(v=>norm(v)===norm(cur))) opts.push(cur);
+  sel.innerHTML='<option value="">همه</option>'+opts.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join('');
+  sel.value=cur;
+ }
+ function fltApply(t){
+  const sels=t._cflt; if(!sels||!t.tBodies[0]) return;
+  sels.forEach((_,i)=>fillSel(t,i));
+  const qs=sels.map(x=>x?norm(x.value):'');
+  const active=qs.some(q=>q);
+  Array.from(t.tBodies[0].rows).forEach(r=>{
+    let ok=true;
+    if(active) ok=qs.every((q,i)=>!q||norm(cellText(r.cells[i]))===q);
+    r.style.display=ok?'':'none';
+  });
+ }
+ function fltAdd(t){
+  if(t._cflt||!t.tHead||!t.tHead.rows.length||!t.tBodies[0]) return;
+  const hr=t.tHead.rows[0];
+  const heads=Array.from(hr.cells);
+  if(!heads.length) return;
+  const key=heads.map(c=>c.textContent.trim()).join('|');
+  const saved=FLT_STATE[key]||[];
+  const fr=t.tHead.insertRow(-1); fr.className='cflt-row';
+  const top=hr.offsetHeight;
+  t._cflt=heads.map((h,i)=>{
+    const td=document.createElement('th');
+    td.style.top=top+'px';
+    fr.appendChild(td);
+    const label=h.textContent.trim();
+    if(!label||/عملیات|اقدام/.test(label)) return null;
+    const sel=document.createElement('select');
+    sel.className='cflt';
+    sel._want=saved[i]||'';
+    sel.addEventListener('change',()=>{
+      FLT_STATE[key]=t._cflt.map(x=>x?x.value:'');
+      fltApply(t);
+    });
+    td.appendChild(sel);
+    return sel;
+  });
+  fltApply(t);
+ }
+ function scan(){ document.querySelectorAll('table.tbl').forEach(t=>{ if(!t._cflt) fltAdd(t); }); }
+ let pend=false;
+ const mo=new MutationObserver(muts=>{
+  muts.forEach(m=>{
+   const el=m.target.nodeType===1?m.target:m.target.parentElement;
+   const tb=el&&el.closest('table.tbl');
+   if(tb&&tb._cflt) fltApply(tb);
+  });
+  if(!pend){ pend=true; requestAnimationFrame(()=>{ pend=false; scan(); }); }
+ });
+ mo.observe(document.body,{childList:true,subtree:true});
+ scan();
+})();
 </script>
 </body>
 </html>
