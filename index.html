@@ -2095,7 +2095,7 @@ function exportRecord(k,id,format){
     let out;
     switch(f.t){
       case 'chk': out=v?'✔ بله':'—'; break;
-      case 'people': out=(v||[]).join('، '); break;
+      case 'people': out=peopleOut(r,v); break;
       case 'num': out=nfmt(v); break;
       case 'tplsel': out=TPLS[v]?TPLS[v].t:esc(v); break;
       default: out=esc(v);
@@ -2405,10 +2405,12 @@ function openForm(k,id,pre){
  if(k==='risks')b+='<div class="lvprev" id="lvprev"></div>';
  if(k==='fmea')b+='<div class="lvprev" id="fmprev"></div>';
  if(k==='lec')b+='<div class="lvprev" id="lecprev"></div>';
+ if(ATT_MODS.includes(k)){ _attWork=attFromArr(rec?rec.attSigs:null); b+=attSigBlock(rec?(rec.people||[]):[]); }
  b+=signFormBlock(k,rec);
  openModal((rec?'ویرایش — ':'ثبت جدید — ')+M.t,b,
   '<button class="btn pri" onclick="saveForm(\''+k+'\','+(id?'\''+id+'\'':'null')+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
  setTimeout(()=>{const mb=document.getElementById('mbody');if(mb)mb.scrollTop=0},50);
+ if(ATT_MODS.includes(k)) $$('#mbody input[ppi="people"]').forEach(c=>c.onchange=attRefresh);
  if(k==='inspections'){const sel=$('#f_tpl');if(sel){const fill=()=>renderTplItems(sel.value,rec?rec.answers:null);sel.onchange=fill;fill()}}
  if(k==='risks'){const upd=()=>{const e1=$('#f_s'),e2=$('#f_p');const s=+(e1&&e1.value)||0,p=+(e2&&e2.value)||0;const el=$('#lvprev');if(el)el.innerHTML='سطح ریسک فعلی: '+lvlChip(s*p)};['f_s','f_p'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
  if(k==='fmea'){const upd=()=>{const S=+($('#f_s')||{}).value||1,O=+($('#f_o')||{}).value||1,D=+($('#f_d')||{}).value||1;const rpn=S*O*D;const cls=rpn<=50?'b-ok':rpn<=100?'b-warn':rpn<=200?'b-org':'b-bad';const lbl=rpn<=50?'کم':rpn<=100?'متوسط':rpn<=200?'بالا':'بحرانی';const el=$('#fmprev');if(el)el.innerHTML='RPN (S×O×D) = <b>'+nd(S)+' × '+nd(O)+' × '+nd(D)+' = '+nd(rpn)+'</b> — <span class="chip '+cls+'">'+lbl+'</span>'};['f_s','f_o','f_d'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
@@ -2484,6 +2486,7 @@ function saveForm(k,id){
    if(!steps.length){bad=bad||'حداقل یک مرحله شغلی'}else rec.steps=steps;
  }
  collectSignature(rec);
+ if(ATT_MODS.includes(k)){ attSync(); rec.attSigs=(rec.people||[]).filter(n=>_attWork[n]&&_attWork[n].img).map(n=>({n:n,img:_attWork[n].img})); }
  if(bad){toast('⚠️ تکمیل الزامی است: '+bad);return}
 
  if(k==='actions'){
@@ -3654,7 +3657,7 @@ function initSignPads(){
   document.querySelectorAll('canvas.sign-pad').forEach(cv=>{
     const ctx=cv.getContext('2d');
     ctx.lineWidth=2.4; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#0f172a';
-    cv.style.touchAction='none'; cv.dataset.drawn='';
+    cv.style.touchAction='none'; if(cv.dataset.drawn===undefined) cv.dataset.drawn='';
     let down=false,last=null;
     const pos=e=>{const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)*cv.width/r.width,y:(e.clientY-r.top)*cv.height/r.height}};
     cv.onpointerdown=e=>{down=true;last=pos(e);try{cv.setPointerCapture(e.pointerId)}catch(_){}e.preventDefault()};
@@ -3675,6 +3678,55 @@ function collectSignature(rec){
   rec.signs[me.role]={name:me.name,job:myJob(),date:todayJ(),img:cv.toDataURL('image/png')};
 }
 
+/* ---------- امضای حاضران (TBT / TBM) ---------- */
+const ATT_MODS=['toolbox','tbm'];
+let _attWork={};
+function attFromArr(arr){ const o={}; (arr||[]).forEach(x=>{ if(x&&x.n&&x.img) o[x.n]={img:x.img}; }); return o; }
+function attSelectedNames(){ return $$('#mbody input[ppi="people"]:checked').map(c=>c.value); }
+function attSigInner(names){
+  if(!names.length) return '<div class="sign-empty">ابتدا حاضران را در بالا انتخاب کنید؛ کادر امضای هر نفر اینجا نمایش داده می‌شود.</div>';
+  return names.map(n=>{
+    const s=_attWork[n];
+    return '<div class="sign-box" data-att-row data-name="'+esc(n)+'" style="margin-bottom:8px"><div class="sign-title">'+esc(n)+'</div>'
+      +(s&&s.img?'<img class="sign-img att-old" src="'+s.img+'" alt="امضا" style="margin-bottom:6px">':'')
+      +'<canvas class="sign-pad att-pad" width="600" height="180"></canvas>'
+      +'<div class="sign-tools"><button type="button" class="btn ghost sm" onclick="attClear(this)">🧹 پاک کردن</button>'
+      +'<span class="sign-who">'+(s&&s.img?'امضای ثبت‌شده — برای تغییر دوباره امضا کنید':'امضا نشده')+'</span></div></div>';
+  }).join('');
+}
+function attSigBlock(names){
+  return '<div class="ff wide" style="margin-top:12px"><label>✍️ امضای حاضران <small style="color:var(--mut)">— هر حاضر زیر نام خود امضا می‌کند؛ امضا در فرم کنار نام ثبت می‌شود</small></label>'
+    +'<div id="attSigList">'+attSigInner(names)+'</div></div>';
+}
+function attSync(){
+  document.querySelectorAll('#attSigList [data-att-row]').forEach(row=>{
+    const n=row.dataset.name, cv=row.querySelector('canvas.att-pad'); if(!cv) return;
+    if(cv.dataset.drawn==='1') _attWork[n]={img:cv.toDataURL('image/png')};
+    else if(row.dataset.cleared==='1') delete _attWork[n];
+  });
+}
+window.attRefresh=function(){
+  attSync();
+  const w=document.getElementById('attSigList');
+  if(w){ w.innerHTML=attSigInner(attSelectedNames()); initSignPads(); }
+};
+window.attClear=function(btn){
+  const row=btn.closest('[data-att-row]'); if(!row) return;
+  const cv=row.querySelector('canvas.att-pad');
+  if(cv){ cv.getContext('2d').clearRect(0,0,cv.width,cv.height); cv.dataset.drawn=''; }
+  const img=row.querySelector('.att-old'); if(img) img.remove();
+  row.dataset.cleared='1';
+};
+function peopleOut(r,v){
+  const list=v||[], sigs=(r&&r.attSigs)||[];
+  if(!sigs.length) return esc(list.join('، '));
+  return list.map(n=>{
+    const a=sigs.find(x=>x.n===n);
+    return '<span style="display:inline-block;margin:2px 10px 2px 0;vertical-align:middle">'+esc(n)
+      +(a?' <img src="'+a.img+'" alt="امضا" style="height:34px;vertical-align:middle;border:1px dashed #e2e8f0;border-radius:4px;background:#fff">':'')+'</span>';
+  }).join('');
+}
+
 /* ---------- Detail ---------- */
 function openDetail(k,id){
  const M=MODS[k],r=db[k].find(x=>x.id===id);if(!r)return;
@@ -3682,7 +3734,7 @@ function openDetail(k,id){
  if(!isOwnRecord(k,r)){toast('فقط اطلاعات مربوط به خودتان قابل مشاهده است');return}
  let h='<div class="dhead"><span class="chip idc">'+esc(r.id)+'</span>'+(r.code?'<span class="chip b-org" style="direction:ltr;font-family:monospace">'+esc(r.code)+'</span>':'')+(M.status&&r.status?chip(r.status):'')+'<small style="color:var(--mut)">ثبت: '+esc(r.createdBy)+' / '+esc(r.createdJ)+'</small></div><div class="dgrid">';
  M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;const v=r[f.k];if(v===undefined||v===''||v===null)return;
-  let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=esc((v||[]).join('، '));break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;default:out=esc(v)}
+  let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=peopleOut(r,v);break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;default:out=esc(v)}
   h+='<div class="dl">'+f.l+'</div><div class="dv">'+out+'</div>'});
  h+='</div>';
  if(r.signs && hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
