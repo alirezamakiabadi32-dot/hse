@@ -4884,6 +4884,195 @@ function capaFromInspection(id, i){
   window.addEventListener('load', function(){ setTimeout(run, 6000); });
 })();
 
+
+/* ============================================================
+   گزارش عملکرد شخصی با انتخاب بازه‌ی تاریخ
+   فقط رکوردهای مرتبط با حساب کاربر فعلی را نشان می‌دهد
+============================================================ */
+(function(){
+  var KEY='myReport';
+  var _origCanView=canView;
+  canView=function(k){ if(k===KEY) return !!me; return _origCanView(k); };
+  SPECIAL[KEY]={t:'گزارش عملکرد من',i:'📑',ren:myReportPage};
+  NAV.push({g:'گزارش شخصی',items:[KEY]});
+
+  var AR={'۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9','٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'};
+  function normDate(s){
+    var x=String(s==null?'':s).replace(/[۰-۹٠-٩]/g,function(c){return AR[c]}).trim().replace(/-/g,'/');
+    var m=x.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if(!m) return '';
+    return m[1]+'/'+('0'+m[2]).slice(-2)+'/'+('0'+m[3]).slice(-2);
+  }
+  function recDate(r){ return normDate(r.date||r.startD||r.createdJ||''); }
+  function inR(r,f,t){ var d=recDate(r); return !!d && d>=f && d<=t; }
+  function listHas(a,n){ return Array.isArray(a) && a.indexOf(n)>=0; }
+  function arr(k){ return (db && db[k]) || []; }
+  function sumOf(a,key){ return a.reduce(function(s,r){return s+(Number(r[key])||0)},0); }
+  var CLOSED=['تایید و بسته شد','رد شده'];
+
+  function buildData(f,t){
+    var n=me.name, D={}, today=todayJ();
+    D.incRep=arr('incidents').filter(function(r){return r.createdBy===n && inR(r,f,t)});
+    D.incNear=D.incRep.filter(function(r){return String(r.type||'').indexOf('شبه')>=0});
+    D.incInj=arr('incidents').filter(function(r){return r.injured===n && inR(r,f,t)});
+    D.uns=arr('unsafe').filter(function(r){return (r.observer===n||r.createdBy===n) && inR(r,f,t)});
+    D.acts=arr('actions').filter(function(r){return r.owner===n && inR(r,f,t)});
+    D.actOpen=D.acts.filter(function(r){return CLOSED.indexOf(r.status)<0});
+    D.actLate=D.actOpen.filter(function(r){var d=normDate(r.due);return !!d && d<today});
+    D.actDone=D.acts.filter(function(r){return r.status==='تایید و بسته شد'});
+    D.insp=arr('inspections').filter(function(r){return r.inspBy===n && inR(r,f,t)});
+    D.risks=arr('risks').filter(function(r){return r.owner===n && inR(r,f,t)});
+    D.trn=arr('trainings').filter(function(r){return listHas(r.people,n) && inR(r,f,t)});
+    D.trnH=sumOf(D.trn,'dur');
+    D.tbm=arr('tbm').filter(function(r){return listHas(r.people,n) && inR(r,f,t)});
+    D.tbt=arr('toolbox').filter(function(r){return listHas(r.people,n) && inR(r,f,t)});
+    D.bbs=arr('bbs').filter(function(r){return r.person===n && inR(r,f,t)});
+    D.bbsSafe=sumOf(D.bbs,'safe');
+    D.bbsUnsafe=sumOf(D.bbs,'unsafe');
+    D.ppe=arr('ppeTx').filter(function(r){return r.person===n && inR(r,f,t)});
+    D.ptw=arr('ptw').filter(function(r){return listHas(r.workers,n) && inR(r,f,t)});
+    return D;
+  }
+
+  function row(l,v){
+    return '<tr><td>'+esc(l)+'</td><td style="text-align:right;font-weight:700">'+v+'</td></tr>';
+  }
+
+  function reportBody(f,t){
+    var D=buildData(f,t);
+    var any=[D.incRep,D.incInj,D.uns,D.acts,D.insp,D.risks,D.trn,D.tbm,D.tbt,D.bbs,D.ppe,D.ptw].some(function(a){return a.length});
+    var h='<p style="font-size:12.5px;color:var(--mut);margin-bottom:10px">بازه گزارش: <b>'+nd(f)+'</b> تا <b>'+nd(t)+'</b></p>';
+    if(!any){
+      return h+'<div style="text-align:center;color:var(--mut);padding:24px">در این بازه هیچ فعالیتی برای شما ثبت نشده است.</div>';
+    }
+    h+='<div class="tscroll"><table class="tbl"><thead><tr><th>شاخص</th><th>مقدار</th></tr></thead><tbody>';
+    h+=row('حادثه و شبه‌حادثه‌ای که ثبت کرده‌اید', nd(D.incRep.length)+' (شبه‌حادثه: '+nd(D.incNear.length)+')');
+    h+=row('حادثه‌ای که در آن مصدوم بوده‌اید', nd(D.incInj.length));
+    h+=row('آنومالی‌های ثبت‌شده توسط شما', nd(D.uns.length));
+    h+=row('اقدامات اصلاحی (مسئول)', nd(D.acts.length)+' — باز: '+nd(D.actOpen.length)+' — معوق: '+nd(D.actLate.length)+' — بسته‌شده: '+nd(D.actDone.length));
+    h+=row('بازرسی‌های انجام‌شده', nd(D.insp.length));
+    h+=row('ریسک‌های تحت مسئولیت', nd(D.risks.length));
+    h+=row('دوره‌های آموزشی (حضور)', nd(D.trn.length)+' دوره — '+nd(D.trnH)+' ساعت');
+    h+=row('جلسات TBM (حضور)', nd(D.tbm.length));
+    h+=row('جلسات TBT (حضور)', nd(D.tbt.length));
+    h+=row('مشاهدات رفتاری BBS', nd(D.bbs.length)+' — ایمن: '+nd(D.bbsSafe)+' — ناایمن: '+nd(D.bbsUnsafe));
+    h+=row('تجهیزات PPE تحویل‌شده', nd(D.ppe.length));
+    h+=row('مجوز کار (PTW) با نام شما', nd(D.ptw.length));
+    h+='</tbody></table></div>';
+
+    var items=[];
+    D.incRep.forEach(function(r){items.push({d:recDate(r),k:'حادثه / شبه‌حادثه',x:r.title||r.type||'',s:r.status||''})});
+    D.incInj.forEach(function(r){items.push({d:recDate(r),k:'حادثه (مصدوم)',x:r.title||'',s:r.status||''})});
+    D.uns.forEach(function(r){items.push({d:recDate(r),k:'آنومالی',x:r.desc||'',s:r.status||''})});
+    D.acts.forEach(function(r){items.push({d:recDate(r),k:'اقدام اصلاحی',x:(r.code?'['+r.code+'] ':'')+(r.desc||''),s:r.status||''})});
+    D.trn.forEach(function(r){items.push({d:recDate(r),k:'آموزش',x:r.course||'',s:'حاضر'})});
+    if(items.length){
+      items.sort(function(a,b){return String(b.d).localeCompare(String(a.d))});
+      h+='<div class="msh" style="margin-top:16px">📋 ریز رکوردها</div>';
+      h+='<div class="tscroll"><table class="tbl"><thead><tr><th>تاریخ</th><th>نوع</th><th>شرح</th><th>وضعیت</th></tr></thead><tbody>';
+      items.forEach(function(it){
+        h+='<tr><td>'+nd(it.d)+'</td><td>'+esc(it.k)+'</td><td>'+esc(it.x)+'</td><td>'+esc(it.s)+'</td></tr>';
+      });
+      h+='</tbody></table></div>';
+    }
+    return h;
+  }
+
+  var PERIODS=[['day','روزانه'],['week','هفتگی'],['month','ماهانه'],['quarter','سه‌ماهه'],['year','سالانه'],['custom','دلخواه']];
+  function fmtJ(y,m,d){ return y+'/'+p2(m)+'/'+p2(d); }
+  function dayAdd(s,n){
+    var g=jParse(s); if(!g) return '';
+    var d=new Date(g.gy,g.gm-1,g.gd+n);
+    var j=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());
+    return fmtJ(j.jy,j.jm,j.jd);
+  }
+  function diffDays(a,b){
+    var ga=jParse(a), gb=jParse(b); if(!ga||!gb) return 0;
+    return Math.round((new Date(gb.gy,gb.gm-1,gb.gd)-new Date(ga.gy,ga.gm-1,ga.gd))/86400000);
+  }
+  // بازه‌ی کامل دوره‌ای که تاریخ «a» در آن قرار دارد
+  function periodRange(p,a){
+    var x=a.split('/').map(Number), jy=x[0], jm=x[1];
+    if(p==='day') return [a,a];
+    if(p==='week'){
+      var g=jParse(a), dow=new Date(g.gy,g.gm-1,g.gd).getDay();
+      var start=dayAdd(a,-((dow+1)%7));
+      return [start,dayAdd(start,6)];
+    }
+    if(p==='month'){ var s1=fmtJ(jy,jm,1); return [s1,dayAdd(jAddM(s1,1),-1)]; }
+    if(p==='quarter'){ var qm=Math.floor((jm-1)/3)*3+1, s2=fmtJ(jy,qm,1); return [s2,dayAdd(jAddM(s2,3),-1)]; }
+    if(p==='year'){ var s3=fmtJ(jy,1,1); return [s3,dayAdd(jAddM(s3,12),-1)]; }
+    return null;
+  }
+  function shiftRange(p,f,t,n){
+    if(p==='custom'){
+      var span=diffDays(f,t)+1;
+      return [dayAdd(f,n*span),dayAdd(t,n*span)];
+    }
+    var anchor;
+    if(p==='day') anchor=dayAdd(f,n);
+    else if(p==='week') anchor=dayAdd(f,7*n);
+    else if(p==='month') anchor=jAddM(f,n);
+    else if(p==='quarter') anchor=jAddM(f,3*n);
+    else anchor=jAddM(f,12*n);
+    return periodRange(p,anchor);
+  }
+
+  function myReportPage(){
+    if(!me) return '';
+    var r=periodRange('month',todayJ());
+    var opts=PERIODS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]==='month'?' selected':'')+'>'+o[1]+'</option>'}).join('');
+    return '<div class="card"><div class="sechead">📑 گزارش عملکرد من — '+esc(me.name)+'</div>'
+      +'<div class="toolbar" style="align-items:flex-end">'
+      +'<div><div style="font-size:12px;color:var(--mut);margin-bottom:4px">دوره</div><select id="mr_period" class="in sm" onchange="myReportPeriod(this.value)">'+opts+'</select></div>'
+      +'<div><div style="font-size:12px;color:var(--mut);margin-bottom:4px">&nbsp;</div><button class="btn ghost sm" onclick="myReportShift(-1)">▶ قبلی</button> <button class="btn ghost sm" onclick="myReportShift(1)">بعدی ◀</button></div>'
+      +'<div><div style="font-size:12px;color:var(--mut);margin-bottom:4px">از تاریخ</div><input id="mr_from" class="in sm" value="'+r[0]+'" placeholder="1404/01/01" oninput="myReportManual()" style="direction:ltr;text-align:center"></div>'
+      +'<div><div style="font-size:12px;color:var(--mut);margin-bottom:4px">تا تاریخ</div><input id="mr_to" class="in sm" value="'+r[1]+'" placeholder="1404/01/31" oninput="myReportManual()" style="direction:ltr;text-align:center"></div>'
+      +'<button class="btn pri sm" onclick="myReportRun()">🔍 نمایش</button>'
+      +'<button class="btn ghost sm" onclick="myReportRun(\'word\')">📄 Word</button>'
+      +'<button class="btn ghost sm" onclick="myReportRun(\'pdf\')">🖨️ PDF</button>'
+      +'</div>'
+      +'<div style="font-size:12px;color:var(--mut);margin-bottom:10px">دوره را انتخاب کنید؛ تاریخ‌ها خودکار تنظیم می‌شوند. برای بازه دلخواه، تاریخ‌ها را به صورت 1404/01/01 وارد کنید.</div>'
+      +'<div id="mr_out">'+reportBody(r[0],r[1])+'</div></div>';
+  }
+
+  function readRange(){
+    var f=normDate($('#mr_from').value), t=normDate($('#mr_to').value);
+    if(!f||!t){ toast('تاریخ‌ها را به صورت 1404/01/01 وارد کنید'); return null; }
+    if(f>t){ var x=f; f=t; t=x; }
+    return [f,t];
+  }
+  function setInputs(f,t){ $('#mr_from').value=f; $('#mr_to').value=t; }
+
+  window.myReportPeriod=function(p){
+    if(p==='custom') return;
+    var r=periodRange(p,todayJ());
+    if(r) setInputs(r[0],r[1]);
+    myReportRun();
+  };
+  window.myReportShift=function(n){
+    var rg=readRange(); if(!rg) return;
+    var p=$('#mr_period').value;
+    var r=shiftRange(p,rg[0],rg[1],n);
+    if(r&&r[0]&&r[1]){ setInputs(r[0],r[1]); myReportRun(); }
+  };
+  window.myReportManual=function(){
+    var s=$('#mr_period'); if(s && s.value!=='custom') s.value='custom';
+  };
+  function exportMyReport(fmt,f,t){
+    var h='<h1>📑 گزارش عملکرد — '+esc(me.name)+'</h1>'
+      +'<p>تاریخ تهیه: '+nd(todayJ())+'</p>'+reportBody(f,t);
+    var fn='HSE-My-Report-'+f.replace(/\//g,'-')+'_to_'+t.replace(/\//g,'-');
+    if(fmt==='word') exportWord(h,fn); else exportPDF(h,fn);
+  }
+
+  window.myReportRun=function(mode){
+    var rg=readRange(); if(!rg) return;
+    if(mode==='word'||mode==='pdf'){ exportMyReport(mode,rg[0],rg[1]); return; }
+    $('#mr_out').innerHTML=reportBody(rg[0],rg[1]);
+  };
+})();
+
 </script>
 </body>
 </html>
