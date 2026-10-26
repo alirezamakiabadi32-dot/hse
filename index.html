@@ -3315,8 +3315,30 @@ function delPerson(i){const p=db.personnel[i];if(!p)return;
  askConfirm('«'+p.name+'» حذف شود؟',function(){
    db.personnel.splice(i,1);
    queueRec('personnel', p.id);
+   scrubPersonName(p.name);
    save();refreshCurrent();toast('حذف شد')
  })}
+/* حذف نام فرد از لیست‌های مشارکت (آموزش، TBM، TBT، PTW، 5S) */
+function scrubPersonName(name){
+  if(!name || !db) return;
+  if((db.personnel||[]).some(function(p){return p.name===name})) return; /* هم‌نام فعال وجود دارد */
+  const LIST_FIELDS=['people','workers','members'];
+  RECORD_MODS.forEach(function(mod){
+    const rows=db[mod];
+    if(!Array.isArray(rows)) return;
+    rows.forEach(function(r){
+      if(!r || typeof r!=='object') return;
+      let changed=false;
+      LIST_FIELDS.forEach(function(k){
+        if(Array.isArray(r[k]) && r[k].indexOf(name)>=0){
+          r[k]=r[k].filter(function(x){return x!==name});
+          changed=true;
+        }
+      });
+      if(changed) queueRec(mod, r.id);
+    });
+  });
+}
 function addArea(){const v=$('#newarea').value.trim();if(!v){toast('نام واحد را وارد کنید');return}
  db.areas.push(v);
  queueModule('areas');
