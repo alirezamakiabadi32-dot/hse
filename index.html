@@ -2255,58 +2255,6 @@ function exportBlankChecklist(tk,format){
 function exportBlankS5(format){
   exportBlankWrap(blankS5HTML(),'HSE-blank-5S-'+todayJ().replace(/\//g,'-'),format);
 }
-function exportKPIReport(format){
-  const K=kpis();
-  let h='<h1>📈 گزارش مدیریتی HSE — سال '+K.jy+'</h1>';
-  h+='<p>تاریخ تهیه: '+nd(todayJ())+' — تهیه‌کننده: '+esc(me.name)+'</p>';
-  h+='<div class="kpi-row">';
-  h+='<div class="kpi-box">TRIR<b>'+(Math.round(K.trir*100)/100)+'</b>نرخ حوادث قابل ثبت</div>';
-  h+='<div class="kpi-box">LTIFR<b>'+(Math.round(K.ltifr*10)/10)+'</b>نرخ حوادث دردسرساز</div>';
-  h+='<div class="kpi-box">روز بدون LTI<b>'+(K.dNo===null?'∞':nd(K.dNo))+'</b>از آخرین حادثه</div>';
-  h+='<div class="kpi-box">نفر-ساعت<b>'+nd(K.hrs)+'</b>سال '+K.jy+'</div>';
-  h+='</div>';
-  h+='<h2>📊 خلاصه مدیریتی</h2>';
-  h+='<p>در سال جاری <b>'+nd(K.rec)+'</b> حادثه قابل‌ثبت (شامل <b>'+nd(K.lti)+'</b> مورد LTI) و <b>'+nd(K.nm)+'</b> شبه‌حادثه ثبت شده است. تعداد <b>'+nd(K.od)+'</b> اقدام اصلاحی معوق است.</p>';
-  const fn='HSE-KPI-Report-'+todayJ().replace(/\//g,'-');
-  if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
-}
-function exportS5Report(format){
-  const st=s5GlobalStats();
-  const keys=s5Keys();
-  let h='<h1>🏭 گزارش ارزیابی 5S — نظام آراستگی محیط کار</h1>';
-  h+='<p>تاریخ: '+nd(todayJ())+' — تهیه‌کننده: '+esc(me.name)+'</p>';
-  h+='<div class="kpi-row">';
-  h+='<div class="kpi-box">میانگین امتیاز<b>'+nd(st.avg)+'٪</b>'+nd(st.latest.length)+' واحد</div>';
-  h+='<div class="kpi-box">سطح A<b>'+nd(st.bands.A)+'</b>≥ ۸۵٪</div>';
-  h+='<div class="kpi-box">سطح D<b>'+nd(st.bands.D)+'</b>&lt; ۵۰٪</div>';
-  h+='</div>';
-  h+='<h2>رتبه‌بندی واحدها (آخرین ارزیابی)</h2>';
-  h+='<table><thead><tr><th>رتبه</th><th>واحد</th><th>تاریخ</th><th>امتیاز</th><th>سطح</th>'+keys.map(k=>'<th>'+esc(s5Tpl()[k].name)+'</th>').join('')+'</tr></thead><tbody>';
-  const sorted=st.latest.slice().sort((a,b)=>b.sc.pct-a.sc.pct);
-  sorted.forEach((x,i)=>{
-    const sc=x.sc;
-    h+='<tr><td>'+nd(i+1)+'</td><td>'+esc(x.rec.area)+'</td><td>'+esc(x.rec.date)+'</td><td>'+nd(sc.pct)+'٪</td><td>'+sc.band+'</td>';
-    keys.forEach(k=>{h+='<td>'+nd((sc.per[k]||{pct:0}).pct)+'٪</td>'});
-    h+='</tr>';
-  });
-  h+='</tbody></table>';
-  const fn='HSE-5S-Report-'+todayJ().replace(/\//g,'-');
-  if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
-}
-function exportScoresReport(format){
-  const mk=mKey(todayJ());
-  const rows=calcScores(mk);
-  const rules=scoreRules();
-  let h='<h1>🏅 گزارش امتیاز ایمنی پرسنل اجراییان — '+monthLabel(mk)+'</h1>';
-  h+='<p>تاریخ: '+nd(todayJ())+' — تهیه‌کننده: '+esc(me.name)+'</p>';
-  h+='<table><thead><tr><th>رتبه</th><th>نام</th><th>امتیاز کل</th>'+rules.map(r=>'<th>'+esc(r.label)+'</th>').join('')+'</tr></thead><tbody>';
-  rows.forEach((r,i)=>{
-    h+='<tr><td>'+nd(i+1)+'</td><td>'+esc(r.name)+'</td><td><b>'+nd(r.score)+'</b></td>'+rules.map(rl=>'<td>'+nd(r.detail[rl.key]||0)+'</td>').join('')+'</tr>';
-  });
-  h+='</tbody></table>';
-  const fn='HSE-Scores-'+todayJ().replace(/\//g,'-');
-  if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
-}
 
 /* ============================================================
    موتور عمومی — لیست‌ها و جدول‌ها
@@ -3028,15 +2976,106 @@ function renderMethodTab(k){
 }
 function riskCell(s,p){riskFilter={s:s,p:p};renderRows();toast('نمایش ریسک‌های شدت '+s+' و احتمال '+p)}
 function riskReset(){riskFilter=null;renderRows()}
+
+/* ---------- انتخاب آیتم‌های گزارش ---------- */
+let _rpt=null;
+function deliverReport(h,fn,fmt){
+  if(fmt==='print') printHTML(h,fn); else if(fmt==='word') exportWord(h,fn); else exportPDF(h,fn);
+}
+function openReportPicker(title, sections, build){
+  const list=(sections||[]).filter(s=>s&&s.html);
+  if(!list.length){ toast('موردی برای گزارش وجود ندارد'); return; }
+  _rpt={sections:list,build:build};
+  const items=list.map((s,i)=>'<label class="ck" style="margin-bottom:6px"><input type="checkbox" class="rp-ck" value="'+i+'" checked> <span>'+s.label+'</span></label>').join('');
+  openModal('🧾 انتخاب آیتم‌های گزارش — '+esc(title),
+    '<div style="font-size:12.5px;color:var(--mut);margin-bottom:10px">آیتم‌هایی را که می‌خواهید در گزارش باشند انتخاب کنید. به‌صورت پیش‌فرض همه انتخاب شده‌اند.</div>'
+    +items
+    +'<div style="margin-top:8px"><button type="button" class="btn ghost sm" onclick="rpSelAll(true)">انتخاب همه</button> <button type="button" class="btn ghost sm" onclick="rpSelAll(false)">لغو همه</button></div>',
+    '<button class="btn pri" onclick="rpRun(\'word\')">📄 Word</button>'
+    +'<button class="btn ghost" onclick="rpRun(\'pdf\')">📄 PDF</button>'
+    +'<button class="btn ghost" onclick="rpRun(\'print\')">🖨️ چاپ</button>'
+    +'<button class="btn ghost" onclick="closeModal()">انصراف</button>');
+}
+window.rpSelAll=function(v){ document.querySelectorAll('.rp-ck').forEach(c=>c.checked=v); };
+window.rpRun=function(fmt){
+  if(!_rpt) return;
+  const picked=[...document.querySelectorAll('.rp-ck')].filter(c=>c.checked).map(c=>_rpt.sections[+c.value]);
+  if(!picked.length){ toast('حداقل یک آیتم را انتخاب کنید'); return; }
+  const body=picked.map(s=>s.html).join('');
+  const build=_rpt.build; _rpt=null;
+  closeModal();
+  build(body,fmt);
+};
+
+function exportKPIReport(format){
+  const K=kpis();
+  const cards='<div class="kpi-row">'
+    +'<div class="kpi-box">TRIR<b>'+(Math.round(K.trir*100)/100)+'</b>نرخ حوادث قابل ثبت</div>'
+    +'<div class="kpi-box">LTIFR<b>'+(Math.round(K.ltifr*10)/10)+'</b>نرخ حوادث دردسرساز</div>'
+    +'<div class="kpi-box">روز بدون LTI<b>'+(K.dNo===null?'∞':nd(K.dNo))+'</b>از آخرین حادثه</div>'
+    +'<div class="kpi-box">نفر-ساعت<b>'+nd(K.hrs)+'</b>سال '+K.jy+'</div>'
+    +'</div>';
+  const summary='<p>در سال جاری <b>'+nd(K.rec)+'</b> حادثه قابل‌ثبت (شامل <b>'+nd(K.lti)+'</b> مورد LTI) و <b>'+nd(K.nm)+'</b> شبه‌حادثه ثبت شده است. تعداد <b>'+nd(K.od)+'</b> اقدام اصلاحی معوق است.</p>';
+  openReportPicker('گزارش مدیریتی HSE', [
+    {label:'📊 شاخص‌های کلیدی (TRIR، LTIFR، روز بدون LTI، نفر-ساعت)', html:'<h2>شاخص‌های کلیدی</h2>'+cards},
+    {label:'📝 خلاصه مدیریتی', html:'<h2>📊 خلاصه مدیریتی</h2>'+summary}
+  ], function(body,fmt){
+    const h='<h1>📈 گزارش مدیریتی HSE — سال '+K.jy+'</h1><p>تاریخ تهیه: '+nd(todayJ())+' — تهیه‌کننده: '+esc(me.name)+'</p>'+body;
+    deliverReport(h,'HSE-KPI-Report-'+todayJ().replace(/\//g,'-'),fmt);
+  });
+}
+function exportS5Report(format){
+  const st=s5GlobalStats();
+  const keys=s5Keys();
+  const cards='<div class="kpi-row">'
+    +'<div class="kpi-box">میانگین امتیاز<b>'+nd(st.avg)+'٪</b>'+nd(st.latest.length)+' واحد</div>'
+    +'<div class="kpi-box">سطح A<b>'+nd(st.bands.A)+'</b>≥ ۸۵٪</div>'
+    +'<div class="kpi-box">سطح D<b>'+nd(st.bands.D)+'</b>&lt; ۵۰٪</div>'
+    +'</div>';
+  const sorted=st.latest.slice().sort((a,b)=>b.sc.pct-a.sc.pct);
+  let rank='<h2>رتبه‌بندی واحدها (آخرین ارزیابی)</h2><table><thead><tr><th>رتبه</th><th>واحد</th><th>تاریخ</th><th>امتیاز</th><th>سطح</th></tr></thead><tbody>';
+  sorted.forEach((x,i)=>{ rank+='<tr><td>'+nd(i+1)+'</td><td>'+esc(x.rec.area)+'</td><td>'+esc(x.rec.date)+'</td><td>'+nd(x.sc.pct)+'٪</td><td>'+x.sc.band+'</td></tr>'; });
+  rank+='</tbody></table>';
+  let detail='<h2>امتیاز به تفکیک رکن 5S</h2><table><thead><tr><th>واحد</th>'+keys.map(k=>'<th>'+esc(s5Tpl()[k].name)+'</th>').join('')+'</tr></thead><tbody>';
+  sorted.forEach(x=>{ detail+='<tr><td>'+esc(x.rec.area)+'</td>'+keys.map(k=>'<td>'+nd((x.sc.per[k]||{pct:0}).pct)+'٪</td>').join('')+'</tr>'; });
+  detail+='</tbody></table>';
+  openReportPicker('گزارش ارزیابی 5S', [
+    {label:'📊 کارت‌های خلاصه (میانگین و سطوح)', html:cards},
+    {label:'🏆 رتبه‌بندی واحدها', html:rank},
+    {label:'🧩 امتیاز به تفکیک رکن 5S', html:detail}
+  ], function(body,fmt){
+    const h='<h1>🏭 گزارش ارزیابی 5S — نظام آراستگی محیط کار</h1><p>تاریخ: '+nd(todayJ())+' — تهیه‌کننده: '+esc(me.name)+'</p>'+body;
+    deliverReport(h,'HSE-5S-Report-'+todayJ().replace(/\//g,'-'),fmt);
+  });
+}
+function exportScoresReport(format){
+  const mk=mKey(todayJ());
+  const rows=calcScores(mk);
+  const rules=scoreRules();
+  let rank='<h2>رتبه‌بندی و امتیاز کل</h2><table><thead><tr><th>رتبه</th><th>نام</th><th>امتیاز کل</th></tr></thead><tbody>';
+  rows.forEach((r,i)=>{ rank+='<tr><td>'+nd(i+1)+'</td><td>'+esc(r.name)+'</td><td><b>'+nd(r.score)+'</b></td></tr>'; });
+  rank+='</tbody></table>';
+  let detail='<h2>امتیاز به تفکیک آیتم</h2><table><thead><tr><th>نام</th>'+rules.map(r=>'<th>'+esc(r.label)+'</th>').join('')+'</tr></thead><tbody>';
+  rows.forEach(r=>{ detail+='<tr><td>'+esc(r.name)+'</td>'+rules.map(rl=>'<td>'+nd(r.detail[rl.key]||0)+'</td>').join('')+'</tr>'; });
+  detail+='</tbody></table>';
+  openReportPicker('گزارش امتیاز ایمنی پرسنل اجراییان', [
+    {label:'🏆 رتبه‌بندی و امتیاز کل', html:rank},
+    {label:'🧩 امتیاز به تفکیک آیتم‌های امتیازدهی', html:detail}
+  ], function(body,fmt){
+    const h='<h1>🏅 گزارش امتیاز ایمنی پرسنل اجراییان — '+monthLabel(mk)+'</h1><p>تاریخ: '+nd(todayJ())+' — تهیه‌کننده: '+esc(me.name)+'</p>'+body;
+    deliverReport(h,'HSE-Scores-'+todayJ().replace(/\//g,'-'),fmt);
+  });
+}
 function exportRiskAll(format){
- let h='<h1>📊 گزارش جامع ارزیابی ریسک</h1>';
- h+='<p>تاریخ: <b>'+nd(todayJ())+'</b> — تهیه‌کننده: '+esc(me.name)+'</p>';
- h+='<h2>📊 ماتریس ریسک ۵×۵</h2>'+buildModuleReport('risks');
- h+='<h2>⚙️ FMEA — حالت خرابی و اثرات</h2>'+buildModuleReport('fmea');
- h+='<h2>🔧 JSA — تحلیل ایمنی شغل</h2>'+buildModuleReport('jsa');
- h+='<h2>📐 LEC — ویلیام فاین</h2>'+buildModuleReport('lec');
- const fn='HSE-Risk-Report-'+todayJ().replace(/\//g,'-');
- if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
+  openReportPicker('گزارش جامع ارزیابی ریسک', [
+    {label:'📊 ماتریس ریسک ۵×۵', html:'<h2>📊 ماتریس ریسک ۵×۵</h2>'+buildModuleReport('risks')},
+    {label:'⚙️ FMEA — حالت خرابی و اثرات', html:'<h2>⚙️ FMEA — حالت خرابی و اثرات</h2>'+buildModuleReport('fmea')},
+    {label:'🔧 JSA — تحلیل ایمنی شغل', html:'<h2>🔧 JSA — تحلیل ایمنی شغل</h2>'+buildModuleReport('jsa')},
+    {label:'📐 LEC — ویلیام فاین', html:'<h2>📐 LEC — ویلیام فاین</h2>'+buildModuleReport('lec')}
+  ], function(body,fmt){
+    const h='<h1>📊 گزارش جامع ارزیابی ریسک</h1><p>تاریخ: <b>'+nd(todayJ())+'</b> — تهیه‌کننده: '+esc(me.name)+'</p>'+body;
+    deliverReport(h,'HSE-Risk-Report-'+todayJ().replace(/\//g,'-'),fmt);
+  });
 }
 
 /* ---------- Scores page ---------- */
@@ -5266,7 +5305,7 @@ function capaFromInspection(id, i){
     return '<tr><td>'+esc(l)+'</td><td style="text-align:right;font-weight:700">'+v+'</td></tr>';
   }
 
-  function reportBody(f,t){
+  function reportBody(f,t,split){
     var D=buildData(f,t);
     var any=[D.incRep,D.incInj,D.uns,D.acts,D.insp,D.risks,D.trn,D.tbm,D.tbt,D.bbs,D.ppe,D.ptw].some(function(a){return a.length});
     var h='<p style="font-size:12.5px;color:var(--mut);margin-bottom:10px">بازه گزارش: <b>'+nd(f)+'</b> تا <b>'+nd(t)+'</b></p>';
@@ -5288,6 +5327,7 @@ function capaFromInspection(id, i){
     h+=row('مجوز کار (PTW) با نام شما', nd(D.ptw.length));
     h+='</tbody></table></div>';
 
+    var summaryHtml=h;
     var items=[];
     D.incRep.forEach(function(r){items.push({d:recDate(r),k:'حادثه / شبه‌حادثه',x:r.title||r.type||'',s:r.status||''})});
     D.incInj.forEach(function(r){items.push({d:recDate(r),k:'حادثه (مصدوم)',x:r.title||'',s:r.status||''})});
@@ -5303,7 +5343,7 @@ function capaFromInspection(id, i){
       });
       h+='</tbody></table></div>';
     }
-    return h;
+    return split?[summaryHtml,h.slice(summaryHtml.length)]:h;
   }
 
   var PERIODS=[['day','روزانه'],['week','هفتگی'],['month','ماهانه'],['quarter','سه‌ماهه'],['year','سالانه'],['custom','دلخواه']];
@@ -5387,17 +5427,71 @@ function capaFromInspection(id, i){
   window.myReportManual=function(){
     var s=$('#mr_period'); if(s && s.value!=='custom') s.value='custom';
   };
-  function exportMyReport(fmt,f,t){
-    var h='<h1>📑 گزارش عملکرد — '+esc(me.name)+'</h1>'
-      +'<p>تاریخ تهیه: '+nd(todayJ())+'</p>'+reportBody(f,t);
-    var fn='HSE-My-Report-'+f.replace(/\//g,'-')+'_to_'+t.replace(/\//g,'-');
-    if(fmt==='word') exportWord(h,fn); else exportPDF(h,fn);
+  function openMyReportPicker(f,t){
+    var parts=reportBody(f,t,true);
+    var secs=Array.isArray(parts)
+      ? [{label:'📋 جدول خلاصه عملکرد', html:parts[0]}, {label:'📋 ریز رکوردها', html:parts[1]}]
+      : [{label:'📋 گزارش عملکرد', html:parts}];
+    openReportPicker('گزارش عملکرد — '+me.name, secs, function(body,fmt){
+      var h='<h1>📑 گزارش عملکرد — '+esc(me.name)+'</h1><p>تاریخ تهیه: '+nd(todayJ())+'</p>'+body;
+      deliverReport(h,'HSE-My-Report-'+f.replace(/\//g,'-')+'_to_'+t.replace(/\//g,'-'),fmt);
+    });
   }
 
   window.myReportRun=function(mode){
     var rg=readRange(); if(!rg) return;
-    if(mode==='word'||mode==='pdf'){ exportMyReport(mode,rg[0],rg[1]); return; }
+    if(mode==='word'||mode==='pdf'||mode==='print'){ openMyReportPicker(rg[0],rg[1]); return; }
     $('#mr_out').innerHTML=reportBody(rg[0],rg[1]);
+  };
+})();
+
+/* ============================================================
+   گزارش خلاصه ماژول‌ها — انتخاب ماژول‌ها برای گزارش
+============================================================ */
+(function(){
+  var KEY='modSummary';
+  var _origCanView=canView;
+  canView=function(k){ if(k===KEY) return !!me && me.role!=='worker'; return _origCanView(k); };
+  SPECIAL[KEY]={t:'گزارش خلاصه ماژول‌ها',i:'🧾',ren:modSummaryPage};
+  NAV.push({g:'گزارش‌ها',items:[KEY]});
+
+  function modKeys(){ return Object.keys(MODS).filter(function(k){ return canView(k); }); }
+  function modRows(k){ return (db[k]||[]).filter(function(r){ return r && r.id && isOwnRecord(k,r); }); }
+  function modSummaryHTML(k){
+    var M=MODS[k], rows=modRows(k);
+    var h='<h2>'+M.i+' '+esc(M.t)+'</h2><p>تعداد کل رکوردها: <b>'+nd(rows.length)+'</b></p>';
+    if(!rows.length) return h+'<p style="color:#94a3b8">موردی ثبت نشده است.</p>';
+    if(M.status){
+      var cnt={};
+      rows.forEach(function(r){ var s=r.status||'—'; cnt[s]=(cnt[s]||0)+1; });
+      h+='<table><thead><tr><th>وضعیت</th><th>تعداد</th></tr></thead><tbody>'
+        +Object.keys(cnt).map(function(s){ return '<tr><td>'+esc(s)+'</td><td>'+nd(cnt[s])+'</td></tr>'; }).join('')
+        +'</tbody></table>';
+    }
+    var last=rows.slice().sort(function(a,b){ return String(b.date||b.createdJ||'').localeCompare(String(a.date||a.createdJ||'')); }).slice(0,10);
+    h+='<h3 style="font-size:12.5px;margin:10px 0 4px">آخرین رکوردها</h3><table><thead><tr><th>تاریخ</th><th>شرح</th>'+(M.status?'<th>وضعیت</th>':'')+'</tr></thead><tbody>'
+      +last.map(function(r){ return '<tr><td>'+nd(r.date||r.createdJ||'—')+'</td><td>'+esc(safeTitleOf(k,r))+'</td>'+(M.status?'<td>'+esc(r.status||'—')+'</td>':'')+'</tr>'; }).join('')
+      +'</tbody></table>';
+    return h;
+  }
+  function modSummaryPage(){
+    var keys=modKeys();
+    var h='<div class="card"><div class="sechead">🧾 گزارش خلاصه ماژول‌ها</div>'
+      +'<div style="font-size:12.5px;color:var(--mut);margin-bottom:10px">برای ساخت گزارش، ماژول‌هایی را که می‌خواهید در گزارش باشند انتخاب کنید. تعداد رکورد هر ماژول در جدول زیر است.</div>'
+      +'<div class="toolbar"><button class="btn pri" onclick="modSummaryOpen()">🧾 انتخاب ماژول‌ها و خروجی</button></div>'
+      +'<table class="tbl"><thead><tr><th>ماژول</th><th>تعداد رکورد</th></tr></thead><tbody>'
+      +keys.map(function(k){ return '<tr><td>'+MODS[k].i+' '+esc(MODS[k].t)+'</td><td>'+nd(modRows(k).length)+'</td></tr>'; }).join('')
+      +'</tbody></table></div>';
+    return h;
+  }
+  window.modSummaryOpen=function(){
+    var keys=modKeys();
+    openReportPicker('خلاصه ماژول‌ها', keys.map(function(k){
+      return {label:MODS[k].i+' '+MODS[k].t+' ('+nd(modRows(k).length)+' رکورد)', html:modSummaryHTML(k)};
+    }), function(body,fmt){
+      var h='<h1>🧾 گزارش خلاصه ماژول‌ها</h1><p>تاریخ تهیه: '+nd(todayJ())+' — تهیه‌کننده: '+esc(me.name)+'</p>'+body;
+      deliverReport(h,'HSE-Modules-Summary-'+todayJ().replace(/\//g,'-'),fmt);
+    });
   };
 })();
 
