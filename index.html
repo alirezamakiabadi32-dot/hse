@@ -5298,6 +5298,8 @@ function capaFromInspection(id, i){
     D.bbsUnsafe=sumOf(D.bbs,'unsafe');
     D.ppe=arr('ppeTx').filter(function(r){return r.person===n && inR(r,f,t)});
     D.ptw=arr('ptw').filter(function(r){return listHas(r.workers,n) && inR(r,f,t)});
+    D.sv=arr('siteVisit').filter(function(r){return (r.visitor===n || r.createdBy===n) && inR(r,f,t)});
+    D.svFix=D.sv.filter(function(r){return r.result===SV_RES[1]}).length;
     return D;
   }
 
@@ -5307,7 +5309,7 @@ function capaFromInspection(id, i){
 
   function reportBody(f,t,split){
     var D=buildData(f,t);
-    var any=[D.incRep,D.incInj,D.uns,D.acts,D.insp,D.risks,D.trn,D.tbm,D.tbt,D.bbs,D.ppe,D.ptw].some(function(a){return a.length});
+    var any=[D.incRep,D.incInj,D.uns,D.acts,D.insp,D.risks,D.trn,D.tbm,D.tbt,D.bbs,D.ppe,D.ptw,D.sv].some(function(a){return a.length});
     var h='<p style="font-size:12.5px;color:var(--mut);margin-bottom:10px">بازه گزارش: <b>'+nd(f)+'</b> تا <b>'+nd(t)+'</b></p>';
     if(!any){
       return h+'<div style="text-align:center;color:var(--mut);padding:24px">در این بازه هیچ فعالیتی برای شما ثبت نشده است.</div>';
@@ -5325,6 +5327,7 @@ function capaFromInspection(id, i){
     h+=row('مشاهدات رفتاری BBS', nd(D.bbs.length)+' — ایمن: '+nd(D.bbsSafe)+' — ناایمن: '+nd(D.bbsUnsafe));
     h+=row('تجهیزات PPE تحویل‌شده', nd(D.ppe.length));
     h+=row('مجوز کار (PTW) با نام شما', nd(D.ptw.length));
+    h+=row('بازدیدهای محل کار (SITE VISIT)', nd(D.sv.length)+' — نیازمند اصلاح: '+nd(D.svFix));
     h+='</tbody></table></div>';
 
     var summaryHtml=h;
@@ -5334,6 +5337,7 @@ function capaFromInspection(id, i){
     D.uns.forEach(function(r){items.push({d:recDate(r),k:'آنومالی',x:r.desc||'',s:r.status||''})});
     D.acts.forEach(function(r){items.push({d:recDate(r),k:'اقدام اصلاحی',x:(r.code?'['+r.code+'] ':'')+(r.desc||''),s:r.status||''})});
     D.trn.forEach(function(r){items.push({d:recDate(r),k:'آموزش',x:r.course||'',s:'حاضر'})});
+    D.sv.forEach(function(r){items.push({d:recDate(r),k:'بازدید محل کار',x:r.activity||'',s:r.result||''})});
     if(items.length){
       items.sort(function(a,b){return String(b.d).localeCompare(String(a.d))});
       h+='<div class="msh" style="margin-top:16px">📋 ریز رکوردها</div>';
@@ -5427,12 +5431,53 @@ function capaFromInspection(id, i){
   window.myReportManual=function(){
     var s=$('#mr_period'); if(s && s.value!=='custom') s.value='custom';
   };
+  function myActions(f,t){
+    var out=[];
+    Object.keys(MODS).forEach(function(k){
+      if(!canView(k)) return;
+      (db[k]||[]).forEach(function(r){
+        if(!r || !r.id || !isOwnRecord(k,r)) return;
+        var base={k:k, mod:MODS[k].t, icon:MODS[k].i, title:safeTitleOf(k,r), status:r.status||'', rec:r};
+        if(r.createdBy===me.name && r.createdJ>=f && r.createdJ<=t)
+          out.push(Object.assign({}, base, {date:r.createdJ, act:'ثبت'}));
+        (r.log||[]).forEach(function(l){
+          if(l && l.u===me.name && l.d>=f && l.d<=t) out.push(Object.assign({}, base, {date:l.d, act:l.t||''}));
+        });
+        if(k==='siteVisit' && r.visitor===me.name && r.date>=f && r.date<=t)
+          out.push(Object.assign({}, base, {date:r.date, act:'بازدید محل کار انجام شد'}));
+        if(r.psigs){
+          Object.keys(r.psigs).forEach(function(sk){
+            var sg=r.psigs[sk];
+            if(sg && sg.name===me.name && sg.date>=f && sg.date<=t)
+              out.push(Object.assign({}, base, {date:sg.date, act:'امضا'}));
+          });
+        }
+      });
+    });
+    out.sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
+    return out;
+  }
+  function myActionSection(a){
+    var html='<h2>'+a.icon+' '+esc(a.mod)+' — '+esc(a.title)+'</h2>'
+      +'<table class="tbl"><tbody>'
+      +'<tr><th style="width:24%">تاریخ</th><td>'+nd(a.date)+'</td></tr>'
+      +'<tr><th>کد رکورد</th><td>'+esc(a.rec.id)+'</td></tr>'
+      +'<tr><th>عملیات انجام‌شده</th><td>'+esc(a.act)+'</td></tr>'
+      +(a.status?'<tr><th>وضعیت فعلی</th><td>'+esc(a.status)+'</td></tr>':'')
+      +'</tbody></table>';
+    return html;
+  }
   function openMyReportPicker(f,t){
     var parts=reportBody(f,t,true);
     var secs=Array.isArray(parts)
-      ? [{label:'📋 جدول خلاصه عملکرد', html:parts[0]}, {label:'📋 ریز رکوردها', html:parts[1]}]
+      ? [{label:'📋 جدول خلاصه عملکرد', html:parts[0]}]
       : [{label:'📋 گزارش عملکرد', html:parts}];
-    openReportPicker('گزارش عملکرد — '+me.name, secs, function(body,fmt){
+    var acts=myActions(f,t);
+    acts.slice(0,300).forEach(function(a){
+      secs.push({label:nd(a.date)+' — '+a.icon+' '+a.mod+' — '+a.title+' — '+a.act, html:myActionSection(a)});
+    });
+    if(!acts.length) secs.push({label:'هیچ عملکرد ثبت‌شده‌ای در این بازه نیست', html:''});
+    openReportPicker('گزارش عملکرد — '+me.name, secs.filter(function(s){ return s.html; }), function(body,fmt){
       var h='<h1>📑 گزارش عملکرد — '+esc(me.name)+'</h1><p>تاریخ تهیه: '+nd(todayJ())+'</p>'+body;
       deliverReport(h,'HSE-My-Report-'+f.replace(/\//g,'-')+'_to_'+t.replace(/\//g,'-'),fmt);
     });
@@ -5445,55 +5490,6 @@ function capaFromInspection(id, i){
   };
 })();
 
-/* ============================================================
-   گزارش خلاصه ماژول‌ها — انتخاب ماژول‌ها برای گزارش
-============================================================ */
-(function(){
-  var KEY='modSummary';
-  var _origCanView=canView;
-  canView=function(k){ if(k===KEY) return !!me && me.role!=='worker'; return _origCanView(k); };
-  SPECIAL[KEY]={t:'گزارش خلاصه ماژول‌ها',i:'🧾',ren:modSummaryPage};
-  NAV.push({g:'گزارش‌ها',items:[KEY]});
-
-  function modKeys(){ return Object.keys(MODS).filter(function(k){ return canView(k); }); }
-  function modRows(k){ return (db[k]||[]).filter(function(r){ return r && r.id && isOwnRecord(k,r); }); }
-  function modSummaryHTML(k){
-    var M=MODS[k], rows=modRows(k);
-    var h='<h2>'+M.i+' '+esc(M.t)+'</h2><p>تعداد کل رکوردها: <b>'+nd(rows.length)+'</b></p>';
-    if(!rows.length) return h+'<p style="color:#94a3b8">موردی ثبت نشده است.</p>';
-    if(M.status){
-      var cnt={};
-      rows.forEach(function(r){ var s=r.status||'—'; cnt[s]=(cnt[s]||0)+1; });
-      h+='<table><thead><tr><th>وضعیت</th><th>تعداد</th></tr></thead><tbody>'
-        +Object.keys(cnt).map(function(s){ return '<tr><td>'+esc(s)+'</td><td>'+nd(cnt[s])+'</td></tr>'; }).join('')
-        +'</tbody></table>';
-    }
-    var last=rows.slice().sort(function(a,b){ return String(b.date||b.createdJ||'').localeCompare(String(a.date||a.createdJ||'')); }).slice(0,10);
-    h+='<h3 style="font-size:12.5px;margin:10px 0 4px">آخرین رکوردها</h3><table><thead><tr><th>تاریخ</th><th>شرح</th>'+(M.status?'<th>وضعیت</th>':'')+'</tr></thead><tbody>'
-      +last.map(function(r){ return '<tr><td>'+nd(r.date||r.createdJ||'—')+'</td><td>'+esc(safeTitleOf(k,r))+'</td>'+(M.status?'<td>'+esc(r.status||'—')+'</td>':'')+'</tr>'; }).join('')
-      +'</tbody></table>';
-    return h;
-  }
-  function modSummaryPage(){
-    var keys=modKeys();
-    var h='<div class="card"><div class="sechead">🧾 گزارش خلاصه ماژول‌ها</div>'
-      +'<div style="font-size:12.5px;color:var(--mut);margin-bottom:10px">برای ساخت گزارش، ماژول‌هایی را که می‌خواهید در گزارش باشند انتخاب کنید. تعداد رکورد هر ماژول در جدول زیر است.</div>'
-      +'<div class="toolbar"><button class="btn pri" onclick="modSummaryOpen()">🧾 انتخاب ماژول‌ها و خروجی</button></div>'
-      +'<table class="tbl"><thead><tr><th>ماژول</th><th>تعداد رکورد</th></tr></thead><tbody>'
-      +keys.map(function(k){ return '<tr><td>'+MODS[k].i+' '+esc(MODS[k].t)+'</td><td>'+nd(modRows(k).length)+'</td></tr>'; }).join('')
-      +'</tbody></table></div>';
-    return h;
-  }
-  window.modSummaryOpen=function(){
-    var keys=modKeys();
-    openReportPicker('خلاصه ماژول‌ها', keys.map(function(k){
-      return {label:MODS[k].i+' '+MODS[k].t+' ('+nd(modRows(k).length)+' رکورد)', html:modSummaryHTML(k)};
-    }), function(body,fmt){
-      var h='<h1>🧾 گزارش خلاصه ماژول‌ها</h1><p>تاریخ تهیه: '+nd(todayJ())+' — تهیه‌کننده: '+esc(me.name)+'</p>'+body;
-      deliverReport(h,'HSE-Modules-Summary-'+todayJ().replace(/\//g,'-'),fmt);
-    });
-  };
-})();
 
 </script>
 </body>
