@@ -656,6 +656,7 @@ function defaultPerms(){
     equipCert:{view:['expert','manager'],create:['expert','manager'],edit:['expert','manager'],del:['manager']},
     confined:{view:['expert','manager'],create:['expert','manager'],edit:['expert','manager'],del:['manager']},
     heightWork:{view:['expert','manager'],create:['expert','manager'],edit:['expert','manager'],del:['manager']},
+    siteVisit:{view:['expert','manager'],create:['expert','manager'],edit:['expert','manager'],del:['manager']},
     legalReport:{view:['expert','manager'],create:['expert','manager'],edit:['expert','manager'],del:['manager']},
     legalReg:{view:['expert','manager'],create:['expert','manager'],edit:['expert','manager'],del:['manager']},
     s5:{view:['expert','manager'],create:['expert','manager'],edit:['expert','manager'],del:['manager']}
@@ -745,7 +746,7 @@ function sanitizeData(data) {
   const arrayKeys = ['personnel','incidents','unsafe','actions','risks','fmea','jsa','lec',
     'inspections','ptw','ppeCat','ppeTx','trainings','hours','healthExp','medical',
     'envWaste','envMon','chem','contacts','drills','emgEquip','toolbox','tbm','bbs',
-    'audits','docs','announce','areas','scoreArch','s5','loto','moc','equipCert','confined','heightWork','legalReport','legalReg'];
+    'audits','docs','announce','areas','scoreArch','s5','loto','moc','equipCert','confined','heightWork','siteVisit','legalReport','legalReg'];
   arrayKeys.forEach(key => {
     if (data[key] === undefined || data[key] === null) {
       data[key] = [];
@@ -800,7 +801,7 @@ let _cloudConnected = false;
 const SAVE_DEBOUNCE_MS = 800;
 const RETRY_DELAYS = [1000, 3000, 8000, 20000, 60000];
 
-const RECORD_MODS=['personnel','incidents','unsafe','actions','risks','fmea','jsa','lec','inspections','ptw','ppeCat','ppeTx','trainings','hours','healthExp','medical','envWaste','envMon','chem','contacts','drills','emgEquip','toolbox','tbm','bbs','audits','docs','announce','s5','loto','moc','equipCert','confined','heightWork','legalReport','legalReg'];
+const RECORD_MODS=['personnel','incidents','unsafe','actions','risks','fmea','jsa','lec','inspections','ptw','ppeCat','ppeTx','trainings','hours','healthExp','medical','envWaste','envMon','chem','contacts','drills','emgEquip','toolbox','tbm','bbs','audits','docs','announce','s5','loto','moc','equipCert','confined','heightWork','siteVisit','legalReport','legalReg'];
 let _seqCounter = 0;
 let _dirtyRecs = {};
 
@@ -1097,7 +1098,7 @@ document.addEventListener('scroll',function(){calRepos()},true);
 const P=()=>db.personnel.map(x=>x.name);
 const PPEI=()=>db.ppeCat.map(x=>x.item);
 const AR=()=>L('AREAS0');
-const PF={incidents:'INC',unsafe:'UNS',actions:'ACT',risks:'RSK',fmea:'FMA',jsa:'JSA',lec:'LEC',inspections:'INS',ptw:'PTW',ppeCat:'PPE',ppeTx:'PIT',trainings:'TRN',hours:'HRS',healthExp:'EXP',medical:'MED',envWaste:'WST',envMon:'EMN',chem:'CHM',contacts:'CTC',drills:'DRL',emgEquip:'EQP',toolbox:'TBT',tbm:'TBM',bbs:'BBS',audits:'AUD',docs:'DOC',announce:'ANN',s5:'S5',loto:'LOT',moc:'MOC',equipCert:'CRT',confined:'CSP',heightWork:'HGT',legalReport:'LRP',legalReg:'LRG'};
+const PF={siteVisit:'SVT',incidents:'INC',unsafe:'UNS',actions:'ACT',risks:'RSK',fmea:'FMA',jsa:'JSA',lec:'LEC',inspections:'INS',ptw:'PTW',ppeCat:'PPE',ppeTx:'PIT',trainings:'TRN',hours:'HRS',healthExp:'EXP',medical:'MED',envWaste:'WST',envMon:'EMN',chem:'CHM',contacts:'CTC',drills:'DRL',emgEquip:'EQP',toolbox:'TBT',tbm:'TBM',bbs:'BBS',audits:'AUD',docs:'DOC',announce:'ANN',s5:'S5',loto:'LOT',moc:'MOC',equipCert:'CRT',confined:'CSP',heightWork:'HGT',legalReport:'LRP',legalReg:'LRG'};
 
 /* ---------- چک‌لیست‌های بازرسی ---------- */
 let TPLS={};
@@ -1401,6 +1402,24 @@ function genActionCode(){
 /* ============================================================
    ماژول‌ها
 ============================================================ */
+/* ---------- فهرست‌ها (PTW و بازدید محل کار) ---------- */
+const PTW_HAZ=['سطوح داغ','پاشش مذاب','صدای زیاد','روشنایی کم','فضای بسته','کار در ارتفاع','مواد شیمیایی','الکتریسیته (فشار قوی)','الکتریسیته (فشار ضعیف)','سیستم‌های تحت فشار','مواد سمی و خفقان‌آور','اجسام تیز و برنده','جرثقیل','پرتوهای غیریونساز','سقوط افراد','سقوط اجسام','پرتاب اجسام','برخورد به اجسام','تجهیزات دوار','آوار و تخریب','تصادف','آسیب به چشم','تماس با چشم','حفاری','شعله باز','سنگ‌زنی','سندبلاست','گزیدگی'];
+const PTW_ADDP=['رادیوگرافی','باربرداری','گودبرداری','فضای بسته','ترافیک','بستن جاده (Road Close)'];
+const PTW_PPE=['طناب نجات','کمربند ایمنی','نوار خطر','تابلو ایمنی','وسایل اطفاء حریق','خودروی اطفاء حریق','عینک مواد شیمیایی','ماسک تمام صورت کارتریج‌دار','کلاه ایمنی','لباس کار','ماسک (گردوغبار)','دستکش ایمنی','دستگاه هوای فشرده','لباس شبرنگ','لباس شبرنگ','لباس ضد اسید','کفش ایمنی','گوشی ایمنی','عینک ایمنی','چکمه ایمنی','ماسک مواد شیمیایی','سوت دستی و پرچم','دستکش ضد اسید','چکمه ضد اسید','ماسک نیم‌صورت شیمیایی','ماسک محافظ صورت (کار با سنگ فرز)','ماسک جوشکاری'];
+const PTW_EQ=['تجهیز در حرکت','تجهیز در توقف','تجهیز در خاموشی (کارت قرمز الزامی است)'];
+const SV_ITEMS=['محدوده کار بازدید و مرزبندی/علامت‌گذاری شد','منابع انرژی شناسایی و ایزوله/قفل (LOTO) بررسی شد','خطرات همجوار و فعالیت‌های هم‌زمان بررسی شد','گاز، تهویه و آتمسفر (در صورت نیاز) بررسی شد','مسیر خروج اضطراری و نقطه تجمع مشخص است','تجهیزات اطفاء حریق در دسترس و سالم است','ابزار و تجهیزات کار بازرسی شده و سالم هستند','مسیر ترافیک و عابرین پیاده کنترل شده است'];
+const SV_RES=['مطابق — آماده صدور مجوز','نیاز به اصلاح قبل از صدور'];
+const PTW_HSE_COORD=['خیر','بله'];
+const PTW_NAME_SIG=[['reqName','req'],['supName','sup'],['hse1Name','hse1'],['hse1bName','hse1b'],['tlName','tl1'],['tlEndName','tl2'],['hseEndName','hse2']];
+const PTW_SIGS=[
+ {key:'req', title:'درخواست‌کننده مجوز', roles:['worker','expert','manager']},
+ {key:'sup', title:'سرپرست واحد', roles:['worker','expert','manager']},
+  {key:'hse1', title:'بازرس HSE (اظهارات)', roles:['expert','manager']},
+ {key:'hse1b', title:'بازرس HSE (امضای مجوز)', roles:['expert','manager']},
+ {key:'tl1', title:'مسئول گروه اجرای کار (اظهارات)', roles:['worker','expert','manager']},
+ {key:'tl2', title:'مسئول گروه اجرای کار (پایان کار)', roles:['worker','expert','manager']},
+ {key:'hse2', title:'بازرس ایمنی (پایان کار)', roles:['expert','manager']}
+];
 const MODS={
 incidents:{t:'حوادث و شبه‌حادثه‌ها',i:'🚨',
  status:['گزارش اولیه','در حال بررسی','در حال اقدام','بسته شده'],
@@ -1533,18 +1552,40 @@ inspections:{t:'بازرسی‌ها و چک‌لیست‌ها',i:'📋',
  fields:[{k:'tpl',l:'نوع چک‌لیست',t:'tplsel',req:1},{k:'date',l:'تاریخ بازرسی',t:'date',req:1,def:todayJ},
   {k:'inspBy',l:'بازرس',t:'sel',o:P,def:()=>me.name},{k:'note',l:'توضیحات بازرس',t:'txt'}],
  cols:['date','tpl','score','inspBy']},
-ptw:{t:'مجوزهای کار (PTW)',i:'🔥',
+ptw:{t:'فرم مجوز ایمنی انجام کار (PTW)',i:'🔥',
  status:['در انتظار بررسی','تایید کارشناس','تایید نهایی','خاتمه یافته','رد شده'],
- fields:[{k:'type',l:'نوع کار پرخطر',t:'sel',req:1,o:()=>L('PTW_TYPES'),list:'PTW_TYPES'},
-  {k:'loc',l:'محل دقیق اجرا',t:'text',req:1},{k:'desc',l:'شرح کار',t:'txt',req:1},
-  {k:'contractor',l:'مجری / پیمانکار',t:'text'},{k:'startD',l:'از تاریخ',t:'date',req:1,def:todayJ},{k:'endD',l:'تا تاریخ',t:'date',req:1,def:todayJ},
-  {k:'workers',l:'مجریان (انتخاب پرسنل)',t:'people'},
-  {k:'gas',l:'تست گاز انجام شد',t:'chk'},{k:'loto',l:'انرژی‌ها ایزوله و قفل شد (LOTO)',t:'chk'},
-  {k:'ppe',l:'PPE ویژه تأمین شد',t:'chk'},{k:'fire',l:'تماشاگر آتش / تجهیزات اطفا مستقر شد',t:'chk'},
-  {k:'rescue',l:'طرح نجات و ارتباطات تعیین شد',t:'chk'},
-  {k:'expertOk',l:'بررسی و تأیید کنترل‌ها توسط کارشناس HSE',t:'chk',gate:['expert','manager']},
-  {k:'mgrOk',l:'تأیید نهایی مدیریت',t:'chk',gate:['manager']}],
- cols:['type','loc','startD','contractor']},
+ fields:[
+  {k:'_h1',l:'۱. این قسمت توسط واحد درخواست‌کننده تکمیل می‌گردد — زمان انجام کار',t:'hdr'},
+  {k:'startD',l:'از تاریخ',t:'date',req:1,def:todayJ},{k:'startT',l:'ساعت شروع',t:'time',req:1},
+  {k:'endD',l:'تا تاریخ',t:'date',req:1,def:todayJ},{k:'endT',l:'ساعت پایان',t:'time',req:1},
+  {k:'_h2',l:'محل انجام کار',t:'hdr'},
+  {k:'plant',l:'کارخانه',t:'text'},{k:'unit',l:'واحد',t:'text',req:1},
+  {k:'section',l:'قسمت',t:'text'},{k:'equip',l:'نام تجهیز',t:'text'},{k:'equipCode',l:'کد تجهیز',t:'text'},
+  {k:'_h3',l:'شرح و تیم اجرایی',t:'hdr'},
+  {k:'desc',l:'شرح دقیق انجام کار',t:'txt',req:1},
+  {k:'workers',l:'اسامی تیم اجرایی (انتخاب پرسنل)',t:'people',req:1},
+  {k:'tools',l:'وسایل کار مورد استفاده',t:'txt'},
+  {k:'_h4',l:'خطرات مربوط به کار و مجوزهای الحاقی',t:'hdr'},
+  {k:'hazards',l:'خطرات مربوط به کار',t:'chkl',o:PTW_HAZ},
+  {k:'addPermits',l:'مجوزهای الحاقی',t:'chkl',o:PTW_ADDP},
+  {k:'_h5',l:'لوازم و تجهیزات ایمنی مورد نیاز',t:'hdr'},
+  {k:'ppeReq',l:'لوازم و تجهیزات ایمنی مورد نیاز',t:'chkl',o:PTW_PPE},
+  {k:'eqState',l:'شرایط تجهیز',t:'sel',o:PTW_EQ},
+  {k:'_h6',l:'امضاها — درخواست‌کننده و سرپرست واحد',t:'hdr'},
+  {k:'reqName',l:'نام و نام خانوادگی درخواست‌کننده مجوز',t:'text'},
+  {k:'supName',l:'نام و نام خانوادگی سرپرست واحد',t:'text'},
+  {k:'_h7',l:'اظهارات بازرس HSE',t:'hdr'},
+  {k:'hseCoord',l:'آیا هماهنگی با شرکت‌ها یا واحدهای دیگر مورد نیاز است؟',t:'sel',o:PTW_HSE_COORD},
+  {k:'hseCoordNote',l:'توضیح هماهنگی (در صورت بله)',t:'txt'},
+  {k:'hse1Name',l:'نام و نام خانوادگی بازرس HSE (اظهارات)',t:'text'},
+  {k:'hse1bName',l:'نام و نام خانوادگی بازرس HSE (امضای مجوز)',t:'text'},
+  {k:'_h8',l:'اظهارات مسئول گروه اجرای کار (مجری کار)',t:'hdr'},
+  {k:'tlName',l:'نام و نام خانوادگی مسئول گروه اجرای کار',t:'text'},
+  {k:'_h9',l:'پایان کار',t:'hdr'},
+  {k:'tlEndName',l:'نام و نام خانوادگی مسئول گروه (پایان کار)',t:'text'},
+  {k:'hseEndName',l:'نام و نام خانوادگی بازرس ایمنی',t:'text'}
+ ],
+ cols:['equip','unit','startD']},
 ppeCat:{t:'انبار و موجودی PPE',i:'🦺',
  fields:[{k:'item',l:'نام قلم',t:'text',req:1},{k:'std',l:'استاندارد مرجع (EN/ANSI)',t:'text'},
   {k:'unit',l:'واحد',t:'sel',o:()=>L('PPE_UNITS'),list:'PPE_UNITS'},{k:'stock',l:'موجودی',t:'num',req:1},
@@ -1747,6 +1788,27 @@ heightWork:{t:'کار در ارتفاع',i:'🧗',
   {k:'note',l:'توضیحات',t:'txt'}],
  cols:['date','area','loc','height','cnt','hwChk']},
 
+siteVisit:{t:'بازدید محل کار (SITE VISIT)',i:'🔍',
+ status:['ثبت شده','اقدام لازم','بسته شد'],
+ fields:[
+  {k:'_h1',l:'مشخصات بازدید',t:'hdr'},
+  {k:'date',l:'تاریخ بازدید',t:'date',req:1,def:todayJ},
+  {k:'time',l:'ساعت بازدید',t:'time'},
+  {k:'area',l:'واحد / محل',t:'sel',o:()=>AR(),req:1,list:'AREAS0'},
+  {k:'visitor',l:'بازدیدکننده',t:'sel',o:P,req:1},
+  {k:'team',l:'همراهان بازدید',t:'people'},
+  {k:'activity',l:'کار / فعالیت مورد بازدید',t:'text',req:1},
+  {k:'ptwRef',l:'شماره مجوز کار مرتبط (PTW)',t:'text'},
+  {k:'_h2',l:'موارد بررسی میدانی',t:'hdr'},
+  {k:'items',l:'موارد بررسی‌شده',t:'chkl',o:SV_ITEMS},
+  {k:'result',l:'نتیجه بازدید',t:'sel',o:SV_RES,req:1},
+  {k:'findings',l:'یافته‌ها و ناایمنی‌های مشاهده‌شده',t:'txt'},
+  {k:'_h3',l:'اقدامات اصلاحی',t:'hdr'},
+  {k:'actions',l:'اقدامات اصلاحی لازم',t:'txt'},
+  {k:'owner',l:'مسئول رفع',t:'sel',o:P},
+  {k:'due',l:'مهلت رفع',t:'date'}
+ ],
+ cols:['date','area','visitor','result']},
 legalReport:{t:'گزارش‌دهی قانونی حوادث',i:'⚖️',
  status:['تهیه نشده','تهیه شد','ارسال شد','تایید دریافت'],
  fields:[
@@ -1898,7 +1960,8 @@ function seed(){
  R('lec',{date:jAgo(4),area:'ریخته‌گری مذاب',activity:'ریخته‌گری در قالب',hazard:'پاشش مذاب و سوختگی',L:'3',E:'6',C:'15',ctrl:'PPE نسوز، فاصله امن، آموزش',action:'بررسی دوره‌ای PPE و آموزش مجدد',owner:'مهدی احمدی',review:jAgo(-60),status:'تایید شده'});
  R('inspections',{tpl:'furnace',date:jAgo(2),inspBy:'سارا محمدی',answers:{0:'ok',1:'ok',2:'ok',3:'fail',4:'ok',5:'ok',6:'ok',7:'ok'},fails:['خشک بودن محوطه، سینی شارژ و قطعات (عدم رطوبت)'],note:'رطوبت موضعی نزدیک سینی شارژ مشاهده شد.',score:88});
  R('inspections',{tpl:'crane',date:jAgo(6),inspBy:'سارا محمدی',answers:{0:'ok',1:'ok',2:'ok',3:'ok',4:'ok',5:'ok',6:'ok',7:'ok'},fails:[],note:'بدون مغایرت',score:100});
- R('ptw',{type:'کار گرم (جوش/برش/سنگ‌زنی)',loc:'خط ریخته‌گری - تعمیر شوتینگ',desc:'برش و تعویض بخش فرسوده',contractor:'واحد تعمیرات',startD:jAgo(1),endD:jAgo(1),workers:['جواد نوری'],gas:true,loto:true,ppe:true,fire:true,rescue:true,expertOk:true,mgrOk:true,status:'خاتمه یافته',createdBy:'جواد نوری'});
+  R('ptw',{startD:jAgo(1),startT:'08:00',endD:jAgo(1),endT:'16:00',plant:'فولاد تنبور',unit:'خط ریخته‌گری',section:'شوتینگ',equip:'شوتینگ کوره ۲',equipCode:'FRN-02',desc:'برش و تعویض بخش فرسوده',workers:['جواد نوری'],tools:'دستگاه برش، سنگ فرز',hazards:[PTW_HAZ[0],PTW_HAZ[25]],addPermits:[],ppeReq:[PTW_PPE[8],PTW_PPE[17],PTW_PPE[25]],eqState:PTW_EQ[1],hseCoord:'خیر',reqName:'جواد نوری',supName:'سرپرست شیفت A',hse1Name:'سارا محمدی',hse1bName:'سارا محمدی',tlName:'جواد نوری',tlEndName:'جواد نوری',hseEndName:'سارا محمدی',status:'خاتمه یافته',createdBy:'جواد نوری',createdJ:jAgo(1)});
+  R('siteVisit',{date:jAgo(2),time:'09:00',area:'سالن ذوب',visitor:'سارا محمدی',team:['علی رضایی','مهدی احمدی'],activity:'شارژ کوره ۲ و ریخته‌گری قطعات پمپ',ptwRef:'',items:SV_ITEMS.slice(0,6),result:SV_RES[1],findings:'فاصله امن از محل ریخته‌گری رعایت نشده بود؛ جرثقیل بدون علامت‌گذاری مسیر',actions:'محدوده‌بندی و تابلوی هشدار نصب شود',owner:'سرپرست شیفت A',status:'اقدام لازم',createdBy:'سارا محمدی',createdJ:jAgo(2)});
  [['کلاه ایمنی','EN 397','عدد',60,20],['عینک ایمنی دودکم','EN 166','عدد',120,30],['فیس‌شیلد نسوز','EN 166 گرید ۹','عدد',25,10],['گیتر آلومینیومی نسوز','ISO 9185','عدد',15,8],['دستکش نسوز کولار','EN 407','جفت',40,15],['چکمه ایمنی نسوز','EN ISO 20345','جفت',35,12],['ماسک نیم‌صورت + فیلتر P100','EN 143','عدد',30,10],['ایرماپ (گوشی)','SNR 27dB','عدد',80,25]].forEach(x=>R('ppeCat',{item:x[0],std:x[1],unit:x[2],stock:x[3],min:x[4],loc:'انبار HSE'}));
  [['کفش کار عایق برق','','جفت',0,0],['کفش کار','','جفت',0,0],['چکمه دربرسوز','','جفت',0,0],['گیتر چرمی','','عدد',0,0],['کمربند کار در ارتفاع','','عدد',0,0],['دستکش عایق برق','','جفت',0,0],['دستکش جوشکاری','','جفت',0,0],['دستکش ضد تعامن','','جفت',0,0],['دستکش کار','','جفت',0,0],['آستین چرمی','','جفت',0,0],['پیشبند چرمی','','عدد',0,0],['لباس نسوز آلومینیومی','','ست',0,0],['لباس نسوز شوبر','','ست',0,0],['لباس کار معمولی','','ست',0,0],['شیلد سیلیکا کوارتز','','عدد',0,0],['شیلد محافظ','','عدد',0,0],['عینک ایمنی','','عدد',0,0],['عینک ریخته‌گری','','عدد',0,0],['عینک جوشکاری','','عدد',0,0],['مقنعه جوشکاری','','عدد',0,0],['ماسک فیلتر دار (N95)','','عدد',0,0],['ماسک سه لایه','','عدد',0,0],['کلاه کار در ارتفاع','','عدد',0,0]].forEach(x=>R('ppeCat',{item:x[0],std:x[1],unit:x[2],stock:x[3],min:x[4],loc:'انبار HSE'}));
  R('ppeTx',{date:jAgo(5),person:'علی رضایی',item:'دستکش نسوز کولار',qty:1,size:'L',status:'تحویل شد',createdBy:'سارا محمدی'});
@@ -2098,6 +2161,7 @@ function exportRecord(k,id,format){
   const r=db[k].find(x=>x.id===id);
   if(!r){toast('رکورد یافت نشد');return}
   if(k==='inspections'){ exportInspectionReport(r,format); return; }
+  if(k==='ptw'){ const hp='<h1>🔥 فرم مجوز ایمنی انجام کار (PTW)</h1><p>کد: <b>'+esc(r.id)+'</b> — وضعیت: <b>'+esc(r.status||'—')+'</b> — ثبت: '+esc(r.createdBy||'')+' / '+esc(r.createdJ||'')+'</p>'+ptwDocHTML(r,false); const fp='HSE-PTW-'+r.id; if(format==='print') printHTML(hp,fp); else if(format==='word') exportWord(hp,fp); else exportPDF(hp,fp); return; }
   let h='<h1>'+M.i+' '+esc(M.t)+'</h1>';
   h+='<p>کد: <b>'+esc(r.id)+'</b>'+(r.code?' — کد CAPA: <b>'+esc(r.code)+'</b>':'')+' — ثبت: '+esc(r.createdBy||'')+' / '+esc(r.createdJ||'')+'</p>';
   if(M.status&&r.status) h+='<p>وضعیت: <b>'+esc(r.status)+'</b></p>';
@@ -2109,7 +2173,7 @@ function exportRecord(k,id,format){
     let out;
     switch(f.t){
       case 'chk': out=v?'✔ بله':'—'; break;
-      case 'people': out=peopleOut(r,v); break;
+      case 'people': out=peopleOut(r,v); break; case 'chkl': out=esc((v||[]).join('، ')); break;
       case 'num': out=nfmt(v); break;
       case 'tplsel': out=TPLS[v]?TPLS[v].t:esc(v); break;
       default: out=esc(v);
@@ -2132,6 +2196,7 @@ function blankCell(f){
     case 'date': return '....... / ....... / .......';
     case 'risklvl': return blankOpts(['کم','متوسط','بالا','بحرانی']);
     case 'sel': { const o=opts(f); return o.length?blankOpts(o):BLANK_LINE; }
+    case 'chkl': return blankOpts(opts(f));
     case 'people': return (db.personnel||[]).length?blankOpts(db.personnel.map(p=>p.name)):BLANK_LINE;
     case 'tplsel': return Object.keys(TPLS).map(k=>BLANK_BOX+' '+esc(TPLS[k].t)).join('<br>')+'<br><i style="font-size:9pt;color:#64748b">(اقلام هر چک‌لیست در انتهای فرم آمده است)</i>';
     default: return BLANK_LINE;
@@ -2153,7 +2218,7 @@ function blankFormHTML(k){
   h+='<p>تاریخ چاپ: '+nd(todayJ())+'</p>';
   h+='<table><tbody>';
   if(M.status) h+='<tr><th style="width:30%">وضعیت</th><td>'+blankOpts(M.status)+'</td></tr>';
-  (M.fields||[]).forEach(f=>{ h+='<tr><th style="width:30%">'+esc(f.l)+(f.req?' <span style="color:#dc2626">*</span>':'')+'</th><td>'+blankCell(f)+'</td></tr>'; });
+  (M.fields||[]).forEach(f=>{ if(f.t==='hdr'){h+='<tr><th colspan="2" style="background:#fff7ed;color:#c2410c">'+esc(f.l)+'</th></tr>';return} h+='<tr><th style="width:30%">'+esc(f.l)+(f.req?' <span style="color:#dc2626">*</span>':'')+'</th><td>'+blankCell(f)+'</td></tr>'; });
   h+='</tbody></table>';
   if((M.fields||[]).some(f=>f.t==='tplsel')){
     Object.keys(TPLS).forEach(tk=>{ h+='<h2>📋 '+esc(TPLS[tk].t)+'</h2>'+blankChecklistTable(TPLS[tk].items); });
@@ -2329,6 +2394,7 @@ function ctrl(f,v){
   }
   case 'risklvl':return '<input type="hidden"'+id+' data-k="'+f.k+'" value="'+esc(v||'')+'"><div class="riskseg">'+['کم','متوسط','بالا','بحرانی'].map(r=>'<button type="button" class="rsk r-'+({کم:'ok',متوسط:'warn',بالا:'org',بحرانی:'bad'})[r]+(v===r?' on':'')+'" onclick="pickRisk(this,\''+f.k+'\',\''+r+'\')">'+r+'</button>').join('')+'</div>';
   case 'tplsel':return '<select class="in" data-k="tpl"'+id+'><option value="">— انتخاب چک‌لیست —</option>'+Object.keys(TPLS).map(k=>'<option '+(v===k?'selected':'')+' value="'+k+'">'+TPLS[k].t+' (هر '+TPLS[k].period+' روز)</option>').join('')+'</select>';
+  case 'chkl':{const sel=Array.isArray(v)?v:[];return '<div class="pbox" style="grid-template-columns:1fr 1fr;max-height:260px">'+opts(f).map((o,i)=>'<label><input type="checkbox" cki="'+f.k+'" value="'+esc(o)+'" '+(sel.includes(o)?'checked':'')+'> '+(i+1)+'. '+esc(o)+'</label>').join('')+'</div>';}
   case 'people':return '<div class="pbox">'+db.personnel.map(p=>'<label><input type="checkbox" ppi="'+f.k+'" value="'+esc(p.name)+'" '+((v||[]).includes(p.name)?'checked':'')+'> '+esc(p.name)+'</label>').join('')+'</div>';
   case 'date':return '<input class="in jdate"'+id+' data-k="'+f.k+'" type="text" inputmode="numeric" value="'+esc(v)+'" placeholder="1404/08/12" autocomplete="off" onclick="openCal(this)" title="برای انتخاب از تقویم جلالی کلیک کنید">';
   case 'num':return '<input class="in"'+id+' data-k="'+f.k+'" type="number" inputmode="decimal" step="any" value="'+esc(v)+'">';
@@ -2397,8 +2463,9 @@ function openForm(k,id,pre){
  let b='<div class="fgrid">';
  M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;
   const v=rec?rec[f.k]:(pre&&pre[f.k]!==undefined?pre[f.k]:(f.def!==undefined?(typeof f.def==='function'?f.def():f.def):''));
+  if(f.t==='hdr'){b+='<div class="ff wide" style="font-weight:700;color:var(--pri2);border-bottom:1px dashed var(--line);padding:6px 0 4px;margin-top:6px">'+f.l+'</div>';return}
   if(f.t==='chk'){b+='<div class="ff wide"><label class="ck"><input type="checkbox" data-k="'+f.k+'" '+(v?'checked':'')+'><span>'+f.l+'</span></label></div>';return}
-  b+='<div class="ff'+((f.t==='txt'||f.t==='people')?' wide':'')+'"><label>'+f.l+(f.req?' <i>*</i>':'')+'</label>'+ctrl(f,v)+'</div>'});
+  b+='<div class="ff'+((f.t==='txt'||f.t==='people'||f.t==='chkl')?' wide':'')+'"><label>'+f.l+(f.req?' <i>*</i>':'')+'</label>'+ctrl(f,v)+'</div>'});
  b+='</div>';
  if(k==='incidents'){
    if(me.role==='worker'){
@@ -2430,6 +2497,16 @@ function openForm(k,id,pre){
  if(k==='fmea'){const upd=()=>{const S=+($('#f_s')||{}).value||1,O=+($('#f_o')||{}).value||1,D=+($('#f_d')||{}).value||1;const rpn=S*O*D;const cls=rpn<=50?'b-ok':rpn<=100?'b-warn':rpn<=200?'b-org':'b-bad';const lbl=rpn<=50?'کم':rpn<=100?'متوسط':rpn<=200?'بالا':'بحرانی';const el=$('#fmprev');if(el)el.innerHTML='RPN (S×O×D) = <b>'+nd(S)+' × '+nd(O)+' × '+nd(D)+' = '+nd(rpn)+'</b> — <span class="chip '+cls+'">'+lbl+'</span>'};['f_s','f_o','f_d'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
  if(k==='lec'){const upd=()=>{const L=+($('#f_L')||{}).value||0,E=+($('#f_E')||{}).value||0,C=+($('#f_C')||{}).value||0;const sc=Math.round(L*E*C*100)/100;const lvl=lecLevel(sc);const cls=sc<20?'b-ok':sc<70?'b-info':sc<200?'b-warn':sc<400?'b-org':'b-bad';const el=$('#lecprev');if(el)el.innerHTML='امتیاز LEC = <b>'+nd(sc)+'</b> — <span class="chip '+cls+'">'+lvl+'</span>'};['f_L','f_E','f_C'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
  if(k==='jsa'){setTimeout(()=>{initJsaSteps(rec?rec.steps:null)},80)}
+ if(k==='ptw'){ PTW_NAME_SIG.forEach(([nk,sk])=>{
+   const inp=document.querySelector('#mbody [data-k="'+nk+'"]'); if(!inp) return; const ff=inp.closest('.ff'); if(!ff) return;
+   const sg=((rec&&rec.psigs)||{})[sk];
+   const box=document.createElement('div'); box.style.cssText='margin-top:6px';
+   box.innerHTML=(sg&&sg.img?'<div style="font-size:11.5px;color:var(--mut)">امضای ثبت‌شده — برای تغییر دوباره امضا کنید</div><img src="'+sg.img+'" alt="امضا" style="height:40px;margin:4px 0;border:1px dashed #e2e8f0;border-radius:6px;background:#fff">':'')
+     +'<div style="font-size:11.5px;color:var(--mut);margin-bottom:3px">✍️ امضا</div>'
+     +'<canvas class="sign-pad" data-psig="'+sk+'" width="500" height="150" style="width:100%;max-width:340px;height:auto;aspect-ratio:500/150;border:1px dashed #94a3b8;border-radius:8px;background:#fff;touch-action:none"></canvas>'
+     +'<div style="margin-top:4px"><button type="button" class="btn ghost sm" onclick="ptwSigClear(\''+sk+'\')">🧹 پاک کردن امضا</button></div>';
+   ff.appendChild(box);
+ }); setTimeout(initSignPads,60); }
  if(signable(k)) setTimeout(initSignPads,60);
 }
 function renderTplItems(tpl,ans){const w=$('#tplWrap');if(!w)return;
@@ -2470,6 +2547,13 @@ function saveForm(k,id){
    if(f.req&&!rec[f.k].length)bad=bad||f.l
  });
 
+ if(k==='ptw'&&isNew) rec.status=M.status[0];
+ if(k==='ptw'){ rec.psigs=Object.assign({},rec.psigs||{}); PTW_NAME_SIG.forEach(([nk,sk])=>{
+   const cv=document.querySelector('#mbody canvas.sign-pad[data-psig="'+sk+'"]'); if(!cv) return;
+   if(cv.dataset.drawn==='1') rec.psigs[sk]={name:rec[nk]||me.name,job:'',date:todayJ(),img:cv.toDataURL('image/png')};
+   else if(cv.dataset.cleared==='1') delete rec.psigs[sk];
+ }); }
+ if(M.fields.some(f=>f.t==='chkl')) M.fields.filter(f=>f.t==='chkl').forEach(f=>{ rec[f.k]=$$('#mbody input[cki="'+f.k+'"]:checked').map(c=>c.value); });
  if(k==='incidents'){ rec.analyses=collectAnalyses(); }
  if(k==='unsafe'){
    if(window._phData!==undefined)rec.photo=window._phData;
@@ -2532,6 +2616,7 @@ function saveForm(k,id){
  toast('✔ با موفقیت ذخیره شد');
  renderSidebar();
  if(curPage===k||(curPage==='risks'&&riskMethod===k)) renderRows();
+  if(k==='ptw'&&isNew) setTimeout(()=>openDetail('ptw',rec.id),120);
  else refreshCurrent();
 }
 
@@ -2776,7 +2861,7 @@ function dashMgmt(){
  h+='<div class="card"><div class="sechead">🧯 سطوح ریسک</div>'+hbars(riskBars)+'</div>';
  h+='<div class="card"><div class="sechead">📌 انواع رویداد</div>'+hbars(typeBars)+'</div></div>';
  h+='<div class="grid3"><div class="card"><div class="sechead">⏰ اقدامات اصلاحی معوق</div>'+miniList(od.map(r=>'<div class="list-row" onclick="openDetail(\'actions\',\''+r.id+'\')"><span class="lt">'+(r.code?'['+esc(r.code)+'] ':'')+esc(r.desc)+'</span><span class="chip b-bad">'+nd(jDaysAgo(r.due))+' روز تأخیر</span></div>'),'مورد معوقی وجود ندارد')+'</div>';
- h+='<div class="card"><div class="sechead">'+(me.role==='manager'?'🏅 مجوزهای در انتظار تأیید':'🔥 مجوزهای در انتظار بررسی')+'</div>'+miniList(pw.map(r=>'<div class="list-row" onclick="openDetail(\'ptw\',\''+r.id+'\')"><span class="lt">'+esc(r.type)+' — '+esc(r.loc)+'</span><span class="chip b-warn">'+esc(r.id)+'</span></div>'),'در انتظار تأییدی نیست')+'</div>';
+ h+='<div class="card"><div class="sechead">'+(me.role==='manager'?'🏅 مجوزهای در انتظار تأیید':'🔥 مجوزهای در انتظار بررسی')+'</div>'+miniList(pw.map(r=>'<div class="list-row" onclick="openDetail(\'ptw\',\''+r.id+'\')"><span class="lt">'+esc(ptwTitle(r))+'</span><span class="chip b-warn">'+esc(r.id)+'</span></div>'),'در انتظار تأییدی نیست')+'</div>';
  h+='<div class="card"><div class="sechead">🦺 هشدار موجودی PPE</div>'+miniList(low.map(r=>'<div class="list-row" onclick="openDetail(\'ppeCat\',\''+r.id+'\')"><span class="lt">'+esc(r.item)+'</span><span class="chip b-bad">موجودی '+nd(r.stock)+' / حد '+nd(r.min)+'</span></div>'),'موجودی همه اقلام کافی است')+'</div></div>';
  h+='<div class="card"><div class="sechead">📋 بازرسی‌های سرسید نشده</div>'+miniList(odInsp.map(x=>'<div class="list-row" onclick="setPage(\'inspections\')"><span class="lt">'+TPLS[x.tk].t+'</span><span class="chip '+(x.days===999?'b-bad':'b-warn')+'">'+(x.days===999?'هرگز انجام نشده':nd(x.days)+' روز')+'</span></div>'),'همه بازرسی‌ها به‌روز هستند')+'</div>';
  h+='<div style="margin-top:14px"></div>';
@@ -3464,7 +3549,7 @@ function notifications(){
  if(canView('ptw')){
   const ptwWait=me.role==='manager'?db.ptw.filter(r=>r.status==='تایید کارشناس'):me.role==='expert'?db.ptw.filter(r=>r.status==='در انتظار بررسی'):[];
   ptwWait.forEach(r=>{
-   out.push({icon:'🔥',kind:'ptw',chip:'b-org',label:'مجوز در انتظار تأیید',text:r.type+' — '+r.loc,sub:(r.contractor||'')+' — '+r.startD,id:r.id});
+   out.push({icon:'🔥',kind:'ptw',chip:'b-org',label:'مجوز در انتظار تأیید',text:ptwTitle(r),sub:(r.desc||'').slice(0,50)+' — '+r.startD,id:r.id});
   });
  }
  if(canView('equipCert')){
@@ -3627,7 +3712,7 @@ function saveVerifyCapa(id){
 
 /* ---------- امضا ---------- */
 const SIGN_ROLES=[['expert','🦺 کارشناس HSE'],['manager','👔 مدیریت']];
-const SIGN_EXCLUDE=['contacts','hours','ppeCat','emgEquip','announce','chem'];
+const SIGN_EXCLUDE=['contacts','hours','ppeCat','emgEquip','announce','chem','ptw'];
 function signable(k){ return k==='s5' || (!!MODS[k] && SIGN_EXCLUDE.indexOf(k)<0); }
 function myJob(){ const p=(db&&db.personnel)?db.personnel.find(x=>x.id===me.id):null; return p?(p.job||''):''; }
 function canSignAs(role){ return !!me && me.role===role && (role==='expert'||role==='manager'); }
@@ -3736,8 +3821,8 @@ function peopleOut(r,v){
   if(!sigs.length) return esc(list.join('، '));
   return list.map(n=>{
     const a=sigs.find(x=>x.n===n);
-    return '<span style="display:inline-block;margin:1px 10px 1px 0;vertical-align:middle;white-space:nowrap">'+esc(n)
-      +(a?' <img src="'+a.img+'" alt="امضا" style="height:22px;width:auto;vertical-align:middle;margin-right:3px">':'')+'</span>';
+    return '<span style="display:inline-block;margin:2px 10px 2px 0;vertical-align:top;text-align:center">'+esc(n)
+      +(a?'<br><img src="'+a.img+'" alt="امضا" style="height:22px;width:auto">':'')+'</span>';
   }).join('');
 }
 
@@ -3747,8 +3832,8 @@ function openDetail(k,id){
  if(!canView(k)){toast('اجازه مشاهده این بخش را ندارید');return}
  if(!isOwnRecord(k,r)){toast('فقط اطلاعات مربوط به خودتان قابل مشاهده است');return}
  let h='<div class="dhead"><span class="chip idc">'+esc(r.id)+'</span>'+(r.code?'<span class="chip b-org" style="direction:ltr;font-family:monospace">'+esc(r.code)+'</span>':'')+(M.status&&r.status?chip(r.status):'')+'<small style="color:var(--mut)">ثبت: '+esc(r.createdBy)+' / '+esc(r.createdJ)+'</small></div><div class="dgrid">';
- M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;const v=r[f.k];if(v===undefined||v===''||v===null)return;
-  let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=peopleOut(r,v);break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;default:out=esc(v)}
+ if(k==='ptw'){ h=h.replace(/<div class="dgrid">$/,'<div>')+ptwDocHTML(r,true); } else M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;const v=r[f.k];if(v===undefined||v===''||v===null)return;
+  let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=peopleOut(r,v);break;case 'chkl':out=esc((v||[]).join('، '));break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;default:out=esc(v)}
   h+='<div class="dl">'+f.l+'</div><div class="dv">'+out+'</div>'});
  h+='</div>';
  if(r.signs && hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
@@ -3856,6 +3941,7 @@ function openDetail(k,id){
  if(k==='actions'&&r.verify&&['انجام شد','در انتظار تأیید'].includes(r.status)&&can('actions','edit')&&me.role!=='worker')
    foot+='<button class="btn pri" onclick="closeModal();verifyCapa(\''+id+'\')">✅ تأیید اثربخشی</button>';
  openModal(M.t,h,foot);
+ if(k==='ptw') setTimeout(initSignPads,60);
 }
 function setStat(k,id,val){
  if(!can(k,'edit')){toast('دسترسی تغییر وضعیت ندارید');return}
@@ -3926,6 +4012,75 @@ function ptwAct(id,to){
  if(curPage==='ptw')renderRows();
  renderSidebar();
 }
+
+/* ---------- PTW: نمایش فرم و امضاها ---------- */
+function ptwTitle(r){ return [r.unit,r.equip].filter(Boolean).join(' — ') || (r.desc||'مجوز کار').slice(0,40); }
+function ptwCanSign(key){ const sp=PTW_SIGS.find(x=>x.key===key); return !!(sp&&me&&sp.roles.includes(me.role)); }
+function ptwCheckList(all,sel){
+  const s=Array.isArray(sel)?sel:[];
+  return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;font-size:12px">'+all.map((o,i)=>'<span>'+(s.includes(o)?'☑':'☐')+' '+nd(i+1)+'. '+esc(o)+'</span>').join('')+'</div>';
+}
+function ptwSigCell(r,key,live){
+  const sg=(r.psigs||{})[key];
+  if(sg&&sg.img) return '<img src="'+sg.img+'" alt="امضا" style="display:block;height:34px;width:auto;max-width:100%;margin:0 0 2px 0"><div style="font-size:10.5px;color:#64748b">'+esc(sg.date||'')+'</div>';
+  if(live&&ptwCanSign(key)) return '<canvas class="sign-pad" data-psig="'+key+'" width="500" height="150" style="width:100%;height:auto;aspect-ratio:500/150;border:1px dashed #94a3b8;border-radius:8px;background:#fff;touch-action:none"></canvas>'
+    +'<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:4px"><button type="button" class="btn ghost sm" onclick="ptwSigClear(\''+key+'\')">🧹 پاک کردن</button><button type="button" class="btn pri sm" onclick="ptwSign(\''+r.id+'\',\''+key+'\')">✍️ ثبت امضا</button></div>'
+    +'<div style="font-size:11px;color:var(--mut);text-align:center;margin-top:3px">'+esc(me.name)+' — '+esc(myJob())+'</div>';
+  return '<span style="color:#94a3b8;font-size:12px">امضا نشده</span>';
+}
+function ptwDocHTML(r,live){
+  const t=x=>(x==null||x==='')?'—':esc(x).replace(/\n/g,'<br>');
+  const sec=s=>'<tr><td colspan="2" style="background:#fff7ed;font-weight:700;color:#c2410c">'+s+'</td></tr>';
+  const row=(l,v)=>'<tr><th style="width:26%;background:#f8fafc;text-align:right">'+l+'</th><td>'+v+'</td></tr>';
+  const sig=(l,key,nm)=>row(l,(nm?'<div style="font-size:12px;margin-bottom:2px">نام و نام خانوادگی: '+t(nm)+'</div>':'')+ptwSigCell(r,key,live));
+  const team=(r.workers||[]).length?(r.workers||[]).map((n,i)=>nd(i+1)+'. '+esc(n)).join('&nbsp;&nbsp;|&nbsp;&nbsp;'):'—';
+  return '<table class="ptwdoc" style="width:100%;border-collapse:collapse;font-size:12.5px"><tbody>'
+   +sec('۱. این قسمت توسط واحد درخواست‌کننده تکمیل می‌گردد')
+   +row('زمان انجام کار','از تاریخ: '+t(r.startD)+' &nbsp; ساعت: '+t(r.startT)+' &nbsp;— تا تاریخ: '+t(r.endD)+' &nbsp; ساعت: '+t(r.endT))
+   +row('محل انجام کار','کارخانه: '+t(r.plant)+' — واحد: '+t(r.unit)+' — قسمت: '+t(r.section)+' — نام تجهیز: '+t(r.equip)+' — کد تجهیز: '+t(r.equipCode))
+   +row('شرح دقیق انجام کار',t(r.desc))
+   +row('اسامی تیم اجرایی',team)
+   +row('وسایل کار مورد استفاده',t(r.tools))
+   +row('خطرات مربوط به کار',ptwCheckList(PTW_HAZ,r.hazards))
+   +row('مجوزهای الحاقی',ptwCheckList(PTW_ADDP,r.addPermits))
+   +row('لوازم و تجهیزات ایمنی مورد نیاز',ptwCheckList(PTW_PPE,r.ppeReq))
+   +row('شرایط تجهیز',t(r.eqState))
+   +sig('امضای درخواست‌کننده مجوز','req',r.reqName||r.createdBy)
+   +sig('امضای سرپرست واحد','sup',r.supName)
+   +sec('۲. اظهارات بازرس HSE')
+   +row('آیا هماهنگی با شرکت‌ها یا واحدهای دیگر مورد نیاز است؟',t(r.hseCoord)+(r.hseCoordNote?' — '+t(r.hseCoordNote):''))
+   +sig('امضای اظهارات بازرس HSE','hse1',r.hse1Name)
+   +sig('امضای بازرس HSE','hse1b',r.hse1bName)
+   +sec('۳. اظهارات مسئول گروه اجرای کار')
+   +row('گواهی','اینجانب مسئولیت اجرای کار را بر عهده داشته، گواهی می‌نمایم که خود و همکاران مرتبط با این کار را از دستورالعمل‌ها و توصیه‌های ایمنی مربوط به کار مطلع شده و در طول زمان انجام کار مقررات ایمنی را رعایت می‌کنیم.')
+   +sig('امضای مسئول گروه اجرای کار','tl1',r.tlName)
+   +sec('۴. پایان کار')
+   +row('مسئول گروه اجرای کار','کلیه کارکنان کار را به اتمام رسانده، ابزار کار و اشیاء اضافی را از محیط خارج نموده و محل کار بطور ایمن و مرتب ترک شده است.')
+   +sig('امضای مسئول گروه اجرای کار (پایان کار)','tl2',r.tlEndName)
+   +row('بازرس ایمنی','اینجانب محل کار را کنترل نموده و صحت اظهارات مسئول گروه اجرایی را تایید می‌کنم. ضمناً با توجه به اتمام کار این مجوز را لغو نموده و اعلام می‌دارم پرسنل ذیربط از لغو آن مطلع گردیده‌اند.')
+   +sig('امضای بازرس ایمنی','hse2',r.hseEndName)
+   +'</tbody></table>'
+   +'<div style="font-size:10.5px;color:#64748b;margin-top:8px;line-height:1.9">توزیع نسخ: واحد — HSE — مسئول اجرای کار &nbsp;|&nbsp; تلفن آتش‌نشانی: 3333-4142-034 &nbsp;|&nbsp; تلفن اورژانس: 3355-4142-0341 &nbsp;|&nbsp; شماره ثبت در دفتر HSE: '+esc(r.id)+'</div>';
+}
+window.ptwSigClear=function(key){
+  const cv=document.querySelector('canvas.sign-pad[data-psig="'+key+'"]'); if(!cv) return;
+  cv.getContext('2d').clearRect(0,0,cv.width,cv.height); cv.dataset.drawn=''; cv.dataset.cleared='1';
+};
+window.ptwSign=function(id,key){
+  const r=db.ptw.find(x=>x.id===id); if(!r) return;
+  const sp=PTW_SIGS.find(x=>x.key===key); if(!sp) return;
+  if(!ptwCanSign(key)){ toast('امضای این بخش برای نقش شما مجاز نیست'); return; }
+  if((r.psigs||{})[key]&&r.psigs[key].img){ toast('این بخش قبلاً امضا شده است'); return; }
+  const cv=document.querySelector('canvas.sign-pad[data-psig="'+key+'"]');
+  if(!cv||cv.dataset.drawn!=='1'){ toast('ابتدا داخل کادر امضا کنید'); return; }
+  r.psigs=Object.assign({},r.psigs||{});
+  r.psigs[key]={name:me.name,job:myJob(),date:todayJ(),img:cv.toDataURL('image/png')};
+  if(!r.log) r.log=[];
+  r.log.push({u:me.name,d:todayJ(),t:'امضا: '+sp.title});
+  queueRec('ptw',id); save();
+  toast('✔ امضا ثبت شد');
+  openDetail('ptw',id);
+};
 
 /* ---------- KPI ---------- */
 function trendsPage(){
@@ -4341,7 +4496,7 @@ const SPECIAL={
 const NAV=[
  {g:'خانه',items:['dash']},
  {g:'گزارشگری و پیگیری',items:['incidents','unsafe','actions']},
- {g:'ارزیابی و کنترل خطر',items:['risks','inspections','ptw','loto','confined','heightWork']},
+ {g:'ارزیابی و کنترل خطر',items:['risks','inspections','ptw','loto','confined','heightWork','siteVisit']},
  {g:'مدیریت تغییر و تجهیزات',items:['moc','equipCert']},
  {g:'نظام آراستگی 5S',items:['s5']},
  {g:'ایمنی شغلی و PPE',items:['ppeCat','ppeTx']},
