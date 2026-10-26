@@ -2023,6 +2023,15 @@ function exportWord(html, filename){
     saveBlob(blob, filename+'.doc', 'application/msword');
   }catch(e){ toast('خطا در تولید Word: '+e.message); }
 }
+function printHTML(h, title){
+  const w=window.open('','_blank');
+  if(!w){ toast('مرورگر پنجره چاپ را مسدود کرد — اجازه پاپ‌آپ را فعال کنید'); return; }
+  w.document.write('<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8"><title>'+esc(title)+'</title>'+reportCSSForWord()
+    +'<style>@page{size:A4;margin:12mm}body{font-family:Tahoma,Vazirmatn,sans-serif;padding:8px;background:#fff}</style></head><body>'
+    +HSE_LOGO_HTML+h+'<div class="footer">سامانه جامع HSE فولاد تنبور — '+nd(todayJ())+'</div></body></html>');
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 500);
+}
 function exportPDF(html, filename){
   if(typeof html2pdf==='undefined'){ toast('کتابخانه PDF بارگذاری نشد — از دکمه چاپ (Ctrl+P) استفاده کنید'); return; }
   const styleId='hse-report-export-style';
@@ -2044,16 +2053,21 @@ function exportPDF(html, filename){
   }
   const wrap=document.createElement('div');
   wrap.className='hse-report';
-  wrap.style.cssText='position:fixed;left:0;top:0;width:800px;background:#fff;z-index:-1;pointer-events:none;overflow:visible';
+  wrap.style.cssText='position:fixed;left:0;top:0;width:800px;max-width:800px;background:#fff;z-index:2147483646;overflow:visible;margin:0;opacity:1;visibility:visible';
   wrap.innerHTML=HSE_LOGO_HTML+html+'<div class="footer">سامانه جامع HSE فولاد تنبور — '+nd(todayJ())+'</div>';
   document.body.appendChild(wrap);
-  const pdfJob=html2pdf().from(wrap).set({
-    margin:6, filename:filename+'.pdf',
-    image:{type:'jpeg',quality:0.95},
-    html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false,scrollX:0,scrollY:0,windowWidth:800},
-    jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
-  });
-  (typeof pdfJob.outputPdf==='function'?pdfJob.outputPdf('blob'):pdfJob.save().then(()=>null))
+  window.scrollTo(0,0);
+  const imgs=[...wrap.querySelectorAll('img')];
+  const waitImgs=Promise.all(imgs.map(im=>im.complete?null:new Promise(r=>{im.onload=im.onerror=r;})));
+  waitImgs.then(()=>{
+    const job=html2pdf().from(wrap).set({
+      margin:6, filename:filename+'.pdf',
+      image:{type:'jpeg',quality:0.95},
+      html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false,scrollX:0,scrollY:0,windowWidth:800},
+      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
+    });
+    return (typeof job.outputPdf==='function') ? job.outputPdf('blob') : job.save().then(()=>null);
+  })
    .then(blob=>{ wrap.remove(); if(blob) saveBlob(blob, filename+'.pdf', 'application/pdf'); else toast('✔ فایل PDF دانلود شد'); })
    .catch(e=>{ wrap.remove(); toast('خطا در PDF — از دکمه چاپ استفاده کنید'); });
 }
@@ -2105,7 +2119,7 @@ function exportRecord(k,id,format){
   h+='</tbody></table>';
   if(hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
   const fn='HSE-'+r.id+'-'+todayJ().replace(/\//g,'-');
-  if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
+  if(format==='print') printHTML(h,fn); else if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
 }
 /* ---------- فرم‌ها و چک‌لیست‌های خالی (برای چاپ و تکمیل دستی) ---------- */
 const BLANK_BOX='☐';
@@ -2408,7 +2422,7 @@ function openForm(k,id,pre){
  if(ATT_MODS.includes(k)){ _attWork=attFromArr(rec?rec.attSigs:null); b+=attSigBlock(rec?(rec.people||[]):[]); }
  b+=signFormBlock(k,rec);
  openModal((rec?'ویرایش — ':'ثبت جدید — ')+M.t,b,
-  '<button class="btn pri" onclick="saveForm(\''+k+'\','+(id?'\''+id+'\'':'null')+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
+  '<button class="btn pri" onclick="saveForm(\''+k+'\','+(id?'\''+id+'\'':'null')+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>'+(id?'<button class="btn ghost" onclick="exportRecord(\''+k+'\',\''+id+'\',\'print\')">🖨️ چاپ</button>':''));
  setTimeout(()=>{const mb=document.getElementById('mbody');if(mb)mb.scrollTop=0},50);
  if(ATT_MODS.includes(k)) $$('#mbody input[ppi="people"]').forEach(c=>c.onchange=attRefresh);
  if(k==='inspections'){const sel=$('#f_tpl');if(sel){const fill=()=>renderTplItems(sel.value,rec?rec.answers:null);sel.onchange=fill;fill()}}
@@ -3722,8 +3736,8 @@ function peopleOut(r,v){
   if(!sigs.length) return esc(list.join('، '));
   return list.map(n=>{
     const a=sigs.find(x=>x.n===n);
-    return '<span style="display:inline-block;margin:2px 10px 2px 0;vertical-align:middle">'+esc(n)
-      +(a?' <img src="'+a.img+'" alt="امضا" style="height:34px;vertical-align:middle;border:1px dashed #e2e8f0;border-radius:4px;background:#fff">':'')+'</span>';
+    return '<span style="display:inline-block;margin:1px 10px 1px 0;vertical-align:middle;white-space:nowrap">'+esc(n)
+      +(a?' <img src="'+a.img+'" alt="امضا" style="height:22px;width:auto;vertical-align:middle;margin-right:3px">':'')+'</span>';
   }).join('');
 }
 
@@ -3826,6 +3840,7 @@ function openDetail(k,id){
  if(M.status&&canEdit(k,r)&&me.role!=='worker')h+='<div class="strow"><label>تغییر وضعیت:</label><select class="in sm" onchange="setStat(\''+k+'\',\''+id+'\',this.value)">'+M.status.map(s=>'<option '+(s===r.status?'selected':'')+'>'+s+'</option>').join('')+'</select></div>';
  if(k==='ptw')h+=ptwBtns(r);
  let foot='';
+ foot+='<button class="btn ghost" onclick="exportRecord(\''+k+'\',\''+id+'\',\'print\')">🖨️ چاپ</button>';
  foot+='<button class="btn ghost" onclick="exportRecord(\''+k+'\',\''+id+'\',\'word\')">📄 Word</button>';
  foot+='<button class="btn ghost" onclick="exportRecord(\''+k+'\',\''+id+'\',\'pdf\')">📄 PDF</button>';
  if(canEdit(k,r))foot+='<button class="btn ghost" onclick="closeModal();openForm(\''+k+'\',\''+id+'\')">✏️ ویرایش</button>';
@@ -4823,7 +4838,7 @@ function exportInspectionReport(rec, format){
   h += '<h2>امضاها</h2>' + (hasSigns(rec.signs) ? signDisplayHTML(rec.signs) : blankSignHTML());
 
   const fn = 'HSE-checklist-' + rec.id + '-' + todayJ().replace(/\//g,'-');
-  if(format==='word') exportWord(h, fn); else exportPDF(h, fn);
+  if(format==='print') printHTML(h, fn); else if(format==='word') exportWord(h, fn); else exportPDF(h, fn);
 }
 
 /* ---------- گزارش تجمیعی (سال جاری) ---------- */
