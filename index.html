@@ -2,7 +2,7 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-visual">
 <meta name="theme-color" content="#101a2c">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -18,7 +18,7 @@ body{font-family:Vazirmatn,Tahoma,sans-serif;background:var(--bg);color:var(--in
 .hidden{display:none!important}
 button{font-family:inherit;cursor:pointer}
 input,select,textarea{font-family:inherit;font-size:13.5px}
-#login{position:fixed;inset:0;display:flex;background:linear-gradient(135deg,#1c1030,#7c2d12 55%,#ea580c);padding:16px;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;height:100%;height:100dvh}
+#login{position:fixed;inset:0;display:flex;background:linear-gradient(135deg,#1c1030,#7c2d12 55%,#ea580c);padding:16px;overflow:auto;overscroll-behavior:contain}
 #login .lbox{margin:auto}
 #login .in{font-size:16px}
 .lbox{background:rgba(255,255,255,.97);border-radius:20px;padding:28px;max-width:860px;width:100%;box-shadow:0 30px 80px rgba(0,0,0,.45)}
@@ -420,9 +420,9 @@ html{-webkit-text-size-adjust:100%}
     <button class="btn ghost sm" onclick="roleBack()">↩ تغییر نقش</button>
     <b id="lformTtl">ورود</b>
    </div>
-   <form class="lform" id="loginForm" autocomplete="on" novalidate>
-    <input id="lu" class="in" name="username" placeholder="نام کاربری" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="next" style="direction:ltr;text-align:center">
-    <input id="lp" class="in" name="password" type="password" placeholder="رمز عبور" autocomplete="current-password" autocapitalize="none" autocorrect="off" enterkeyhint="go" style="direction:ltr;text-align:center">
+   <form class="lform" id="loginForm" autocomplete="off" novalidate>
+    <input id="lu" class="in" name="hse_login_id" placeholder="نام کاربری" autocomplete="off" data-lpignore="true" data-1p-ignore="true" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="next" style="direction:ltr;text-align:center">
+    <input id="lp" class="in" name="hse_login_key" type="password" placeholder="رمز عبور" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" autocapitalize="none" autocorrect="off" enterkeyhint="go" style="direction:ltr;text-align:center">
     <button class="btn pri" type="submit">ورود</button>
    </form>
    <div id="lerr" class="lerr hidden"></div>
@@ -5565,16 +5565,10 @@ function capaFromInspection(id, i){
 
 </script>
 <script>
-/* ورود: فرم واقعی + اسکرول فیلد فعال بالای کیبورد */
+/* ورود: فرم واقعی برای دکمه Enter / Go کیبورد */
 (function(){
   var f=document.getElementById('loginForm');
   if(f) f.addEventListener('submit',function(e){ e.preventDefault(); if(typeof doLogin==='function') doLogin(); });
-  ['lu','lp'].forEach(function(id){
-    var el=document.getElementById(id); if(!el) return;
-    el.addEventListener('focus',function(){
-      setTimeout(function(){ el.scrollIntoView({block:'center',behavior:'smooth'}); },300);
-    });
-  });
 })();
 </script>
 <script>
@@ -5648,6 +5642,102 @@ function capaFromInspection(id, i){
   if(mb){
     scan(mb);
     new MutationObserver(function(){scan(mb);}).observe(mb,{childList:true,subtree:true});
+  }
+})();
+</script>
+<script>
+/* اعلان سیستمی برای هر رکورد جدید یا تغییر وضعیت که همکاران ثبت می‌کنند */
+(function(){
+  const NOTIFY_OWN = false;          /* true = اعلان برای کارهای خودتان هم نشان داده شود */
+  let swReg = null, prevSnap = null;
+
+  if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='localhost')){
+    navigator.serviceWorker.register('sw.js').then(r => { swReg = r; }).catch(() => {});
+  }
+
+  function canNotify(){ return 'Notification' in window && Notification.permission==='granted'; }
+
+  function show(title, body, tag){
+    if(!canNotify()) return;
+    const opts = {body: body, tag: tag, dir:'rtl', lang:'fa', renotify:true};
+    try{
+      if(swReg && swReg.showNotification) swReg.showNotification(title, opts);
+      else new Notification(title, opts);
+    }catch(e){}
+  }
+
+  function titleOf(r){ return r.title || r.desc || r.name || r.area || r.label || r.id || ''; }
+
+  function snapshotOf(d){
+    const o = {};
+    RECORD_MODS.forEach(k => {
+      const arr = d && d[k];
+      if(!arr) return;
+      const list = Array.isArray(arr) ? arr : Object.values(arr);
+      o[k] = {};
+      list.forEach(r => {
+        if(r && r.id) o[k][r.id] = {status: r.status||'', by: r.createdBy||'', text: titleOf(r)};
+      });
+    });
+    return o;
+  }
+
+  function diffAndNotify(){
+    if(!prevSnap || !db) return;
+    const now = snapshotOf(db);
+    const me_name = (me && me.name) || '';
+    RECORD_MODS.forEach(k => {
+      const cur = now[k]; if(!cur) return;
+      const old = prevSnap[k] || {};
+      const M = MODS[k] || {t:k, i:'🔔'};
+      Object.keys(cur).forEach(id => {
+        const n = cur[id], o = old[id];
+        if(!o){
+          if(!NOTIFY_OWN && n.by && n.by===me_name) return;
+          const t = M.i+' '+M.t+' جدید';
+          const b = (n.text||'') + (n.by ? ' — ثبت‌کننده: '+n.by : '');
+          show(t, b, k+':'+id);
+          if(typeof toast==='function' && !document.hidden) toast(t+': '+(n.text||''));
+        } else if(o.status !== n.status && n.status){
+          const t = M.i+' تغییر وضعیت';
+          show(t, (n.text||'')+' — '+(o.status||'—')+' ← '+n.status, k+':'+id+':s');
+          if(typeof toast==='function' && !document.hidden) toast(t+': '+n.status);
+        }
+      });
+    });
+    prevSnap = now;
+  }
+
+  /* پس از هر به‌روزرسانی داده از ابر، تغییرات را بررسی کن */
+  const _applyOrig = applyCloud;
+  applyCloud = function(cloud){
+    const r = _applyOrig.apply(this, arguments);
+    try{ diffAndNotify(); }catch(e){ console.warn('notify', e); }
+    return r;
+  };
+
+  /* مبنا: وضعیت داده‌ها بعد از ورود کاربر (تا رکوردهای قدیمی اعلان نشوند) */
+  const iv = setInterval(() => {
+    if(db && me){
+      clearInterval(iv);
+      prevSnap = snapshotOf(db);
+      askPermissionBar();
+    }
+  }, 800);
+
+  function askPermissionBar(){
+    if(!('Notification' in window) || Notification.permission!=='default') return;
+    const bar = document.createElement('div');
+    bar.style.cssText='position:fixed;top:10px;left:10px;right:10px;z-index:400;background:#0f172a;color:#fff;border-radius:12px;padding:10px 14px;display:flex;gap:10px;align-items:center;justify-content:space-between;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25)';
+    bar.innerHTML = '<span>🔔 برای دریافت اعلان‌های برنامه اجازه دهید</span>';
+    const b = document.createElement('button');
+    b.className='btn pri sm'; b.textContent='فعال‌سازی';
+    b.onclick = async () => {
+      try{ await Notification.requestPermission(); }catch(e){}
+      bar.remove();
+    };
+    bar.appendChild(b);
+    document.body.appendChild(bar);
   }
 })();
 </script>
