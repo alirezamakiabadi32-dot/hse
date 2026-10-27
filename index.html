@@ -18,7 +18,9 @@ body{font-family:Vazirmatn,Tahoma,sans-serif;background:var(--bg);color:var(--in
 .hidden{display:none!important}
 button{font-family:inherit;cursor:pointer}
 input,select,textarea{font-family:inherit;font-size:13.5px}
-#login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1c1030,#7c2d12 55%,#ea580c);padding:16px;overflow:auto}
+#login{position:fixed;inset:0;display:flex;background:linear-gradient(135deg,#1c1030,#7c2d12 55%,#ea580c);padding:16px;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;height:100%;height:100dvh}
+#login .lbox{margin:auto}
+#login .in{font-size:16px}
 .lbox{background:rgba(255,255,255,.97);border-radius:20px;padding:28px;max-width:860px;width:100%;box-shadow:0 30px 80px rgba(0,0,0,.45)}
 .lbrand{text-align:center;margin-bottom:18px}
 .lbrand .ic{font-size:44px}
@@ -31,7 +33,8 @@ input,select,textarea{font-family:inherit;font-size:13.5px}
 .lrole b{display:block;margin:6px 0 4px}
 .lrole span{font-size:11.5px;color:var(--mut);line-height:1.8;display:block}
 .lform{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-.lform input{width:150px}
+.lform input{width:150px;min-height:44px}
+.lform{align-items:stretch}
 .lrolehead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px dashed var(--line);padding-top:14px;margin-bottom:12px}
 .lrolehead b{font-size:15px;color:var(--pri2)}
 .lerr{background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:8px 12px;font-size:12.5px;margin-top:12px;text-align:center}
@@ -389,6 +392,7 @@ html{-webkit-text-size-adjust:100%}
 .sign-who{color:var(--mut)}
 .sign-hint{font-size:10.5px;color:var(--mut);margin-top:4px}
 @media(max-width:640px){.sign-grid{grid-template-columns:1fr}}
+@media(max-width:640px){.lform{flex-direction:column}.lform input,.lform .btn{width:100%;min-height:44px}#login{padding:12px}.lbox{padding:20px}}
 @media print{
  #side,#topbar,.toolbar,.tbtn,.btn,.calpop,#fab,.bellpop,.sync-indicator,.addopt-btn,.risk-tabs{display:none!important}
  #main{margin:0}body{background:#fff}
@@ -416,11 +420,11 @@ html{-webkit-text-size-adjust:100%}
     <button class="btn ghost sm" onclick="roleBack()">↩ تغییر نقش</button>
     <b id="lformTtl">ورود</b>
    </div>
-   <div class="lform">
-    <input id="lu" class="in" placeholder="نام کاربری" autocomplete="off" inputmode="text" onkeydown="if(event.key==='Enter')doLogin()">
-    <input id="lp" class="in" type="password" placeholder="رمز عبور" onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="btn pri" onclick="doLogin()">ورود</button>
-   </div>
+   <form class="lform" id="loginForm" autocomplete="on" novalidate>
+    <input id="lu" class="in" name="username" placeholder="نام کاربری" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="next" style="direction:ltr;text-align:center">
+    <input id="lp" class="in" name="password" type="password" placeholder="رمز عبور" autocomplete="current-password" autocapitalize="none" autocorrect="off" enterkeyhint="go" style="direction:ltr;text-align:center">
+    <button class="btn pri" type="submit">ورود</button>
+   </form>
    <div id="lerr" class="lerr hidden"></div>
   </div>
   <div class="lnote">با نام کاربری و رمز عبور مربوط به خودتان وارد شوید</div>
@@ -5493,7 +5497,20 @@ function capaFromInspection(id, i){
 
 </script>
 <script>
-/* جستجو در لیست انتخاب نام‌ها (پرسنل) */
+/* ورود: فرم واقعی + اسکرول فیلد فعال بالای کیبورد */
+(function(){
+  var f=document.getElementById('loginForm');
+  if(f) f.addEventListener('submit',function(e){ e.preventDefault(); if(typeof doLogin==='function') doLogin(); });
+  ['lu','lp'].forEach(function(id){
+    var el=document.getElementById(id); if(!el) return;
+    el.addEventListener('focus',function(){
+      setTimeout(function(){ el.scrollIntoView({block:'center',behavior:'smooth'}); },300);
+    });
+  });
+})();
+</script>
+<script>
+/* جستجو در لیست انتخاب نام‌ها (پرسنل) — چک‌باکس‌ها و منوهای کشویی */
 (function(){
   function nrm(s){
     return String(s||'').replace(/\u200c/g,'').replace(/\u064a/g,'\u06cc').replace(/\u0643/g,'\u06a9')
@@ -5529,25 +5546,35 @@ function capaFromInspection(id, i){
       cnt.textContent=q ? ('نمایش '+shown+' از '+total+' نفر') : '';
     });
   }
+  function isNameSelect(sel){
+    if(typeof db==='undefined' || !db || !Array.isArray(db.personnel)) return false;
+    var names=new Set(db.personnel.map(function(p){return p.name;}));
+    var vals=Array.prototype.map.call(sel.options,function(o){return o.value;})
+      .filter(function(v){return v!=='' && v!=='خیر';});
+    if(!vals.length) return false;
+    var matched=vals.filter(function(v){return names.has(v);}).length;
+    return matched>0 && matched/vals.length>=0.5;
+  }
   function enhanceSelect(sel){
     if(sel.dataset.nsEnh) return;
+    if(!isNameSelect(sel)) return;
     sel.dataset.nsEnh='1';
-    var all=Array.prototype.map.call(sel.options,function(o){return {v:o.value||o.text,t:o.text};});
+    var all=Array.prototype.map.call(sel.options,function(o){return {v:o.value,t:o.text};});
     var inp=mkSearch();
-    sel.parentNode.insertBefore(inp,sel);
+    var anchor=sel.closest('.addopt-wrap')||sel;
+    anchor.parentNode.insertBefore(inp,anchor);
     inp.addEventListener('input',function(){
       var q=nrm(inp.value), cur=sel.value;
       sel.innerHTML='';
       all.forEach(function(o){
-        if(q && o.v!==cur && nrm(o.t).indexOf(q)===-1) return;
-        sel.add(new Option(o.t,o.v,false,o.v===cur));
+        var keep = o.v==='' || o.v===cur || !q || nrm(o.t).indexOf(q)!==-1;
+        if(keep) sel.add(new Option(o.t,o.v,false,o.v===cur));
       });
     });
   }
   function scan(root){
     root.querySelectorAll('.pbox').forEach(enhancePbox);
-    var s=root.querySelector('#s5_assessor');
-    if(s) enhanceSelect(s);
+    root.querySelectorAll('select').forEach(enhanceSelect);
   }
   var mb=document.getElementById('mbody');
   if(mb){
