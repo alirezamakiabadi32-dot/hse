@@ -3742,6 +3742,18 @@ function capaFromInsp(id){
  if(!TPLS[r.tpl]){toast('قالب حذف شده');return}
  openForm('actions',null,{src:'بازرسی',ref:r.id,type:'اصلاحی (Corrective)',prio:'بالا',desc:'رفع مغایرت‌های چک‌لیست «'+TPLS[r.tpl].t+'» مورخ '+r.date+':\n• '+r.fails.join('\n• ')});
 }
+/* تبدیل مغایرت‌های چک‌لیست به آنومالی (فرم آنومالی با شرح مغایرت‌ها پر می‌شود) */
+function convertInspToUnsafe(id){
+  const r=db.inspections.find(x=>x.id===id);
+  if(!r){toast('بازرسی یافت نشد');return}
+  if(!canCreate('unsafe')){toast('اجازه ثبت آنومالی ندارید');return}
+  const t=TPLS[r.tpl]?TPLS[r.tpl].t:'چک‌لیست';
+  openForm('unsafe',null,{
+    date:todayJ(),
+    area:r.area||'',
+    desc:'مغایرت‌های چک‌لیست «'+t+'» مورخ '+r.date+' (کد '+r.id+'):\n• '+(r.fails||[]).join('\n• ')
+  });
+}
 function capaFromS5(id){
  const r=db.s5.find(x=>x.id===id); if(!r)return;
  const m=s5MinKey(r); if(!m){toast('رکن ضعیفی یافت نشد');return}
@@ -4015,6 +4027,7 @@ function openDetail(k,id){
  if(canEdit(k,r))foot+='<button class="btn ghost" onclick="closeModal();openForm(\''+k+'\',\''+id+'\')">✏️ ویرایش</button>';
  if(canDel(k))foot+='<button class="btn danger" onclick="delRec(\''+k+'\',\''+id+'\')">🗑️ حذف</button>';
  if(k==='inspections'&&can('actions','create')&&r.fails&&r.fails.length)foot+='<button class="btn pri" onclick="closeModal();capaFromInsp(\''+id+'\')">🛠️ صدور اقدام</button>';
+  if(k==='inspections'&&canCreate('unsafe')&&r.fails&&r.fails.length)foot+='<button class="btn ghost" onclick="closeModal();convertInspToUnsafe(\''+id+'\')">⚠️ تبدیل به آنومالی</button>';
  if(k==='s5'&&can('actions','create')&&s5MinKey(r))foot+='<button class="btn ghost" onclick="closeModal();capaFromS5(\''+id+'\')">🛠️ اقدام برای رکن ضعیف</button>';
  if(k==='unsafe'&&can('actions','create')&&!r.capaRef&&!['اصلاح شد','رد شده'].includes(r.status))
    foot+='<button class="btn pri" onclick="closeModal();capaFromUnsafe(\''+id+'\')">🔗 ارجاع به CAPA</button>';
