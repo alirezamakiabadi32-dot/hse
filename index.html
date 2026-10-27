@@ -567,7 +567,7 @@ const DEFAULT_LISTS = {
   CHEM_HAZ:['قابل اشتعال','خورنده','سمی / مخرب تنفسی','مخرب پوست و چشم','اکسیدکننده'],
   DRILL_KINDS:['اسکان اضطراری','حریق / مذاب','نشت گاز','کمک‌های اولیه','پاشش مذاب / سوختگی'],
   DRILL_SCORES:['عالی','قابل قبول','نیازمند بهبود'],
-  EMG_ITEMS:['کپسول پودر و گاز','کپسول CO2','شارژر ایستگاهی','دوش اضطراری','چشم‌شور','جعبه کمک‌های اولیه','برانکارد','پتوی نسوز اضطراری'],
+  EMG_ITEMS:['کپسول پودر و گاز','کپسول CO2','کپسول پودر و گاز ۶ کیلوگرمی','کپسول پودر و گاز ۱۲ کیلوگرمی','کپسول پودر و گاز ۵۰ کیلوگرمی','کپسول CO2 ۳ کیلوگرمی','کپسول CO2 ۶ کیلوگرمی','شارژر ایستگاهی','دوش اضطراری','چشم‌شور','جعبه کمک‌های اولیه','برانکارد','پتوی نسوز اضطراری'],
   EMG_STATUS:['سالم','نیازمند سرویس','خارج از سرویس'],
   BBS_CATS:['استفاده از PPE','جابجایی بار / جرثقیل','کار در ارتفاع','کار با مذاب','نظم و پاکیزگی محل','انرژی و LOTO','سایر'],
   AUDIT_TYPES:['ممیزی داخلی','ممیزی تبعیتی','ایزو 45001','ایزو 14001'],
@@ -5649,21 +5649,25 @@ function capaFromInspection(id, i){
 /* اعلان سیستمی برای هر رکورد جدید یا تغییر وضعیت که همکاران ثبت می‌کنند */
 (function(){
   const NOTIFY_OWN = false;          /* true = اعلان برای کارهای خودتان هم نشان داده شود */
-  let swReg = null, prevSnap = null;
-
-  if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='localhost')){
-    navigator.serviceWorker.register('sw.js').then(r => { swReg = r; }).catch(() => {});
+  let prevSnap = null;
+  /* ثبت سرویس‌ورکر اعلان (sw.js باید کنار index.html در همان پوشه باشد) */
+  let swReady = null;
+  if('serviceWorker' in navigator){
+    swReady = navigator.serviceWorker.register('./sw.js')
+      .then(r => navigator.serviceWorker.ready.then(() => r))
+      .catch(err => { console.warn('sw.js:', err); return null; });
   }
 
   function canNotify(){ return 'Notification' in window && Notification.permission==='granted'; }
 
-  function show(title, body, tag){
+  async function show(title, body, tag){
     if(!canNotify()) return;
     const opts = {body: body, tag: tag, dir:'rtl', lang:'fa', renotify:true};
     try{
-      if(swReg && swReg.showNotification) swReg.showNotification(title, opts);
+      const reg = swReady ? await swReady : null;
+      if(reg && reg.showNotification) await reg.showNotification(title, opts);
       else new Notification(title, opts);
-    }catch(e){}
+    }catch(e){ console.warn('notification:', e); }
   }
 
   function titleOf(r){ return r.title || r.desc || r.name || r.area || r.label || r.id || ''; }
@@ -5735,10 +5739,95 @@ function capaFromInspection(id, i){
     b.onclick = async () => {
       try{ await Notification.requestPermission(); }catch(e){}
       bar.remove();
+      const reg = swReady ? await swReady : null;
+      if(!reg) toast('⚠️ فایل sw.js کنار index.html پیدا نشد؛ آن را هم در همان پوشه آپلود کنید');
+      else if(Notification.permission==='granted') toast('✅ اعلان‌ها فعال شد');
     };
     bar.appendChild(b);
     document.body.appendChild(bar);
   }
+})();
+</script>
+<script>
+/* ثبت فهرست کپسول‌های آتش‌نشانی پودر و گاز (یک بار، توسط مدیر) */
+(function(){
+  const FLAG = 'hse_emg_cyl_v1';
+  const LIST = [
+    {w:'۶', items:['کنفرانس قدیم','مونتاژ','دیزل ژنراتور','انبار','پست برق درب ورودی']},
+    {w:'۱۲', items:['عملیات حرارتی','قالب گیری','کانکس تمیزکاری','ذوب','آزمایشگاه','مدل سازی','انبار مدل قدیم']},
+    {w:'۵۰', items:['قالب گیری','ماشین کاری','انبار']}
+  ];
+  function run(){
+    try{
+      if(localStorage.getItem(FLAG)) return;
+      if(!me || me.role!=='manager' || !db) return;
+      db.emgEquip = db.emgEquip || [];
+      let added = 0;
+      LIST.forEach(g => {
+        const item = 'کپسول پودر و گاز ' + g.w + ' کیلوگرمی';
+        g.items.forEach(loc => {
+          const exists = db.emgEquip.some(r => r.item===item && r.loc===loc);
+          if(exists) return;
+          const id = uid(PF.emgEquip || 'EQP');
+          db.emgEquip.push({
+            id: id, item: item, loc: loc, count: 1, lastChk: '', nextChk: '', status: '',
+            createdBy: me.name, createdJ: todayJ(),
+            log: [{u: me.name, d: todayJ(), t: 'ثبت از فهرست کپسول‌ها'}]
+          });
+          queueRec('emgEquip', id);
+          added++;
+        });
+      });
+      if(added){ save({immediate:true}); }
+      localStorage.setItem(FLAG, '1');
+      if(added && typeof toast==='function') toast('✔ '+added+' کپسول به تجهیزات اضطراری اضافه شد');
+    }catch(e){ console.warn('ثبت کپسول‌ها:', e); }
+  }
+  const iv = setInterval(() => {
+    if(db && me){ clearInterval(iv); run(); }
+  }, 1000);
+})();
+</script>
+<script>
+/* ثبت فهرست کپسول‌های CO2 (یک بار، توسط مدیر؛ محل‌های تکراری به تعداد جدول ثبت می‌شوند) */
+(function(){
+  const FLAG = 'hse_emg_co2_v1';
+  const LIST = [
+    {w:'۳', locs:['تخلیه','اداری','کارگاه تعمیرات','تابلو برق عملیات حرارتی','تابلو برق عملیات حرارتی','تابلو برق هاتیاکس','هاتیاکس','تابلو برق تخلیه گریت بار','تابلو برق بین مونتاژ و تخلیه گریت بار','میکسر ماسه','تابلو برق کنار رادمیل ها','گلوله','گلوله','تابلو برق ستد پلاست','تابلو برق قالب گیری','تابلو برق ستد پلاست','تابلو برق تمیزکاری','تابلو برق تمیزکاری','کانکس تمیزکاری','ذوب','ماشین کاری','ماشین کاری','دیزل ژنراتور','انبار','مدلسازی','انبار مواد شیمیایی']},
+    {w:'۶', locs:['ذوب','ذوب','آزمایشگاه','ماشین کاری','ماشین کاری']}
+  ];
+  function run(){
+    try{
+      if(localStorage.getItem(FLAG)) return;
+      if(!me || me.role!=='manager' || !db) return;
+      db.emgEquip = db.emgEquip || [];
+      let added = 0;
+      LIST.forEach(g => {
+        const item = 'کپسول CO2 ' + g.w + ' کیلوگرمی';
+        const need = {};
+        g.locs.forEach(l => { need[l] = (need[l]||0) + 1; });
+        Object.keys(need).forEach(loc => {
+          const have = db.emgEquip.filter(r => r.item===item && r.loc===loc).length;
+          for(let n = have; n < need[loc]; n++){
+            const id = uid(PF.emgEquip || 'EQP');
+            db.emgEquip.push({
+              id: id, item: item, loc: loc, count: 1, lastChk: '', nextChk: '', status: '',
+              createdBy: me.name, createdJ: todayJ(),
+              log: [{u: me.name, d: todayJ(), t: 'ثبت از فهرست کپسول CO2'}]
+            });
+            queueRec('emgEquip', id);
+            added++;
+          }
+        });
+      });
+      if(added){ save({immediate:true}); }
+      localStorage.setItem(FLAG, '1');
+      if(added && typeof toast==='function') toast('✔ '+added+' کپسول CO2 به تجهیزات اضطراری اضافه شد');
+    }catch(e){ console.warn('ثبت کپسول CO2:', e); }
+  }
+  const iv = setInterval(() => {
+    if(db && me){ clearInterval(iv); run(); }
+  }, 1000);
 })();
 </script>
 </body>
