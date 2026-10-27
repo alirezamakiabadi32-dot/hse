@@ -3870,20 +3870,71 @@ function convertInspItemToUnsafe(id, idx){
     desc:'مغایرت چک‌لیست «'+tpl.t+'» مورخ '+r.date+' (کد '+r.id+'):\n• '+item
   });
 }
+/* موارد نیازمند اقدام در ارزیابی 5S: همه اقلامی که نمره‌شان از این حد کمتر است (از همه ارکان) */
+const S5_PROBLEM_MAX = 2;   /* 0 تا 2 = اجرا نشده / شروع شده / ناقص */
+function s5ProblemItems(rec){
+  const out=[];
+  if(!rec || !rec.s5) return out;
+  s5Keys().forEach(k=>{
+    const t=s5Tpl()[k], items=s5ItemsOf(k), vals=rec.s5[k]||{};
+    items.forEach((it,i)=>{
+      const v=vals[i];
+      if(v==='na') return;
+      const sc = (v===undefined||v===null||v==='') ? 0 : (+v||0);
+      if(sc<=S5_PROBLEM_MAX) out.push({key:k, num:t.num, rukn:t.name, idx:i, text:it, score:sc});
+    });
+  });
+  return out;
+}
+/* نمایش همه موارد ضعیف و انتخاب آن‌ها برای اقدام اصلاحی */
 function capaFromS5(id){
- const r=db.s5.find(x=>x.id===id); if(!r)return;
- const m=s5MinKey(r); if(!m){toast('رکن ضعیفی یافت نشد');return}
- const sc=s5ScoreOf(r);
- openForm('actions',null,{
-   src:'5S',
-   ref:r.id,
-   type:'بهبود (Improvement)',
-   prio:'بالا',
-   desc:'بهبود رکن «'+m.name+'» در ارزیابی 5S واحد «'+r.area+'» (تاریخ '+r.date+' — امتیاز '+sc.pct+'٪):\n• رکن ضعیف: '+m.name+' با '+m.pct+'٪',
-   owner:(db.personnel.find(p=>p.area===r.area&&p.role==='worker')||{}).name||'',
-   startD:todayJ(),
-   due:jAddM(todayJ(),1)
- });
+  const r=db.s5.find(x=>x.id===id); if(!r)return;
+  const items=s5ProblemItems(r);
+  if(!items.length){toast('موردی برای اقدام یافت نشد');return}
+  const sc=s5ScoreOf(r);
+  const optTxt=L('S5_SCORE_OPTS')||[];
+  let h='<div style="font-size:12.5px;color:var(--mut);margin-bottom:10px">'
+    +'واحد «'+esc(r.area)+'» — '+nd(items.length)+' مورد با نمره ≤ '+nd(S5_PROBLEM_MAX)+' در ارکان 5S. موارد مورد نظر را برای اقدام اصلاحی انتخاب کنید.</div>';
+  let lastRukn=null;
+  items.forEach((x,n)=>{
+    if(x.rukn!==lastRukn){
+      h+='<div style="font-weight:700;margin:12px 0 6px;color:var(--pri)">'+nd(x.num)+'. '+esc(x.rukn)+'</div>';
+      lastRukn=x.rukn;
+    }
+    h+='<label style="display:flex;gap:8px;align-items:flex-start;padding:7px 8px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;font-size:12.5px;cursor:pointer">'
+      +'<input type="checkbox" class="s5pick" value="'+x.key+'|'+x.idx+'" checked style="margin-top:3px">'
+      +'<span style="flex:1">'+esc(x.text)+'</span>'
+      +'<span class="chip b-bad" style="white-space:nowrap">'+esc(optTxt[x.score]||String(x.score))+'</span></label>';
+  });
+  h+='<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap">'
+    +'<button class="btn ghost sm" onclick="document.querySelectorAll(\'.s5pick\').forEach(c=>c.checked=true)">انتخاب همه</button>'
+    +'<button class="btn pri" onclick="submitS5Capa(\''+id+'\')">🛠️ ایجاد اقدام اصلاحی برای موارد انتخابی</button></div>';
+  openModal('🏭 موارد نیازمند اقدام 5S — امتیاز کل '+nd(sc.pct)+'٪', h);
+}
+function submitS5Capa(id){
+  const r=db.s5.find(x=>x.id===id); if(!r)return;
+  const all=s5ProblemItems(r);
+  const picked=Array.prototype.map.call(document.querySelectorAll('.s5pick:checked'),c=>c.value);
+  const sel=all.filter(x=>picked.indexOf(x.key+'|'+x.idx)>=0);
+  if(!sel.length){toast('حداقل یک مورد را انتخاب کنید');return}
+  const sc=s5ScoreOf(r);
+  const optTxt=L('S5_SCORE_OPTS')||[];
+  let lines=[], lastRukn=null;
+  sel.forEach(x=>{
+    if(x.rukn!==lastRukn){ lines.push('— '+x.rukn+':'); lastRukn=x.rukn; }
+    lines.push('  • '+x.text+' (نمره '+nd(x.score)+' — '+(optTxt[x.score]||'')+')');
+  });
+  closeModal();
+  openForm('actions',null,{
+    src:'5S',
+    ref:r.id,
+    type:'بهبود (Improvement)',
+    prio:'بالا',
+    desc:'رفع موارد ضعیف ارزیابی 5S واحد «'+r.area+'» (تاریخ '+r.date+' — امتیاز کل '+sc.pct+'٪):\n'+lines.join('\n'),
+    owner:(db.personnel.find(p=>p.area===r.area&&p.role==='worker')||{}).name||'',
+    startD:todayJ(),
+    due:jAddM(todayJ(),1)
+  });
 }
 function verifyCapa(id){
  const r=db.actions.find(x=>x.id===id);
@@ -4144,7 +4195,7 @@ function openDetail(k,id){
  if(canDel(k))foot+='<button class="btn danger" onclick="delRec(\''+k+'\',\''+id+'\')">🗑️ حذف</button>';
  if(k==='inspections'&&can('actions','create')&&r.fails&&r.fails.length)foot+='<button class="btn pri" onclick="closeModal();capaFromInsp(\''+id+'\')">🛠️ صدور اقدام</button>';
   if(k==='inspections'&&canCreate('unsafe')&&r.fails&&r.fails.length)foot+='<button class="btn ghost" onclick="closeModal();convertInspToUnsafe(\''+id+'\')">⚠️ تبدیل به آنومالی</button>';
- if(k==='s5'&&can('actions','create')&&s5MinKey(r))foot+='<button class="btn ghost" onclick="closeModal();capaFromS5(\''+id+'\')">🛠️ اقدام برای رکن ضعیف</button>';
+ if(k==='s5'&&can('actions','create')&&s5ProblemItems(r).length)foot+='<button class="btn ghost" onclick="closeModal();capaFromS5(\''+id+'\')">🛠️ اقدام برای موارد ضعیف</button>';
  if(k==='unsafe'&&can('actions','create')&&!r.capaRef&&!['اصلاح شد','رد شده'].includes(r.status))
    foot+='<button class="btn pri" onclick="closeModal();capaFromUnsafe(\''+id+'\')">🔗 ارجاع به CAPA</button>';
  if(k==='unsafe'&&r.capaRef)
