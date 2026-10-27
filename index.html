@@ -5492,5 +5492,69 @@ function capaFromInspection(id, i){
 
 
 </script>
+<script>
+/* جستجو در لیست انتخاب نام‌ها (پرسنل) */
+(function(){
+  function nrm(s){
+    return String(s||'').replace(/\u200c/g,'').replace(/\u064a/g,'\u06cc').replace(/\u0643/g,'\u06a9')
+      .replace(/\s+/g,' ').trim().toLowerCase();
+  }
+  function mkSearch(){
+    var i=document.createElement('input');
+    i.type='search'; i.className='in name-search'; i.placeholder='🔍 جستجوی نام...';
+    i.autocomplete='off';
+    i.style.cssText='margin-bottom:6px;font-size:12.5px;padding:6px 10px';
+    return i;
+  }
+  function enhancePbox(pb){
+    if(pb.dataset.nsEnh) return;
+    var boxes=pb.querySelectorAll('input[type=checkbox]');
+    if(!boxes.length) return;
+    var isName=Array.prototype.some.call(boxes,function(c){return c.hasAttribute('ppi')||c.name==='s5_members';});
+    if(!isName) return;
+    pb.dataset.nsEnh='1';
+    var inp=mkSearch();
+    var cnt=document.createElement('div');
+    cnt.style.cssText='font-size:11px;color:var(--mut);margin:-2px 0 6px';
+    pb.parentNode.insertBefore(inp,pb);
+    pb.parentNode.insertBefore(cnt,pb);
+    inp.addEventListener('input',function(){
+      var q=nrm(inp.value), shown=0, total=0;
+      pb.querySelectorAll('label').forEach(function(l){
+        total++;
+        var ok=!q || nrm(l.textContent).indexOf(q)!==-1;
+        l.style.display=ok?'':'none';
+        if(ok) shown++;
+      });
+      cnt.textContent=q ? ('نمایش '+shown+' از '+total+' نفر') : '';
+    });
+  }
+  function enhanceSelect(sel){
+    if(sel.dataset.nsEnh) return;
+    sel.dataset.nsEnh='1';
+    var all=Array.prototype.map.call(sel.options,function(o){return {v:o.value||o.text,t:o.text};});
+    var inp=mkSearch();
+    sel.parentNode.insertBefore(inp,sel);
+    inp.addEventListener('input',function(){
+      var q=nrm(inp.value), cur=sel.value;
+      sel.innerHTML='';
+      all.forEach(function(o){
+        if(q && o.v!==cur && nrm(o.t).indexOf(q)===-1) return;
+        sel.add(new Option(o.t,o.v,false,o.v===cur));
+      });
+    });
+  }
+  function scan(root){
+    root.querySelectorAll('.pbox').forEach(enhancePbox);
+    var s=root.querySelector('#s5_assessor');
+    if(s) enhanceSelect(s);
+  }
+  var mb=document.getElementById('mbody');
+  if(mb){
+    scan(mb);
+    new MutationObserver(function(){scan(mb);}).observe(mb,{childList:true,subtree:true});
+  }
+})();
+</script>
 </body>
 </html>
