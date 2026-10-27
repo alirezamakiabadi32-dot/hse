@@ -2348,6 +2348,7 @@ function renderRows(){
   let tds=M.cols.map(c=>'<td>'+fmtCell(k,r,c)+'</td>').join('');
   if(M.status)tds+='<td>'+(r.status?chip(r.status):'—')+'</td>';
   let ops='';
+  if(k==='emgEquip'&&emgTplKey(r.item)&&can('inspections','create'))ops+='<button class="ibtn" title="بازرسی (چک‌لیست همین تجهیز)" onclick="event.stopPropagation();openEmgInspection(\''+r.id+'\')">📋</button>';
   if(canEdit(k,r))ops+='<button class="ibtn" title="ویرایش" onclick="event.stopPropagation();openForm(\''+k+'\',\''+r.id+'\')">✏️</button>';
   if(canDel(k))ops+='<button class="ibtn" title="حذف" onclick="event.stopPropagation();delRec(\''+k+'\',\''+r.id+'\')">🗑️</button>';
   tds+='<td onclick="event.stopPropagation()">'+ops+'</td>';
@@ -3752,6 +3753,107 @@ function convertInspToUnsafe(id){
     date:todayJ(),
     area:r.area||'',
     desc:'مغایرت‌های چک‌لیست «'+t+'» مورخ '+r.date+' (کد '+r.id+'):\n• '+(r.fails||[]).join('\n• ')
+  });
+}
+/* ============================================================
+   چک‌لیست‌های اختصاصی هر تجهیز اضطراری
+   هر نوع تجهیز یک چک‌لیست جدا دارد؛ از ردیف تجهیز در لیست باز می‌شود.
+============================================================ */
+const EMG_TPLS = {
+  emg_powder:{t:'بازرسی کپسول پودر و گاز',period:30,items:[
+    'وجود کپسول در محل مشخص و دسترسی آزاد',
+    'پین ایمنی و پلمپ سالم و بدون باز شدن',
+    'عقربه مانومتر در ناحیه سبز',
+    'بدنه بدون زنگ‌زدگی، ضربه‌خوردگی یا نشتی',
+    'شلنگ و نازل بدون ترک و انسداد',
+    'وزن کپسول (کاهش بیش از ۱۰٪ وزن شارژ = نیاز به شارژ مجدد)',
+    'برچسب دستورالعمل و تاریخ شارژ/آزمایش قابل خواندن و معتبر',
+    'عدم وجود مانع یا اجسام خارجی در مسیر دسترسی'
+  ]},
+  emg_co2:{t:'بازرسی کپسول CO2',period:30,items:[
+    'وجود کپسول در محل مشخص و دسترسی آزاد',
+    'پین ایمنی و پلمپ سالم و بدون باز شدن',
+    'وزن کپسول (کاهش بیش از ۱۰٪ وزن شارژ = نیاز به شارژ مجدد)',
+    'بدنه بدون زنگ‌زدگی، ضربه‌خوردگی یا یخ‌زدگی',
+    'شیپور (هورن) سالم، بدون ترک و از جنس عایق الکتریکی',
+    'شلنگ و نازل بدون ترک و انسداد',
+    'برچسب دستورالعمل و تاریخ شارژ/آزمایش قابل خواندن و معتبر',
+    'عدم وجود مانع یا اجسام خارجی در مسیر دسترسی'
+  ]},
+  emg_charger:{t:'بازرسی شارژر ایستگاهی',period:30,items:[
+    'سالم بودن تابلو، کابل و اتصالات برق',
+    'عملکرد نشانگر وضعیت شارژ',
+    'عدم بوی سوختگی، داغی غیرعادی یا تغییر شکل',
+    'دسترسی آزاد و علامت‌گذاری مناسب',
+    'برچسب هشدار و دستورالعمل قابل خواندن'
+  ]},
+  emg_shower:{t:'بازرسی دوش اضطراری',period:7,items:[
+    'دسترسی آزاد و علامت‌گذاری مناسب (بدون مانع)',
+    'عملکرد صحیح دستگیره/شیر (باز شدن با یک حرکت)',
+    'جریان آب کافی و یکنواخت',
+    'تمیز بودن نازل و عدم انسداد',
+    'پوشش ضدگرد و غبار سالم',
+    'دمای آب مناسب (حدود ۱۶ تا ۳۸ درجه)',
+    'عدم نشتی و خیس‌شدن کف اطراف'
+  ]},
+  emg_eyewash:{t:'بازرسی چشم‌شور',period:7,items:[
+    'دسترسی در کمتر از ۱۰ ثانیه و علامت‌گذاری مناسب',
+    'هر دو نازل بدون انسداد و جریان یکنواخت آب',
+    'پوشش محافظ نازل‌ها سالم و تمیز',
+    'عملکرد صحیح فلکه یا پدال',
+    'آب تمیز و تاریخ تعویض/نشانگر تاریخ معتبر',
+    'عدم نشتی و خیس‌شدن کف اطراف'
+  ]},
+  emg_firstaid:{t:'بازرسی جعبه کمک‌های اولیه',period:30,items:[
+    'وجود جعبه در محل مشخص و دسترسی آسان',
+    'کامل بودن اقلام طبق لیست محتویات',
+    'تاریخ انقضای اقلام معتبر',
+    'بسته‌بندی سالم و عدم رطوبت یا آلودگی',
+    'لیست محتویات داخل جعبه موجود و خوانا'
+  ]},
+  emg_stretcher:{t:'بازرسی برانکارد',period:30,items:[
+    'وجود برانکارد در محل مشخص و دسترسی آزاد',
+    'سالم بودن بدنه، دسته‌ها و چرخ‌ها (در صورت وجود)',
+    'سالم بودن بندهای نگهدارنده و قفل‌ها',
+    'تمیز بودن و عدم آلودگی',
+    'عدم زنگ‌زدگی یا ترک در قسمت‌های فلزی'
+  ]},
+  emg_blanket:{t:'بازرسی پتوی نسوز اضطراری',period:30,items:[
+    'وجود پتو در محل مشخص و دسترسی آزاد',
+    'بسته‌بندی/کیف سالم و قابل باز شدن سریع',
+    'عدم پارگی، سوختگی یا آلودگی روی پتو',
+    'راهنمای استفاده روی کیف یا دیوار قابل خواندن',
+    'عدم رطوبت'
+  ]}
+};
+function emgTplKey(item){
+  const t = String(item||'');
+  if(t.indexOf('پودر')>=0) return 'emg_powder';
+  if(t.indexOf('CO2')>=0) return 'emg_co2';
+  if(t.indexOf('شارژر')>=0) return 'emg_charger';
+  if(t.indexOf('دوش')>=0) return 'emg_shower';
+  if(t.indexOf('چشم')>=0) return 'emg_eyewash';
+  if(t.indexOf('کمک')>=0) return 'emg_firstaid';
+  if(t.indexOf('برانکارد')>=0) return 'emg_stretcher';
+  if(t.indexOf('پتو')>=0) return 'emg_blanket';
+  return null;
+}
+/* اطمینان از وجود چک‌لیست تجهیز در داده‌های برنامه (برای همه کاربران) */
+function ensureEmgTpl(key){
+  if(!key || !EMG_TPLS[key]) return false;
+  if(typeof TPLS==='undefined' || !TPLS) return false;
+  if(!TPLS[key]) TPLS[key] = JSON.parse(JSON.stringify(EMG_TPLS[key]));
+  return true;
+}
+function openEmgInspection(eqId){
+  const r = db.emgEquip.find(x=>x.id===eqId);
+  if(!r){ toast('تجهیز یافت نشد'); return; }
+  const key = emgTplKey(r.item);
+  if(!ensureEmgTpl(key)){ toast('چک‌لیست این تجهیز تعریف نشده است'); return; }
+  openForm('inspections', null, {
+    tpl: key,
+    date: todayJ(),
+    note: 'تجهیز: '+r.item+' — محل: '+(r.loc||'—')+' (کد '+r.id+')'
   });
 }
 /* تبدیل یک مغایرت مشخص از چک‌لیست به آنومالی */
@@ -5828,6 +5930,24 @@ function capaFromInspection(id, i){
   const iv = setInterval(() => {
     if(db && me){ clearInterval(iv); run(); }
   }, 1000);
+})();
+</script>
+<script>
+/* افزودن چک‌لیست‌های تجهیزات اضطراری به فهرست چک‌لیست‌ها (یک بار، توسط مدیر) */
+(function(){
+  const FLAG = 'hse_emg_tpl_v1';
+  function run(){
+    try{
+      if(localStorage.getItem(FLAG)) return;
+      if(!me || me.role!=='manager' || typeof TPLS==='undefined' || !TPLS || typeof queueModule!=='function') return;
+      let added = 0;
+      Object.keys(EMG_TPLS).forEach(k => { if(!TPLS[k]){ TPLS[k] = JSON.parse(JSON.stringify(EMG_TPLS[k])); added++; } });
+      if(added){ db.tpls = TPLS; queueModule('tpls'); save({immediate:true}); }
+      localStorage.setItem(FLAG, '1');
+      if(added && typeof toast==='function') toast('✔ '+added+' چک‌لیست تجهیز اضطراری اضافه شد');
+    }catch(e){ console.warn('چک‌لیست تجهیزات:', e); }
+  }
+  const iv = setInterval(() => { if(db && me && TPLS){ clearInterval(iv); run(); } }, 1000);
 })();
 </script>
 </body>
