@@ -3754,6 +3754,20 @@ function convertInspToUnsafe(id){
     desc:'مغایرت‌های چک‌لیست «'+t+'» مورخ '+r.date+' (کد '+r.id+'):\n• '+(r.fails||[]).join('\n• ')
   });
 }
+/* تبدیل یک مغایرت مشخص از چک‌لیست به آنومالی */
+function convertInspItemToUnsafe(id, idx){
+  const r=db.inspections.find(x=>x.id===id);
+  if(!r){toast('بازرسی یافت نشد');return}
+  if(!canCreate('unsafe')){toast('اجازه ثبت آنومالی ندارید');return}
+  const tpl=TPLS[r.tpl];
+  if(!tpl){toast('قالب حذف شده');return}
+  const item=tpl.items[idx];
+  openForm('unsafe',null,{
+    date:todayJ(),
+    area:r.area||'',
+    desc:'مغایرت چک‌لیست «'+tpl.t+'» مورخ '+r.date+' (کد '+r.id+'):\n• '+item
+  });
+}
 function capaFromS5(id){
  const r=db.s5.find(x=>x.id===id); if(!r)return;
  const m=s5MinKey(r); if(!m){toast('رکن ضعیفی یافت نشد');return}
@@ -3980,7 +3994,7 @@ function openDetail(k,id){
  }
  if(k==='unsafe'&&r.photo)h+='<h4 class="msh">🖼️ عکس آنومالی</h4><img src="'+r.photo+'" alt="عکس" style="max-width:100%;max-height:320px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in" onclick="viewPhoto(this.src)">';
  if(k==='inspections'&&r.tpl){h+='<h4 class="msh">نتایج اقلام ('+nd(r.score||0)+'٪ انطباق)</h4>';
-  if(TPLS[r.tpl]){h+='<div class="tplres">'+TPLS[r.tpl].items.map((it,i)=>{const a=(r.answers||{})[i]||'na';const cl=a==='ok'?'b-ok':a==='fail'?'b-bad':'b-mut';const tx=a==='ok'?'مناسب':a==='fail'?'مغایرت':'نامرتبط';return '<div class="tri"><span>'+esc(it)+'</span><span class="chip '+cl+'">'+tx+'</span></div>'}).join('')+'</div>'}
+  if(TPLS[r.tpl]){h+='<div class="tplres">'+TPLS[r.tpl].items.map((it,i)=>{const a=(r.answers||{})[i]||'na';const cl=a==='ok'?'b-ok':a==='fail'?'b-bad':'b-mut';const tx=a==='ok'?'مناسب':a==='fail'?'مغایرت':'نامرتبط';const ub=(a==='fail'&&canCreate('unsafe'))?' <button class="btn ghost sm" style="padding:3px 8px;font-size:11px" onclick="closeModal();convertInspItemToUnsafe(\''+r.id+'\','+i+')">⚠️ تبدیل به آنومالی</button>':'';return '<div class="tri"><span>'+esc(it)+'</span><span><span class="chip '+cl+'">'+tx+'</span>'+ub+'</span></div>'}).join('')+'</div>'}
   else h+='<div class="lvprev">قالب حذف شده. مغایرت‌ها: '+((r.fails&&r.fails.length)?esc(r.fails.join('، ')):'ندارد')+'</div>'}
  if(k==='unsafe'){
    const aging=jDaysAgo(r.date);
