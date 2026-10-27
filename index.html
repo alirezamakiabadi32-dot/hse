@@ -2160,11 +2160,52 @@ function exportModuleTable(k,format){
   const fn='HSE-'+k+'-'+todayJ().replace(/\//g,'-');
   if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
 }
+/* گزارش کامل یک ارزیابی 5S: اطلاعات پایه، نتیجه کلی و همه ارکان با همه اقلام و نمره‌ها */
+function s5DocHTML(r){
+  const sc=s5ScoreOf(r), mn=s5MinKey(r), opts=L('S5_SCORE_OPTS')||[];
+  const bandTxt={A:'A — عالی',B:'B — خوب',C:'C — متوسط',D:'D — ضعیف'};
+  let h='<h2>اطلاعات ارزیابی</h2><table><tbody>'
+    +'<tr><th style="width:30%">واحد / محل</th><td>'+esc(r.area||'—')+'</td></tr>'
+    +'<tr><th>تاریخ ارزیابی</th><td>'+esc(r.date||'—')+'</td></tr>'
+    +'<tr><th>ارزیاب</th><td>'+esc(r.assessor||'—')+'</td></tr>'
+    +'<tr><th>اعضای تیم ارزیابی</th><td>'+esc((r.members||[]).join('، ')||'—')+'</td></tr>'
+    +(r.note?'<tr><th>یادداشت</th><td>'+esc(r.note)+'</td></tr>':'')
+    +'<tr><th>وضعیت</th><td>'+esc(r.status||'—')+'</td></tr>'
+    +'</tbody></table>';
+  h+='<h2>نتیجه کلی</h2><table><tbody>'
+    +'<tr><th style="width:30%">امتیاز کل</th><td><b>'+nd(sc.pct)+'٪</b> ('+nd(sc.total)+' از '+nd(sc.max)+')</td></tr>'
+    +'<tr><th>سطح</th><td>'+esc(bandTxt[sc.band]||'—')+'</td></tr>'
+    +(mn?'<tr><th>ضعیف‌ترین رکن</th><td>'+esc(mn.name)+' ('+nd(mn.pct)+'٪)</td></tr>':'')
+    +'</tbody></table>';
+  s5Keys().forEach(function(k){
+    const t=s5Tpl()[k], items=s5ItemsOf(k), vals=(r.s5&&r.s5[k])||{};
+    const p=sc.per[k]||{pct:0};
+    h+='<h2>'+nd(t.num)+'. '+esc(t.name)+' — امتیاز '+nd(p.pct)+'٪</h2>';
+    h+='<table><thead><tr><th style="width:7%">#</th><th>قلم ارزیابی</th><th style="width:30%">نمره</th></tr></thead><tbody>';
+    items.forEach(function(it,i){
+      const v=vals[i];
+      let out;
+      if(v==='na') out='نامرتبط';
+      else if(v===undefined||v===null||v==='') out='—';
+      else out=esc(opts[+v]||String(v));
+      h+='<tr><td>'+nd(i+1)+'</td><td>'+esc(it)+'</td><td>'+out+'</td></tr>';
+    });
+    h+='</tbody></table>';
+  });
+  if(hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
+  return h;
+}
 function exportRecord(k,id,format){
   const M=MODS[k];
   const r=db[k].find(x=>x.id===id);
   if(!r){toast('رکورد یافت نشد');return}
   if(k==='inspections'){ exportInspectionReport(r,format); return; }
+  if(k==='s5'){
+    const hs='<h1>'+M.i+' '+esc(M.t)+'</h1><p>کد: <b>'+esc(r.id)+'</b> — ثبت: '+esc(r.createdBy||'')+' / '+esc(r.createdJ||'')+'</p>'+s5DocHTML(r);
+    const fs='HSE-5S-'+r.id+'-'+todayJ().replace(/\//g,'-');
+    if(format==='print') printHTML(hs,fs); else if(format==='word') exportWord(hs,fs); else exportPDF(hs,fs);
+    return;
+  }
   if(k==='ptw'){ const hp='<h1>🔥 فرم مجوز ایمنی انجام کار (PTW)</h1><p>کد: <b>'+esc(r.id)+'</b> — وضعیت: <b>'+esc(r.status||'—')+'</b> — ثبت: '+esc(r.createdBy||'')+' / '+esc(r.createdJ||'')+'</p>'+ptwDocHTML(r,false); const fp='HSE-PTW-'+r.id; if(format==='print') printHTML(hp,fp); else if(format==='word') exportWord(hp,fp); else exportPDF(hp,fp); return; }
   let h='<h1>'+M.i+' '+esc(M.t)+'</h1>';
   h+='<p>کد: <b>'+esc(r.id)+'</b>'+(r.code?' — کد CAPA: <b>'+esc(r.code)+'</b>':'')+' — ثبت: '+esc(r.createdBy||'')+' / '+esc(r.createdJ||'')+'</p>';
