@@ -161,7 +161,11 @@ textarea.in{min-height:76px;resize:vertical}
 .bellwrap{position:relative}
 .bellpop{position:absolute;top:calc(100% + 8px);left:0;width:340px;max-width:90vw;max-height:70vh;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(15,23,42,.25);z-index:120}
 .bell-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;font-weight:700;position:sticky;top:0;background:var(--card);z-index:1}
-.bell-head .ibtn{margin-inline-start:auto}
+.bell-head .ibtn{margin-inline-start:0}
+.bell-all{margin-inline-start:auto;border:1px solid var(--line);background:transparent;color:var(--mut);font:inherit;font-size:11.5px;font-weight:600;padding:3px 8px;border-radius:8px;cursor:pointer}
+.bell-all:hover{background:var(--t-or)}
+.bell-read{flex-shrink:0;width:26px;height:26px;border-radius:50%;border:1px solid var(--line);background:transparent;color:var(--mut);font-size:13px;line-height:1;cursor:pointer}
+.bell-read:hover{background:#16a34a;border-color:#16a34a;color:#fff}
 .bell-list{padding:4px}
 .bell-item{display:flex;gap:10px;align-items:center;padding:10px;border-radius:10px;cursor:pointer;border-bottom:1px dashed var(--line)}
 .bell-item:hover{background:var(--t-or)}
@@ -4030,6 +4034,23 @@ function recLabel(r){
   return String(r.title||r.desc||r.item||r.topic||r.task||r.course||r.equip||r.type||r.code||r.id).slice(0,60);
 }
 
+/* ---------- خوانده‌شدن اعلان‌ها (ذخیره برای هر کاربر در مرورگر) ---------- */
+const READ_KEY='hse_notif_read_';
+function notifKey(n){return [n.kind,n.id||'',n.text].join('|')}
+function readSet(){try{return JSON.parse(localStorage.getItem(READ_KEY+(me?me.name:''))||'[]')||[]}catch(e){return []}}
+function saveReadSet(a){try{localStorage.setItem(READ_KEY+(me?me.name:''),JSON.stringify(a.slice(-500)))}catch(e){}}
+function markNotifRead(i,ev){
+ if(ev)ev.stopPropagation();
+ const n=(window._notifs||[])[i];if(!n)return;
+ const a=readSet();const k=notifKey(n);if(!a.includes(k))a.push(k);
+ saveReadSet(a);renderBell();
+}
+function markAllNotifsRead(ev){
+ if(ev)ev.stopPropagation();
+ const a=readSet();(window._notifs||[]).forEach(n=>{const k=notifKey(n);if(!a.includes(k))a.push(k)});
+ saveReadSet(a);renderBell();
+}
+
 function notifications(){
  const out=[];
  if(canView('incidents')&&['expert','manager'].includes(me.role)){
@@ -4124,7 +4145,8 @@ function notifications(){
   });
   out.unshift(...dueItems);
  }
- return out;
+ const rd=new Set(readSet());
+ return out.filter(n=>!rd.has(notifKey(n)));
 }
 function renderBell(){
  const items=notifications();
@@ -4132,11 +4154,12 @@ function renderBell(){
  if(badge){if(items.length){badge.textContent=nd(items.length);badge.classList.remove('hidden')}else badge.classList.add('hidden')}
  const pop=$('#bellpop');if(!pop)return;
  if(!items.length){pop.innerHTML='<div class="bell-empty">✅ اعلان جدیدی ندارید</div>';window._notifs=[];return}
- pop.innerHTML='<div class="bell-head">🔔 اعلان‌ها <span class="chip b-mut">'+nd(items.length)+' مورد</span><button class="ibtn" onclick="closeBell()">✖</button></div>'
+ pop.innerHTML='<div class="bell-head">🔔 اعلان‌ها <span class="chip b-mut">'+nd(items.length)+' مورد</span><button class="bell-all" onclick="markAllNotifsRead(event)">همه خوانده شد</button><button class="ibtn" onclick="closeBell()">✖</button></div>'
   +'<div class="bell-list">'+items.map((n,i)=>'<div class="bell-item" onclick="gotoNotif('+i+')">'
    +'<span class="bell-ic">'+n.icon+'</span>'
    +'<div class="bell-txt"><b>'+esc(n.text)+'</b><small>'+esc(n.sub||'')+'</small></div>'
    +'<span class="chip '+n.chip+'">'+esc(n.label)+'</span>'
+   +'<button class="bell-read" title="خوانده شد" aria-label="خوانده شد" onclick="markNotifRead('+i+',event)">✓</button>'
    +'</div>').join('')+'</div>';
  window._notifs=items;
 }
