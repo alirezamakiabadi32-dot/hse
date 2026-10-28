@@ -1003,6 +1003,7 @@ function sanitizeData(data) {
   s5MigrateV2(data);
   if (!data.lists || typeof data.lists !== 'object') data.lists = {};
   if (!data.scoreRules || !Array.isArray(data.scoreRules) || !data.scoreRules.length) data.scoreRules = defaultScoreRules();
+  else data.scoreRules = migrateBbsRules(data.scoreRules);
   data = sanitizePermissions(data);
   return data;
 }
@@ -1014,8 +1015,35 @@ function defaultScoreRules(){
   return [
     {key:'nm', src:'incidents', match:{typeContains:'شبه'}, pts:5, label:'ثبت شبه‌حادثه'},
     {key:'sess', src:'tbm+toolbox', match:{present:true}, pts:2, label:'حضور در جلسات TBT/TBM'},
-    {key:'act', src:'bbs', match:{hasPerson:true, unsafeGt:0}, pts:-3, label:'اعمال ناایمن'}
+    {key:'bbs_safe', src:'bbs', match:{hasPerson:true, field:'safe'}, pts:1, label:'رفتار ایمن'},
+    {key:'act', src:'bbs', match:{hasPerson:true, field:'unsafe'}, pts:-3, label:'رفتار ناایمن'}
   ];
+}
+/* مهاجرت قانون قدیمی BBS (یک امتیاز به‌ازای هر رکورد) به امتیاز به‌ازای هر رفتار ایمن/ناایمن */
+function migrateBbsRules(rules){
+  if(!Array.isArray(rules)) return rules;
+  rules.forEach(r=>{
+    if(r && r.src==='bbs' && r.key==='act' && r.match && !r.match.field){
+      r.match={hasPerson:true, field:'unsafe'};
+      if(!r.label || r.label==='اعمال ناایمن') r.label='رفتار ناایمن';
+    }
+  });
+  const hasSafe=rules.some(r=>r && r.src==='bbs' && r.match && r.match.field==='safe');
+  if(!hasSafe) rules.push({key:'bbs_safe', src:'bbs', match:{hasPerson:true, field:'safe'}, pts:1, label:'رفتار ایمن'});
+  return rules;
+}
+/* شمارش تذکرهای ثبت‌شده در مشاهدات رفتاری برای هر فرد (کل سوابق) */
+const BBS_WARN_LIMIT=3;
+function bbsWarnCounts(){
+  const m={};
+  ((db&&db.bbs)||[]).forEach(r=>{
+    if(!r.person || r.warned!=='بله') return;
+    const o=m[r.person]||(m[r.person]={name:r.person,count:0,lastId:r.id,lastDate:''});
+    o.count++;
+    const d=String(r.date||'');
+    if(d>=o.lastDate){o.lastDate=d;o.lastId=r.id;}
+  });
+  return m;
 }
 
 /* ============================================================
@@ -1484,6 +1512,8 @@ function ruleMatchChips(r){
   if(r.match && r.match.typeContains) out.push('نوع شامل «'+esc(r.match.typeContains)+'»');
   if(r.match && r.match.present) out.push('حضور در جلسه');
   if(r.match && r.match.hasPerson) out.push('فرد مشخص');
+  if(r.match && r.match.field==='safe') out.push('به‌ازای هر رفتار ایمن');
+  if(r.match && r.match.field==='unsafe') out.push('به‌ازای هر رفتار ناایمن');
   if(r.match && r.match.unsafeGt!==undefined && r.match.unsafeGt!==null) out.push('رفتار ناایمن > '+nd(r.match.unsafeGt));
   if(r.src==='incidents' && r.match && r.match.createdByWorker) out.push('ثبت‌کننده: پرسنل اجرایی');
   if(r.src==='incidents' && r.match && r.match.createdByPerson) out.push('ثبت‌کننده: خود فرد');
@@ -1496,11 +1526,14 @@ function calcScores(mk){
     rows[p.name]={name:p.name,score:0,detail:{}};
     scoreRules().forEach(rl=>rows[p.name].detail[rl.key]=0);
   });
-  const add=(name,key,pts)=>{
+  const add=(name,key,pts,n)=>{
     const w=rows[name]; if(!w) return;
+    n=(n===undefined)?1:n;
     if(w.detail[key]===undefined) w.detail[key]=0;
-    w.detail[key]++; w.score+=pts;
+    w.detail[key]+=n; w.score+=pts*n;
   };
+  const warnMap=bbsWarnCounts();
+  Object.keys(rows).forEach(nm=>{ rows[nm].warns=(warnMap[nm]||{}).count||0; });
   scoreRules().forEach(rl=>{
     if(!rl.key) return;
     if(rl.src==='incidents'){
@@ -1528,8 +1561,13 @@ function calcScores(mk){
       db.bbs.forEach(r=>{
         if(mKey(r.date)!==mk) return;
         if(rl.match&&rl.match.hasPerson && !r.person) return;
-        if(rl.match&&rl.match.unsafeGt!==undefined && +r.unsafe<=+rl.match.unsafeGt) return;
         if(!r.person) return;
+        if(rl.match&&rl.match.field){
+          const n=Math.max(0,parseInt(r[rl.match.field],10)||0);
+          if(n>0) add(r.person, rl.key, rl.pts, n);
+          return;
+        }
+        if(rl.match&&rl.match.unsafeGt!==undefined && +r.unsafe<=+rl.match.unsafeGt) return;
         add(r.person, rl.key, rl.pts);
       });
     }
@@ -1900,10 +1938,11 @@ tbm:{t:'جلسات TBM (Task Briefing Meeting)',i:'📝',
 bbs:{t:'مشاهدات رفتاری (BBS)',i:'👀',
  fields:[{k:'date',l:'تاریخ مشاهده',t:'date',req:1,def:todayJ},{k:'area',l:'محل',t:'sel',o:()=>AR(),list:'AREAS0'},
   {k:'cat',l:'موضوع رفتار',t:'sel',o:()=>L('BBS_CATS'),list:'BBS_CATS'},
-  {k:'person',l:'فرد مرتکب رفتار ناایمن (انتساب امتیاز منفی)',t:'sel',o:P},
-  {k:'safe',l:'تعداد رفتارهای ایمن',t:'num'},{k:'unsafe',l:'تعداد رفتارهای ناایمن',t:'num'},
+  {k:'person',l:'فرد مشاهده‌شده (امتیاز رفتارها به او تعلق می‌گیرد)',t:'sel',o:P},
+  {k:'safe',l:'تعداد رفتارهای ایمن (هر مورد امتیاز مثبت)',t:'num'},{k:'unsafe',l:'تعداد رفتارهای ناایمن (هر مورد امتیاز منفی)',t:'num'},
+  {k:'warned',l:'آیا به فرد تذکر داده شد؟ (سومین تذکر به مدیر/کارشناس هشدار می‌دهد)',t:'sel',o:['خیر','بله']},
   {k:'feedback',l:'بازخورد داده‌شده',t:'txt'}],
- cols:['date','area','cat','person','safe','unsafe']},
+ cols:['date','area','cat','person','safe','unsafe','warned']},
 audits:{t:'ممیزی‌های HSE',i:'🔎',
  fields:[{k:'date',l:'تاریخ',t:'date',req:1,def:todayJ},
   {k:'type',l:'نوع ممیزی',t:'sel',o:()=>L('AUDIT_TYPES'),list:'AUDIT_TYPES'},
@@ -2853,6 +2892,11 @@ function saveForm(k,id){
  save();
  closeModal();
  toast('✔ با موفقیت ذخیره شد');
+ if(k==='bbs'&&rec.person&&rec.warned==='بله'&&(!orig||orig.warned!=='بله')){
+   const wc=(bbsWarnCounts()[rec.person]||{}).count||0;
+   if(wc>=BBS_WARN_LIMIT) setTimeout(()=>toast('🚨 هشدار: «'+rec.person+'» '+nd(wc)+' بار تذکر گرفته است — مدیر و کارشناس مطلع شدند'),1800);
+   else setTimeout(()=>toast('⚠️ تذکر '+nd(wc)+'ام برای «'+rec.person+'» ثبت شد'),1800);
+ }
  renderSidebar();
  if(curPage===k||(curPage==='risks'&&riskMethod===k)) renderRows();
   if(k==='ptw'&&isNew) setTimeout(()=>openDetail('ptw',rec.id),120);
@@ -3345,8 +3389,8 @@ function exportScoresReport(format){
   const mk=mKey(todayJ());
   const rows=calcScores(mk);
   const rules=scoreRules();
-  let rank='<h2>رتبه‌بندی و امتیاز کل</h2><table><thead><tr><th>رتبه</th><th>نام</th><th>امتیاز کل</th></tr></thead><tbody>';
-  rows.forEach((r,i)=>{ rank+='<tr><td>'+nd(i+1)+'</td><td>'+esc(r.name)+'</td><td><b>'+nd(r.score)+'</b></td></tr>'; });
+  let rank='<h2>رتبه‌بندی و امتیاز کل</h2><table><thead><tr><th>رتبه</th><th>نام</th><th>امتیاز کل</th><th>تعداد تذکر</th></tr></thead><tbody>';
+  rows.forEach((r,i)=>{ rank+='<tr><td>'+nd(i+1)+'</td><td>'+esc(r.name)+'</td><td><b>'+nd(r.score)+'</b></td><td>'+nd(r.warns||0)+'</td></tr>'; });
   rank+='</tbody></table>';
   let detail='<h2>امتیاز به تفکیک آیتم</h2><table><thead><tr><th>نام</th>'+rules.map(r=>'<th>'+esc(r.label)+'</th>').join('')+'</tr></thead><tbody>';
   rows.forEach(r=>{ detail+='<tr><td>'+esc(r.name)+'</td>'+rules.map(rl=>'<td>'+nd(r.detail[rl.key]||0)+'</td>').join('')+'</tr>'; });
@@ -3382,13 +3426,13 @@ function scoresPage(){curPage='scores';
  h+='<button class="btn ghost sm" onclick="exportScoresReport(\'pdf\')">📄 PDF</button>';
  h+='</div></div>';
  h+='<div class="card"><div class="sechead">⚙️ آیتم‌های امتیازدهی فعال</div><div style="display:flex;gap:6px;flex-wrap:wrap">';
- scoreRules().forEach(r=>{h+='<span class="chip '+(r.pts>0?'b-ok':'b-bad')+'">'+esc(r.label)+' ('+(r.pts>0?'+':'')+nd(r.pts)+')</span>'});
+ scoreRules().forEach(r=>{h+='<span class="chip '+(r.pts>0?'b-ok':'b-bad')+'">'+esc(r.label)+' ('+(r.pts>0?'+':'')+nd(r.pts)+(r.match&&r.match.field?' به‌ازای هر مورد':'')+')</span>'});
  h+='</div></div>';
- h+='<div class="card"><div class="sechead">جدول امتیاز ماه جاری</div><div class="tscroll"><table class="tbl"><thead><tr><th>رتبه</th><th>نام پرسنل اجرایی</th><th>امتیاز کل</th>';
+ h+='<div class="card"><div class="sechead">جدول امتیاز ماه جاری</div><div class="tscroll"><table class="tbl"><thead><tr><th>رتبه</th><th>نام پرسنل اجرایی</th><th>امتیاز کل</th><th>تعداد تذکر</th>';
  const rules=scoreRules();
  rules.forEach(r=>{h+='<th>'+esc(r.label)+'</th>'});
  h+='</tr></thead><tbody>'+rows.map((r,i)=>{
-   let tds='<td>'+(r.score>0&&i===0?'🥇':r.score>0&&i===1?'🥈':r.score>0&&i===2?'🥉':nd(i+1))+'</td><td>'+esc(r.name)+'</td><td><span class="chip '+(r.score>0?'b-ok':r.score<0?'b-bad':'b-mut')+'">'+nd(r.score)+'</span></td>';
+   let tds='<td>'+(r.score>0&&i===0?'🥇':r.score>0&&i===1?'🥈':r.score>0&&i===2?'🥉':nd(i+1))+'</td><td>'+esc(r.name)+'</td><td><span class="chip '+(r.score>0?'b-ok':r.score<0?'b-bad':'b-mut')+'">'+nd(r.score)+'</span></td><td><span class="chip '+((r.warns||0)>=BBS_WARN_LIMIT?'b-bad':(r.warns||0)>0?'b-warn':'b-mut')+'">'+((r.warns||0)>=BBS_WARN_LIMIT?'🚨 ':'')+nd(r.warns||0)+'</span></td>';
    rules.forEach(rl=>{tds+='<td>'+nd(r.detail[rl.key]||0)+'</td>'});
    return '<tr>'+tds+'</tr>';
  }).join('')+'</tbody></table></div></div>';
@@ -3430,7 +3474,8 @@ function ruleSrcChange(){
    h+='<label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" id="sr_present" checked> حضور در جلسه</label>';
  } else if(src==='bbs'){
    h+='<label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" id="sr_hasPerson" checked> فقط رکوردهای دارای شخص</label>';
-   h+='<input id="sr_unsafeGt" class="in" type="number" step="1" placeholder="رفتار ناایمن بیشتر از (اختیاری)" style="margin-top:6px">';
+   h+='<select id="sr_bbsField" class="in" style="margin-top:6px"><option value="safe">امتیاز به‌ازای هر رفتار ایمن (× تعداد)</option><option value="unsafe">امتیاز به‌ازای هر رفتار ناایمن (× تعداد)</option><option value="">امتیاز به‌ازای هر رکورد مشاهده</option></select>';
+   h+='<input id="sr_unsafeGt" class="in" type="number" step="1" placeholder="رفتار ناایمن بیشتر از (اختیاری، فقط برای حالت هر رکورد)" style="margin-top:6px">';
  }
  w.innerHTML=h;
 }
@@ -3447,6 +3492,7 @@ function ruleAdd(){
    const w=$('#sr_workerOnly'); if(w&&w.checked) match.createdByWorker=true;
  } else if(src==='bbs'){
    const hp=$('#sr_hasPerson'); if(hp&&hp.checked) match.hasPerson=true;
+   const bf=$('#sr_bbsField'); if(bf&&bf.value) match.field=bf.value;
    const ug=($('#sr_unsafeGt').value||'').trim(); if(ug!=='') match.unsafeGt=parseInt(ug,10);
  } else {
    match.present=true;
@@ -4056,6 +4102,12 @@ function notifications(){
  if(canView('incidents')&&['expert','manager'].includes(me.role)){
   db.incidents.filter(r=>r.status==='گزارش اولیه').forEach(r=>{
    out.push({icon:'🚨',kind:'incidents',chip:'b-bad',label:'حادثه نیازمند بررسی',text:r.title,sub:r.area+' — '+r.date,id:r.id});
+  });
+ }
+ /* هشدار تذکر: از بار سوم به بعد برای مدیر و کارشناس */
+ if(canView('bbs')&&['expert','manager'].includes(me.role)){
+  Object.values(bbsWarnCounts()).filter(a=>a.count>=BBS_WARN_LIMIT).sort((a,b)=>b.count-a.count).forEach(a=>{
+   out.push({icon:'⚠️',kind:'bbs',chip:'b-bad',label:'هشدار: تذکر '+nd(a.count)+'ام',text:a.name+' — '+nd(a.count)+' بار تذکر ایمنی دریافت کرده است',sub:'نیازمند بررسی و اقدام مدیر/کارشناس HSE',id:a.lastId});
   });
  }
  if(canView('actions')){
@@ -6135,6 +6187,7 @@ function capaFromInspection(id, i){
     D.bbs=arr('bbs').filter(function(r){return r.person===n && inR(r,f,t)});
     D.bbsSafe=sumOf(D.bbs,'safe');
     D.bbsUnsafe=sumOf(D.bbs,'unsafe');
+    D.bbsWarn=D.bbs.filter(function(r){return r.warned==='بله'}).length;
     D.ppe=arr('ppeTx').filter(function(r){return r.person===n && inR(r,f,t)});
     D.ptw=arr('ptw').filter(function(r){return listHas(r.workers,n) && inR(r,f,t)});
     D.sv=arr('siteVisit').filter(function(r){return (r.visitor===n || r.createdBy===n) && inR(r,f,t)});
@@ -6163,7 +6216,7 @@ function capaFromInspection(id, i){
     h+=row('دوره‌های آموزشی (حضور)', nd(D.trn.length)+' دوره — '+nd(D.trnH)+' ساعت');
     h+=row('جلسات TBM (حضور)', nd(D.tbm.length));
     h+=row('جلسات TBT (حضور)', nd(D.tbt.length));
-    h+=row('مشاهدات رفتاری BBS', nd(D.bbs.length)+' — ایمن: '+nd(D.bbsSafe)+' — ناایمن: '+nd(D.bbsUnsafe));
+    h+=row('مشاهدات رفتاری BBS', nd(D.bbs.length)+' — ایمن: '+nd(D.bbsSafe)+' — ناایمن: '+nd(D.bbsUnsafe)+' — تذکر: '+nd(D.bbsWarn));
     h+=row('تجهیزات PPE تحویل‌شده', nd(D.ppe.length));
     h+=row('مجوز کار (PTW) با نام شما', nd(D.ptw.length));
     h+=row('بازدیدهای محل کار (SITE VISIT)', nd(D.sv.length)+' — نیازمند اصلاح: '+nd(D.svFix));
