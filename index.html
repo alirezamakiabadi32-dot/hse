@@ -1035,13 +1035,13 @@ let _seqCounter = 0;
 let _dirtyRecs = {};
 
 /* ثبت تغییر کل یک ماژول (برای لیست‌های ساده و ماژول‌های غیررکوردی) */
-function queueModule(moduleName){
+function queueModule(moduleName){ if(window._viewOnly) return;
   if(!moduleName) return;
   _pendingModules[moduleName] = ++_seqCounter;
   _persistSync();
 }
 /* ثبت تغییر فقط یک رکورد — جلوی بازنویسی تغییرات همکاران را می‌گیرد */
-function queueRec(moduleName, id){
+function queueRec(moduleName, id){ if(window._viewOnly) return;
   if(!moduleName) return;
   if(!id || RECORD_MODS.indexOf(moduleName)<0) return queueModule(moduleName);
   if(!_dirtyRecs[moduleName]) _dirtyRecs[moduleName] = {};
@@ -1062,7 +1062,7 @@ function _clean(v){ return JSON.parse(JSON.stringify(v===undefined?null:v)); }
 const SYNC_KEY = LS+'_sync';
 const SENSITIVE_MODS = ['medical','healthExp'];   // داده‌های پزشکی هرگز در کش مرورگر نمی‌مانند
 let _cacheErrShown = false;
-function cacheDb(){
+function cacheDb(){ if(window._viewOnly) return;
   try{
     const c = Object.assign({}, db);
     SENSITIVE_MODS.forEach(m=>{ delete c[m]; });
@@ -1096,7 +1096,7 @@ function _baseFrom(data){
   });
   return b;
 }
-function _persistSync(){
+function _persistSync(){ if(window._viewOnly) return;
   try{
     // تغییرات داده‌های پزشکی روی دستگاه ذخیره نمی‌شوند (در همین نشست ارسال می‌شوند)
     const keep = m => SENSITIVE_MODS.indexOf(m)<0;
@@ -1189,7 +1189,7 @@ async function _flushDelta(){
   }
 }
 
-function save(opts){
+function save(opts){ if(window._viewOnly) return;
   opts = opts || {};
   cacheDb();
   clearTimeout(_saveTimer);
@@ -2575,6 +2575,7 @@ function renderRows(){
   let ops='';
   if(k==='emgEquip'&&emgTplKey(r.item)&&can('inspections','create'))ops+='<button class="ibtn" title="بازرسی (چک‌لیست همین تجهیز)" onclick="event.stopPropagation();openEmgInspection(\''+r.id+'\')">📋</button>';
   if(k==='emgEquip')ops=emgInspChip(r)+ops;
+  ops=apprChip(r)+ops;
   if(canEdit(k,r))ops+='<button class="ibtn" title="ویرایش" onclick="event.stopPropagation();openForm(\''+k+'\',\''+r.id+'\')">✏️</button>';
   if(canDel(k))ops+='<button class="ibtn" title="حذف" onclick="event.stopPropagation();delRec(\''+k+'\',\''+r.id+'\')">🗑️</button>';
   tds+='<td onclick="event.stopPropagation()">'+ops+'</td>';
@@ -2749,6 +2750,8 @@ function saveForm(k,id){
 
  // FIX: rec فقط برای رکورد جدید ساخته شود
  if(isNew) rec={id:uid(PF[k]),createdBy:me.name,createdJ:todayJ(),log:[]};
+  if(isNew&&APPR_MODS.includes(k)) rec.appr=apprInit(me.role);
+  else if(!isNew&&APPR_MODS.includes(k)&&me.role!=='manager'&&(!rec.appr||rec.appr.stage==='rejected'||rec.appr.stage==='approved')) rec.appr=apprInit(roleOfName(rec.createdBy));
 
  if(k==='incidents' && me.role==='worker') { rec.type='شبه‌حادثه (Near Miss)'; }
 
@@ -2968,12 +2971,13 @@ function saveS5(){
  rec.log = rec.log || [];
  if(!rec.id){
    if(!can('s5','create')){toast('دسترسی ثبت 5S ندارید');return}
-   rec.id=uid('S5'); rec.log.push({u:me.name,d:todayJ(),t:'ثبت اولیه'}); db.s5.push(rec);
+   rec.id=uid('S5'); rec.log.push({u:me.name,d:todayJ(),t:'ثبت اولیه'}); rec.appr=apprInit(me.role); db.s5.push(rec);
  } else {
    if(!can('s5','edit')){toast('دسترسی ویرایش 5S ندارید');return}
    const i=db.s5.findIndex(r=>r.id===rec.id);
    rec.log.push({u:me.name,d:todayJ(),t:'ویرایش'});
-   if(i>=0) db.s5[i]=rec; else db.s5.push(rec);
+   if(me.role!=='manager'&&(!rec.appr||rec.appr.stage==='rejected'||rec.appr.stage==='approved')) rec.appr=apprInit(roleOfName(rec.createdBy));
+    if(i>=0) db.s5[i]=rec; else db.s5.push(rec);
  }
  queueRec('s5', rec.id);
  save();
@@ -3117,7 +3121,7 @@ function dashWorker(){
  const myTr=db.trainings.filter(r=>(r.people||[]).includes(me.name));
  const mySess=db.toolbox.concat(db.tbm).filter(r=>(r.people||[]).includes(me.name)).sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,5);
  const PR_RANK={'فوری':3,'مهم':2,'عادی':1};
- const ann=(db.announce||[]).slice().sort((a,b)=>(PR_RANK[b.prio]||1)-(PR_RANK[a.prio]||1) || String(b.date).localeCompare(String(a.date))).slice(0,3);
+ const ann=(db.announce||[]).filter(apprOK).slice().sort((a,b)=>(PR_RANK[b.prio]||1)-(PR_RANK[a.prio]||1) || String(b.date).localeCompare(String(a.date))).slice(0,3);
  const myArea5=db.s5.filter(r=>r.area===me.area).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
  let h='<div class="card" style="background:linear-gradient(120deg,#fff7ed,#ffedd5)">';
  h+='<div class="worker-hero" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'+
@@ -3896,7 +3900,7 @@ function inspDueList(includeNever){
   Object.keys(TPLS||{}).forEach(tk=>{
     if(EMG_TPLS[tk]) return;
     const per=+((TPLS[tk]||{}).period)||0; if(!per) return;
-    const last=(db.inspections||[]).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
+    const last=(db.inspections||[]).filter(apprOK).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
     if(!last){ if(includeNever) out.push({kind:'tpl',id:tk,label:TPLS[tk].t,last:'',next:'',left:null}); return; }
     const next=jAddDays(last.date,per); const left=-jDaysAgo(next);
     if(isFinite(left)) out.push({kind:'tpl',id:tk,label:TPLS[tk].t,last:last.date,next:next,left:left});
@@ -3927,7 +3931,7 @@ function dueBoard(k){
     + '</tbody></table></div></div>';
 }
 function dueNextCell(tk){
-  const last=(db.inspections||[]).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
+  const last=(db.inspections||[]).filter(apprOK).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
   if(!last) return '<span class="chip b-mut">هنوز بازرسی نشده</span>';
   const next=jAddDays(last.date,(TPLS[tk]||{}).period); const left=-jDaysAgo(next);
   return esc(next)+' '+dueChip(isFinite(left)?left:null);
@@ -3935,6 +3939,81 @@ function dueNextCell(tk){
 
 /* نشان اولویت اعلان: فوری = قرمز، مهم = نارنجی، عادی = آبی روشن */
 function annChip(p){return chip(p||'عادی',({'فوری':'b-bad','مهم':'b-warn'})[p]||'b-info')}
+/* ---- سلسله‌ی تایید: پرسنل اجرایی ← کارشناس ایمنی ← مدیریت ----
+   ثبت پرسنل اجرایی: اول کارشناس، بعد مدیریت
+   ثبت کارشناس ایمنی: فقط مدیریت
+   ثبت مدیریت: بدون نیاز به تایید */
+const ROLE_FA={worker:'پرسنل اجرایی',expert:'کارشناس ایمنی',manager:'مدیریت'};
+const APPR_EXCLUDE=['personnel','areas','ptw','scoreArch'];
+const APPR_MODS=RECORD_MODS.filter(k=>APPR_EXCLUDE.indexOf(k)<0);
+function roleName(r){ return ROLE_FA[r]||r; }
+function roleOfName(n){ const p=(db&&db.personnel||[]).find(x=>x.name===n); return p?p.role:'worker'; }
+function apprInit(role){
+  if(role==='worker') return {stage:'expert',hist:[]};
+  if(role==='expert') return {stage:'manager',hist:[]};
+  return {stage:'approved',hist:[]};
+}
+function apprOK(r){ return !r.appr || r.appr.stage==='approved'; }
+function apprCanAct(r){
+  return !!r.appr && ((r.appr.stage==='expert'&&me.role==='expert')||(r.appr.stage==='manager'&&me.role==='manager'));
+}
+function apprLabel(a){
+  return a.stage==='expert'?'ثبت اولیه — منتظر تایید کارشناس ایمنی':a.stage==='manager'?'ثبت اولیه — منتظر تایید مدیریت':a.stage==='rejected'?'برگشت داده شده به ثبت‌کننده':'ثبت نهایی';
+}
+/* نشان وضعیت تایید در فهرست: فقط موارد در انتظار و ردشده */
+function apprChip(r){
+  if(!r.appr || r.appr.stage==='approved') return '';
+  const cl=r.appr.stage==='rejected'?'b-bad':'b-warn';
+  return '<span class="chip '+cl+'">'+apprLabel(r.appr)+'</span> ';
+}
+/* تعداد مواردی که منتظر تایید نقش فعلی هستند (برای منوی کناری) */
+function apprPending(k){
+  if(!me||!APPR_MODS.includes(k)||!Array.isArray(db[k])) return 0;
+  const st=me.role==='expert'?'expert':me.role==='manager'?'manager':null;
+  if(!st) return 0;
+  return db[k].filter(r=>r.appr&&r.appr.stage===st).length;
+}
+function apprBoxHTML(k,r){
+  if(!APPR_MODS.includes(k)||!r.appr) return '';
+  const a=r.appr;
+  let h='<div class="card" style="margin-top:12px;background:var(--surf)"><div class="sechead">✍️ مسیر تایید — '+apprLabel(a)+'</div>';
+  if((a.hist||[]).length){
+    h+=(a.hist||[]).map(x=>'<div class="emgrow"><span>'+esc(x.n)+' ('+roleName(x.r)+')</span><span>'+(x.a==='approve'?'✔ تایید':'✖ رد')+' — '+esc(x.d)+(x.reason?' — '+esc(x.reason):'')+'</span></div>').join('');
+  }
+  if(apprCanAct(r)){
+    h+='<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri sm" onclick="apprAct(\''+k+'\',\''+r.id+'\',\'approve\')">✅ تایید</button><button class="btn danger sm" onclick="apprAct(\''+k+'\',\''+r.id+'\',\'reject\')">✖ رد با ذکر دلیل</button></div>';
+  } else if(a.stage==='rejected'){
+    h+='<div style="margin-top:8px;font-size:12px;color:var(--mut)">'+(r.createdBy===me.name?'برای ارسال مجدد، فرم را ویرایش و ذخیره کنید.':'منتظر اصلاح و ارسال مجدد توسط ثبت‌کننده است.')+'</div>';
+  } else if(a.stage!=='approved'){
+    h+='<div style="margin-top:8px;font-size:12px;color:var(--mut)">در انتظار اقدام '+roleName(a.stage)+'</div>';
+  }
+  return h+'</div>';
+}
+/* تایید یا رد یک مرحله توسط نقش مربوط */
+function apprAct(k,id,action){
+  const r=(db[k]||[]).find(x=>x.id===id);
+  if(!r||!r.appr){ toast('مورد یافت نشد'); return; }
+  if(!apprCanAct(r)){ toast('این مرحله‌ی تایید مربوط به نقش شما نیست'); return; }
+  let reason='';
+  if(action==='reject'){
+    reason=(prompt('دلیل رد را بنویسید:')||'').trim();
+    if(!reason){ toast('برای رد کردن، ذکر دلیل الزامی است'); return; }
+  }
+  const a=r.appr; a.hist=a.hist||[];
+  a.hist.push({r:me.role,n:me.name,d:todayJ(),a:action==='approve'?'approve':'reject',reason:reason});
+  if(action==='reject'){ a.stage='rejected'; a.reason=reason; }
+  else a.stage=(a.stage==='expert')?'manager':'approved';
+  r.log=(r.log||[]).concat([{u:me.name,d:todayJ(),t:(action==='approve'?'تایید':'رد')+' ('+roleName(me.role)+')'+(reason?': '+reason:'')}]);
+  queueRec(k,id); save();
+  toast(action==='approve'?'✔ تایید شد':'✖ رد شد');
+  renderSidebar();
+  openDetail(k,id);
+  if(curPage===k) renderRows();
+}
+function recLabel(r){
+  return String(r.title||r.desc||r.item||r.topic||r.task||r.course||r.equip||r.type||r.code||r.id).slice(0,60);
+}
+
 function notifications(){
  const out=[];
  if(canView('incidents')&&['expert','manager'].includes(me.role)){
@@ -3989,9 +4068,32 @@ function notifications(){
  /* اعلان‌های ایمنی مهم و فوری (۱۴ روز اخیر) — برای همه نقش‌ها و در ابتدای فهرست */
  if(canView('announce')){
   const recentAnn=(db.announce||[])
-    .filter(r=>(r.prio==='فوری'||r.prio==='مهم') && jDaysAgo(r.date)<=14)
+    .filter(r=>(r.prio==='فوری'||r.prio==='مهم') && jDaysAgo(r.date)<=14 && apprOK(r))
     .sort((a,b)=>((a.prio==='فوری'?0:1)-(b.prio==='فوری'?0:1)) || String(b.date).localeCompare(String(a.date)));
   out.unshift(...recentAnn.map(r=>({icon:'📢',kind:'announce',chip:r.prio==='فوری'?'b-bad':'b-warn',label:'اعلان '+r.prio,text:r.title,sub:(r.body||'').slice(0,70)+' — '+r.date,id:r.id})));
+ }
+ /* فرم‌هایی که به ثبت‌کننده برگشت داده شده‌اند */
+ APPR_MODS.forEach(k=>{
+   if(!Array.isArray(db[k])) return;
+   db[k].forEach(r=>{
+     if(!r.appr||r.appr.stage!=='rejected'||r.createdBy!==me.name) return;
+     out.push({icon:'↩️',kind:k,chip:'b-bad',label:'برگشت برای اصلاح',
+       text:(MODS[k]?MODS[k].t:k)+' — '+recLabel(r),
+       sub:'دلیل: '+(r.appr.reason||'—'),id:r.id});
+   });
+ });
+ /* مواردی که منتظر تایید نقش من هستند */
+ if(me.role==='expert'||me.role==='manager'){
+  const st=me.role==='expert'?'expert':'manager';
+  APPR_MODS.forEach(k=>{
+    if(!canView(k)||!Array.isArray(db[k])) return;
+    db[k].forEach(r=>{
+      if(!r.appr||r.appr.stage!==st) return;
+      out.push({icon:'✍️',kind:k,chip:'b-org',label:'منتظر تایید شما',
+        text:(MODS[k]?MODS[k].t:k)+' — '+recLabel(r),
+        sub:'ثبت‌کننده: '+r.createdBy+' ('+roleName(roleOfName(r.createdBy))+') — '+r.createdJ,id:r.id});
+    });
+  });
  }
  /* بازرسی‌هایی که امروز سررسید شده‌اند یا معوق مانده‌اند */
  if(canView('inspections')||canView('emgEquip')){
@@ -4184,7 +4286,7 @@ function ensureEmgTpl(key){
 /* آخرین بازرسی یک تجهیز اضطراری (با شناسه‌ی تجهیز؛ بازرسی‌های قدیمی‌تر با کد داخل توضیحات) */
 function emgLastInsp(r){
   const key=emgTplKey(r.item); if(!key) return null;
-  const list=(db.inspections||[]).filter(i=>i.tpl===key && (i.eqId===r.id || (!i.eqId && String(i.note||'').indexOf('(کد '+r.id+')')>=0)))
+  const list=(db.inspections||[]).filter(apprOK).filter(i=>i.tpl===key && (i.eqId===r.id || (!i.eqId && String(i.note||'').indexOf('(کد '+r.id+')')>=0)))
     .sort((a,b)=>String(b.date).localeCompare(String(a.date)));
   return list[0]||null;
 }
@@ -4457,7 +4559,8 @@ function openDetail(k,id){
   let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=peopleOut(r,v);break;case 'chkl':out=esc((v||[]).join('، '));break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;default:out=esc(v)}
   h+='<div class="dl">'+f.l+'</div><div class="dv">'+out+'</div>'});
  h+='</div>';
- if(r.signs && hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
+ h+=apprBoxHTML(k,r);
+  if(r.signs && hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
  if(k==='incidents' && r.analyses){
    const a=normalizeAnalyses(r.analyses);
    h+='<h4 class="msh">🔬 تحلیل حادثه</h4>';
@@ -5132,7 +5235,7 @@ const NAV=[
 function pageOf(k){return SPECIAL[k]||MODS[k]}
 function renderSidebar(){let h='';
  NAV.forEach(g=>{const items=g.items.filter(k=>canView(k));if(!items.length)return;
-  h+='<div class="sgrp">'+g.g+'</div>'+items.map(k=>{const Pg=pageOf(k);const n=navBadge(k);return '<div class="sitem'+(curPage===k?' on':'')+'" onclick="setPage(\''+k+'\')"><span>'+Pg.i+'</span><span>'+Pg.t+'</span>'+(n?'<span class="nb">'+nd(n)+'</span>':'')+(newItemCount(k)?'<span class="nb nbnew" title="موارد جدید از آخرین بازدید">+'+nd(newItemCount(k))+'</span>':'')+'</div>'}).join('')});
+  h+='<div class="sgrp">'+g.g+'</div>'+items.map(k=>{const Pg=pageOf(k);const n=navBadge(k)+apprPending(k);return '<div class="sitem'+(curPage===k?' on':'')+'" onclick="setPage(\''+k+'\')"><span>'+Pg.i+'</span><span>'+Pg.t+'</span>'+(n?'<span class="nb">'+nd(n)+'</span>':'')+(newItemCount(k)?'<span class="nb nbnew" title="موارد جدید از آخرین بازدید">+'+nd(newItemCount(k))+'</span>':'')+'</div>'}).join('')});
  $('#snav').innerHTML=h;
  try{renderBell()}catch(e){console.warn(e)}}
 /* مقایسه‌ی پایدار داده‌ها: ترتیب کلیدها و ساختارهای خالی را نادیده می‌گیرد (Firebase آن‌ها را برمی‌گرداند یا مرتب می‌کند) */
@@ -6449,5 +6552,34 @@ document.addEventListener('keydown', function(e){
 })();
 </script>
 <script>setInterval(function(){try{renderSidebar()}catch(e){}},30*60*1000);</script>
+<script>
+/* ---- آمار و گزارش‌ها فقط روی «ثبت نهایی» حساب می‌شوند ----
+   داده‌ی فقط‌خواندنی: موارد ثبت اولیه (در انتظار تایید یا برگشت‌خورده) از آمار کنار گذاشته می‌شوند.
+   در این حالت هیچ ذخیره‌ای انجام نمی‌شود (window._viewOnly). */
+(function(){
+  function finalDbView(){
+    const v={};
+    Object.keys(db).forEach(k=>{
+      v[k]=(APPR_MODS.indexOf(k)>=0 && Array.isArray(db[k])) ? db[k].filter(apprOK) : db[k];
+    });
+    return v;
+  }
+  function finalOnly(fn){
+    return function(){
+      const real=db, wasView=window._viewOnly;
+      window._viewOnly=true; db=finalDbView();
+      try{ return fn.apply(this,arguments); }
+      finally{ db=real; window._viewOnly=wasView; }
+    };
+  }
+  window.finalOnly=finalOnly;
+  /* کارگر: داشبورد شخصی خودش (شامل موارد در انتظار خودش) همان قبلی می‌ماند */
+  const dashMg=finalOnly(function(){ return dashMgmt(); });
+  SPECIAL.dash.ren=function(){ return me.role==='worker' ? dashWorker() : dashMg(); };
+  ['kpi','risks','scores','s5','trends'].forEach(k=>{
+    if(SPECIAL[k]) SPECIAL[k].ren=finalOnly(SPECIAL[k].ren);
+  });
+})();
+</script>
 </body>
 </html>
