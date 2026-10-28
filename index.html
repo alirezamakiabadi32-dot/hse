@@ -50,6 +50,7 @@ input,select,textarea{font-family:inherit;font-size:13.5px}
 .sitem:hover{background:rgba(255,255,255,.06);color:#fff}
 .sitem.on{background:rgba(234,88,12,.18);border-right-color:var(--pri);color:#fff}
 .sitem .nb{margin-right:auto;background:var(--bad);color:#fff;border-radius:99px;font-size:12px;padding:1px 7px}
+.sitem .nb.nbnew{margin-right:0;background:#2563eb;font-weight:700}
 #main{flex:1;margin-right:252px;min-width:0}
 #topbar{position:sticky;top:0;background:var(--card);border-bottom:1px solid var(--line);padding:10px 18px;display:flex;align-items:center;gap:10px;z-index:40}
 #ptitle{font-size:15.5px;font-weight:700}
@@ -2573,6 +2574,7 @@ function renderRows(){
   if(M.status)tds+='<td>'+(r.status?chip(r.status):'—')+'</td>';
   let ops='';
   if(k==='emgEquip'&&emgTplKey(r.item)&&can('inspections','create'))ops+='<button class="ibtn" title="بازرسی (چک‌لیست همین تجهیز)" onclick="event.stopPropagation();openEmgInspection(\''+r.id+'\')">📋</button>';
+  if(k==='emgEquip')ops=emgInspChip(r)+ops;
   if(canEdit(k,r))ops+='<button class="ibtn" title="ویرایش" onclick="event.stopPropagation();openForm(\''+k+'\',\''+r.id+'\')">✏️</button>';
   if(canDel(k))ops+='<button class="ibtn" title="حذف" onclick="event.stopPropagation();delRec(\''+k+'\',\''+r.id+'\')">🗑️</button>';
   tds+='<td onclick="event.stopPropagation()">'+ops+'</td>';
@@ -2678,6 +2680,7 @@ function openForm(k,id,pre){
  if(!id&&!canCreate(k)){toast('اجازه ثبت جدید در این بخش را ندارید');return}
  if(k==='s5'){ openS5Wizard(id); return; }
  window._phData=undefined;
+ window._emgEqId=(k==='inspections'&&!id&&pre&&pre._eqId)?pre._eqId:null;
  let b='<div class="fgrid">';
  M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;
   const v=rec?rec[f.k]:(pre&&pre[f.k]!==undefined?pre[f.k]:(f.def!==undefined?(typeof f.def==='function'?f.def():f.def):''));
@@ -2778,7 +2781,9 @@ function saveForm(k,id){
    window._phData=undefined;
  }
  if(k==='inspections'){
-  if(!rec.tpl)bad='نوع چک‌لیست';
+  if(window._emgEqId) rec.eqId=window._emgEqId;
+   window._emgEqId=null;
+   if(!rec.tpl)bad='نوع چک‌لیست';
   else if(!TPLS[rec.tpl])bad='چک‌لیست انتخاب‌شده منقضی شده — دوباره انتخاب کنید';
   else{
    const ans={},fails=[];
@@ -3110,7 +3115,8 @@ function dashWorker(){
  const myPpe=db.ppeTx.filter(r=>r.person===me.name).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
  const myTr=db.trainings.filter(r=>(r.people||[]).includes(me.name));
  const mySess=db.toolbox.concat(db.tbm).filter(r=>(r.people||[]).includes(me.name)).sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,5);
- const ann=db.announce.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,3);
+ const PR_RANK={'فوری':3,'مهم':2,'عادی':1};
+ const ann=(db.announce||[]).slice().sort((a,b)=>(PR_RANK[b.prio]||1)-(PR_RANK[a.prio]||1) || String(b.date).localeCompare(String(a.date))).slice(0,3);
  const myArea5=db.s5.filter(r=>r.area===me.area).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
  let h='<div class="card" style="background:linear-gradient(120deg,#fff7ed,#ffedd5)">';
  h+='<div class="worker-hero" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'+
@@ -3135,7 +3141,7 @@ function dashWorker(){
  h+='<div class="card"><div class="sechead">🦺 PPE تحویلی من</div>'+miniList(myPpe.map(r=>'<div class="list-row" onclick="openDetail(\'ppeTx\',\''+r.id+'\')"><span class="lt">'+esc(r.item)+'</span><small>'+esc(r.date)+'</small>'+chip(r.status||'تحویل شد')+'</div>'),'PPE‌ای برای شما ثبت نشده')+'</div></div>';
  h+='<div class="grid2"><div class="card"><div class="sechead">🗣️ جلسات TBT / TBM من</div>'+miniList(mySess.map(r=>'<div class="list-row" onclick="openDetail(\''+(db.toolbox.indexOf(r)>=0?'toolbox':'tbm')+'\',\''+r.id+'\')"><span class="lt">'+(db.toolbox.indexOf(r)>=0?'TBT — ':'TBM — ')+esc(r.topic||r.task)+'</span><small>'+esc(r.date)+'</small><span class="chip b-ok">+۲</span></div>'),'در جلسه‌ای ثبت نشده‌اید')+'</div>';
  h+='<div class="card" style="background:#fef2f2;border-color:#fecaca"><div class="sechead">☎️ شماره‌های اضطراری</div>'+db.contacts.map(c=>'<div class="emgrow"><span>'+esc(c.title)+'</span><span class="phbig">'+esc(c.phone)+'</span></div>').join('')+'</div></div>';
- h+='<div class="grid2"><div class="card"><div class="sechead">📢 اعلان‌ها</div>'+miniList(ann.map(a=>'<div class="list-row" onclick="openDetail(\'announce\',\''+a.id+'\')"><span class="lt">'+esc(a.title)+'</span>'+chip(a.prio||'عادی')+'</div>'),'اعلانی وجود ندارد')+'</div>';
+ h+='<div class="grid2"><div class="card"><div class="sechead">📢 اعلان‌ها</div>'+miniList(ann.map(a=>'<div class="list-row" onclick="openDetail(\'announce\',\''+a.id+'\')"><span class="lt">'+esc(a.title)+'</span>'+annChip(a.prio)+'</div>'),'اعلانی وجود ندارد')+'</div>';
  h+='<div class="card"><div class="sechead">🏆 قواعد طلایی ایمنی</div><ul class="rulelist"><li>هرگز بدون گیتر، فیس‌شیلد و چکمه نسوز به محدوده مذاب نزدیک نشو.</li><li>هیچ قطعه یا ابزار مرطوبی وارد کوره نشود.</li><li>زیر بار معلق جرثقیل نایست.</li><li>آب و مذاب دشمن یکدیگرند.</li><li>در سالن ذوب ایرماپ داشته باش.</li><li>قبل از هر تعمیر، مجوز کار و LOTO بگیر.</li><li>دیدی خطر، همان لحظه گزارش کن.</li></ul></div></div>';
  return h}
 
@@ -3843,6 +3849,37 @@ function navBadge(k){
  if(k==='legalReport'&&canView('legalReport'))return (db.legalReport||[]).filter(r=>!['ارسال شد','تایید دریافت'].includes(r.status)).length;
  if(k==='loto'&&canView('loto'))return (db.loto||[]).filter(r=>r.status==='فعال (قفل شده)').length;
  return 0}
+/* ---- شمارنده‌ی «موارد جدید» در هر ماژول ----
+   هر رکورد با شناسه و وضعیتش امضا می‌شود. رکوردی که امضایش قبلاً دیده نشده
+   (رکورد تازه، یا تغییر وضعیت) به‌عنوان مورد جدید شمرده می‌شود.
+   با باز کردن ماژول، همه‌ی موارد آن ماژول دیده‌شده ثبت می‌شوند. */
+const SEEN_KEY = 'hse_seen_v1_';
+let _seenStore = null;
+function seenLoad(){
+  if(_seenStore) return _seenStore;
+  try{ _seenStore = JSON.parse(localStorage.getItem(SEEN_KEY + (me ? me.name : '')) || '{}') || {}; }
+  catch(e){ _seenStore = {}; }
+  return _seenStore;
+}
+function seenSave(){
+  try{ localStorage.setItem(SEEN_KEY + (me ? me.name : ''), JSON.stringify(_seenStore || {})); }catch(e){}
+}
+function recSig(r){ return String(r.id) + '|' + String(r.status || ''); }
+function moduleRecs(k){ return (db && Array.isArray(db[k])) ? db[k] : null; }
+function markModuleSeen(k){
+  const recs = moduleRecs(k); if(!recs || !me) return;
+  seenLoad(); _seenStore[k] = recs.map(recSig); seenSave();
+}
+function newItemCount(k){
+  const recs = moduleRecs(k); if(!recs || !me) return 0;
+  const st = seenLoad();
+  if(!Array.isArray(st[k])){ st[k] = recs.map(recSig); seenSave(); return 0; }
+  const seen = new Set(st[k]);
+  return recs.filter(r => !seen.has(recSig(r)) && r.createdBy !== me.name).length;
+}
+
+/* نشان اولویت اعلان: فوری = قرمز، مهم = نارنجی، عادی = آبی روشن */
+function annChip(p){return chip(p||'عادی',({'فوری':'b-bad','مهم':'b-warn'})[p]||'b-info')}
 function notifications(){
  const out=[];
  if(canView('incidents')&&['expert','manager'].includes(me.role)){
@@ -3893,6 +3930,13 @@ function notifications(){
       out.push({icon:'🏭',kind:'s5',chip:'b-bad',label:'5S ضعیف (سطح D)',text:'واحد '+x.rec.area+' با '+nd(x.sc.pct)+'٪',sub:'آخرین ارزیابی: '+x.rec.date,id:x.rec.id});
     }
   });
+ }
+ /* اعلان‌های ایمنی مهم و فوری (۱۴ روز اخیر) — برای همه نقش‌ها و در ابتدای فهرست */
+ if(canView('announce')){
+  const recentAnn=(db.announce||[])
+    .filter(r=>(r.prio==='فوری'||r.prio==='مهم') && jDaysAgo(r.date)<=14)
+    .sort((a,b)=>((a.prio==='فوری'?0:1)-(b.prio==='فوری'?0:1)) || String(b.date).localeCompare(String(a.date)));
+  out.unshift(...recentAnn.map(r=>({icon:'📢',kind:'announce',chip:r.prio==='فوری'?'b-bad':'b-warn',label:'اعلان '+r.prio,text:r.title,sub:(r.body||'').slice(0,70)+' — '+r.date,id:r.id})));
  }
  return out;
 }
@@ -4069,16 +4113,38 @@ function ensureEmgTpl(key){
   if(!TPLS[key]) TPLS[key] = JSON.parse(JSON.stringify(EMG_TPLS[key]));
   return true;
 }
+/* آخرین بازرسی یک تجهیز اضطراری (با شناسه‌ی تجهیز؛ بازرسی‌های قدیمی‌تر با کد داخل توضیحات) */
+function emgLastInsp(r){
+  const key=emgTplKey(r.item); if(!key) return null;
+  const list=(db.inspections||[]).filter(i=>i.tpl===key && (i.eqId===r.id || (!i.eqId && String(i.note||'').indexOf('(کد '+r.id+')')>=0)))
+    .sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  return list[0]||null;
+}
+function emgPeriodDays(r){
+  const key=emgTplKey(r.item); if(!key) return 30;
+  const t=(TPLS&&TPLS[key])||EMG_TPLS[key]||{};
+  return +t.period||30;
+}
+/* نشان وضعیت بازرسی این دوره، کنار هر تجهیز در فهرست */
+function emgInspChip(r){
+  if(!emgTplKey(r.item)) return '';
+  const last=emgLastInsp(r);
+  if(!last) return '<span class="chip b-mut">بدون بازرسی</span> ';
+  if(jDaysAgo(last.date)<emgPeriodDays(r)) return '<span class="chip b-ok" title="آخرین بازرسی">✔ بازرسی این دوره ثبت شده ('+esc(last.date)+')</span> ';
+  return '<span class="chip b-warn" title="آخرین بازرسی">سررسید بازرسی ('+esc(last.date)+')</span> ';
+}
 function openEmgInspection(eqId){
   const r = db.emgEquip.find(x=>x.id===eqId);
   if(!r){ toast('تجهیز یافت نشد'); return; }
   const key = emgTplKey(r.item);
   if(!ensureEmgTpl(key)){ toast('چک‌لیست این تجهیز تعریف نشده است'); return; }
-  openForm('inspections', null, {
-    tpl: key,
-    date: todayJ(),
-    note: 'تجهیز: '+r.item+' — محل: '+(r.loc||'—')+' (کد '+r.id+')'
-  });
+  const pre = { tpl: key, date: todayJ(), note: 'تجهیز: '+r.item+' — محل: '+(r.loc||'—')+' (کد '+r.id+')', _eqId: r.id };
+  const last = emgLastInsp(r);
+  if(last && jDaysAgo(last.date) < emgPeriodDays(r)){
+    askConfirm('این تجهیز در تاریخ '+last.date+' بازرسی شده و هنوز در دوره‌ی جاری است. بازرسی تکراری ثبت نشود. آیا باز هم فرم جدید باز شود؟', function(){ openForm('inspections', null, pre); });
+    return;
+  }
+  openForm('inspections', null, pre);
 }
 /* تبدیل یک مغایرت مشخص از چک‌لیست به آنومالی */
 function convertInspItemToUnsafe(id, idx){
@@ -4998,7 +5064,7 @@ const NAV=[
 function pageOf(k){return SPECIAL[k]||MODS[k]}
 function renderSidebar(){let h='';
  NAV.forEach(g=>{const items=g.items.filter(k=>canView(k));if(!items.length)return;
-  h+='<div class="sgrp">'+g.g+'</div>'+items.map(k=>{const Pg=pageOf(k);const n=navBadge(k);return '<div class="sitem'+(curPage===k?' on':'')+'" onclick="setPage(\''+k+'\')"><span>'+Pg.i+'</span><span>'+Pg.t+'</span>'+(n?'<span class="nb">'+nd(n)+'</span>':'')+'</div>'}).join('')});
+  h+='<div class="sgrp">'+g.g+'</div>'+items.map(k=>{const Pg=pageOf(k);const n=navBadge(k);return '<div class="sitem'+(curPage===k?' on':'')+'" onclick="setPage(\''+k+'\')"><span>'+Pg.i+'</span><span>'+Pg.t+'</span>'+(n?'<span class="nb">'+nd(n)+'</span>':'')+(newItemCount(k)?'<span class="nb nbnew" title="موارد جدید از آخرین بازدید">+'+nd(newItemCount(k))+'</span>':'')+'</div>'}).join('')});
  $('#snav').innerHTML=h;
  try{renderBell()}catch(e){console.warn(e)}}
 /* مقایسه‌ی پایدار داده‌ها: ترتیب کلیدها و ساختارهای خالی را نادیده می‌گیرد (Firebase آن‌ها را برمی‌گرداند یا مرتب می‌کند) */
@@ -5020,6 +5086,7 @@ function setPage(k){const Pg=pageOf(k);
  if(!Pg || !canView(k)){ k='dash'; }
  if(!canView(k)){ toast('دسترسی به این بخش غیرفعال است'); return; }
  curPage=k;riskFilter=null;
+ markModuleSeen(k);
  $('#ptitle').textContent=pageOf(k).i+' '+pageOf(k).t;
  const sd=document.getElementById('side');if(sd)sd.classList.remove('open');
  const sc=document.getElementById('scrim');if(sc)sc.classList.remove('show');
@@ -5112,6 +5179,7 @@ function applyCloud(cloud){
     } else if (me) {
       refreshCurrent();
     }
+    try{ renderSidebar(); }catch(e){}
   } catch(e) {
     console.warn('خطا در همگام‌سازی remote:', e);
   } finally {
