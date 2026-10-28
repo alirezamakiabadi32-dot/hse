@@ -593,6 +593,25 @@ select.in option,select option{background-color:var(--card);color:var(--ink)}
 :root[data-theme="dark"] .in::placeholder{color:#94a3b8!important;-webkit-text-fill-color:#94a3b8!important;opacity:1}
 :root[data-theme="dark"] select option{background:#0f1828;color:#e2e8f0}
 :root[data-theme="dark"] .in:disabled{opacity:.6!important}
+
+/* ===== نوار بالای موبایل: نام کاربر نمایش داده شود و دکمه‌ها داخل صفحه بمانند ===== */
+@media(max-width:640px){
+ #topbar{gap:6px;min-width:0}
+ #topbar>div:first-of-type{min-width:0;overflow:hidden}
+ .uchip{padding:3px 6px;gap:5px;min-width:0;max-width:150px;flex-shrink:1}
+ .uchip>div{display:block!important;min-width:0}
+ .uchip b{display:block;max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:1.4}
+ .uchip small{display:none}
+ .uchip #uav{font-size:16px;line-height:1}
+ .sync-indicator{padding:6px;gap:0;flex-shrink:0}
+ .sync-indicator #syncTxt{display:none}
+ #topbar>.tbtn{flex-shrink:0}
+}
+@media(max-width:360px){
+ .uchip{max-width:112px}
+ .uchip b{max-width:50px}
+ #ptitle{font-size:12px}
+}
 </style>
 </head>
 <body>
