@@ -1779,6 +1779,7 @@ lec:{t:'LEC — ارزیابی ریسک به روش ویلیام فاین',i:'�
 
 inspections:{t:'بازرسی‌ها و چک‌لیست‌ها',i:'📋',
  fields:[{k:'tpl',l:'نوع چک‌لیست',t:'tplsel',req:1},{k:'date',l:'تاریخ بازرسی',t:'date',req:1,def:todayJ},
+  {k:'eqId',l:'تجهیز اضطراری (فقط برای چک‌لیست تجهیزات)',t:'eqsel'},
   {k:'inspBy',l:'بازرس',t:'sel',o:P,def:()=>me.name},{k:'note',l:'توضیحات بازرس',t:'txt'}],
  cols:['date','tpl','score','inspBy']},
 ptw:{t:'فرم مجوز ایمنی انجام کار (PTW)',i:'🔥',
@@ -1881,7 +1882,7 @@ emgEquip:{t:'تجهیزات اضطراری',i:'🧨',
   {k:'loc',l:'محل استقرار',t:'text',req:1},{k:'count',l:'تعداد',t:'num'},
   {k:'lastChk',l:'آخرین بازرسی',t:'date'},{k:'nextChk',l:'بازرسی بعدی',t:'date'},
   {k:'status',l:'وضعیت',t:'sel',o:()=>L('EMG_STATUS'),list:'EMG_STATUS'}],
- cols:['item','loc','count','nextChk','status']},
+ cols:['item','loc','count','lastChk','nextChk','status']},
 toolbox:{t:'جلسات TBT (Tool Box Talk)',i:'🗣️',
  fields:[{k:'date',l:'تاریخ',t:'date',req:1,def:todayJ},{k:'topic',l:'موضوع جلسه',t:'sel',o:()=>L('TBT'),req:1,list:'TBT'},
   {k:'presenter',l:'ارائه‌دهنده',t:'text'},{k:'dur',l:'مدت (دقیقه)',t:'num'},
@@ -2446,6 +2447,7 @@ function exportRecord(k,id,format){
       case 'people': out=peopleOut(r,v); break; case 'chkl': out=esc((v||[]).join('، ')); break;
       case 'num': out=nfmt(v); break;
       case 'tplsel': out=TPLS[v]?TPLS[v].t:esc(v); break;
+      case 'eqsel': out=esc(eqLabelById(v)); break;
       default: out=esc(v);
     }
     h+='<tr><th style="width:30%">'+esc(f.l)+'</th><td>'+out+'</td></tr>';
@@ -2532,6 +2534,7 @@ function exportBlankS5(format){
 function colLabel(k,c){const f=(MODS[k].fields||[]).find(x=>x.k===c);return f?f.l:(FNLBL[c]||c)}
 function fmtCell(k,r,c){
  const M=MODS[k],f=(M.fields||[]).find(x=>x.k===c);
+ if(k==='emgEquip'&&(c==='lastChk'||c==='nextChk')){const d=emgDerivedFields(r);return esc((d?d[c]:r[c])||'—')}
  if(FN[c])return FN[c](r);
  let v=r[c];
  if(f&&f.t==='chk')return v?'✔ بله':'—';
@@ -2567,6 +2570,7 @@ function renderRows(){
  if(sf)rows=rows.filter(r=>r.status===sf);
  if(q)rows=rows.filter(r=>JSON.stringify(Object.assign({},r,{log:0,answers:0,photo:0})).toLowerCase().includes(q));
  rows.sort((a,b)=>String(b.date||b.createdJ||'').localeCompare(String(a.date||a.createdJ||'')));
+ const dbw=$('#dueBoardWrap');if(dbw&&(k==='inspections'||k==='emgEquip')){const nh=dueBoard(k);if(dbw.dataset.h!==nh){dbw.innerHTML=nh;dbw.dataset.h=nh}}
  const tb=$('#rows');if(!tb)return;
  const ncols=M.cols.length+(M.status?1:0)+1;
  tb.innerHTML=rows.length?rows.map(r=>{
@@ -2598,8 +2602,9 @@ function modPage(k){curPage=k;const M=MODS[k];
  h+='<button class="btn ghost sm" onclick="exportModuleTable(\''+k+'\',\'pdf\')" title="خروجی PDF">📄 PDF</button>';
   if(k==='inspections'){ h+='<button class="btn ghost sm" onclick="exportInspectionsCSV()" title="جدول همه اقلام همه بازرسی‌ها برای Excel">📊 Excel</button>'+'<button class="btn ghost sm" onclick="exportInspectionsSummary(\'word\')">📈 گزارش تجمیعی Word</button>'+'<button class="btn ghost sm" onclick="exportInspectionsSummary(\'pdf\')">📈 گزارش تجمیعی PDF</button>'; }
  if(M.fields&&canCreate(k))h+='<button class="btn ghost sm" onclick="exportBlankForm(\''+k+'\',\'word\')" title="فرم خالی برای چاپ و تکمیل دستی">📝 فرم خالی Word</button>';
+ if(k==='emgEquip'&&can('emgEquip','edit'))h+='<button class="btn ghost sm" onclick="emgSyncAllUI()" title="آخرین/بعدی بازرسی و وضعیت همهٔ تجهیزات را از روی چک‌لیست‌های ثبت‌شده به‌روز می‌کند">🔄 همگام‌سازی با چک‌لیست‌ها</button>';
  h+='</div></div><div class="mstats" id="mstats"></div>';
-  if(k==='inspections'||k==='emgEquip') h+=dueBoard(k);
+  if(k==='inspections'||k==='emgEquip') h+='<div id="dueBoardWrap">'+dueBoard(k)+'</div>';
  if(k==='unsafe')h+=unsafeStats();
  h+='<div class="card"><div class="tscroll"><table class="tbl"><thead><tr>'+M.cols.map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'<th>عملیات</th></tr></thead><tbody id="rows"></tbody></table></div></div>';
  $('#content').innerHTML=h;renderRows()}
@@ -2615,6 +2620,7 @@ function ctrl(f,v){
    return '<div class="addopt-wrap"><select class="in"'+id+' data-k="'+f.k+'"><option value="">— انتخاب کنید —</option>'+listOpts+'</select>'+addBtn+'</div>';
   }
   case 'risklvl':return '<input type="hidden"'+id+' data-k="'+f.k+'" value="'+esc(v||'')+'"><div class="riskseg">'+['کم','متوسط','بالا','بحرانی'].map(r=>'<button type="button" class="rsk r-'+({کم:'ok',متوسط:'warn',بالا:'org',بحرانی:'bad'})[r]+(v===r?' on':'')+'" onclick="pickRisk(this,\''+f.k+'\',\''+r+'\')">'+r+'</button>').join('')+'</div>';
+  case 'eqsel':return '<select class="in"'+id+' data-k="eqId" data-v="'+esc(v||'')+'"></select>';
   case 'tplsel':return '<select class="in" data-k="tpl"'+id+'><option value="">— انتخاب چک‌لیست —</option>'+Object.keys(TPLS).map(k=>'<option '+(v===k?'selected':'')+' value="'+k+'">'+TPLS[k].t+' (هر '+TPLS[k].period+' روز)</option>').join('')+'</select>';
   case 'chkl':{const sel=Array.isArray(v)?v:[];return '<div class="pbox" style="grid-template-columns:1fr 1fr;max-height:260px">'+opts(f).map((o,i)=>'<label><input type="checkbox" cki="'+f.k+'" value="'+esc(o)+'" '+(sel.includes(o)?'checked':'')+'> '+(i+1)+'. '+esc(o)+'</label>').join('')+'</div>';}
   case 'people':return '<div class="pbox">'+db.personnel.map(p=>'<label><input type="checkbox" ppi="'+f.k+'" value="'+esc(p.name)+'" '+((v||[]).includes(p.name)?'checked':'')+'> '+esc(p.name)+'</label>').join('')+'</div>';
@@ -2715,7 +2721,7 @@ function openForm(k,id,pre){
   '<button class="btn pri" onclick="saveForm(\''+k+'\','+(id?'\''+id+'\'':'null')+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>'+(id?'<button class="btn ghost" onclick="exportRecord(\''+k+'\',\''+id+'\',\'print\')">🖨️ چاپ</button>':''));
  setTimeout(()=>{const mb=document.getElementById('mbody');if(mb)mb.scrollTop=0},50);
  if(ATT_MODS.includes(k)) $$('#mbody input[ppi="people"]').forEach(c=>c.onchange=attRefresh);
- if(k==='inspections'){const sel=$('#f_tpl');if(sel){const fill=()=>renderTplItems(sel.value,rec?rec.answers:null);sel.onchange=fill;fill()}}
+ if(k==='inspections'){const sel=$('#f_tpl');if(sel){const fill=()=>{renderTplItems(sel.value,rec?rec.answers:null);refreshEqSel()};sel.onchange=fill;fill()}}
  if(k==='risks'){const upd=()=>{const e1=$('#f_s'),e2=$('#f_p');const s=+(e1&&e1.value)||0,p=+(e2&&e2.value)||0;const el=$('#lvprev');if(el)el.innerHTML='سطح ریسک فعلی: '+lvlChip(s*p)};['f_s','f_p'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
  if(k==='fmea'){const upd=()=>{const S=+($('#f_s')||{}).value||1,O=+($('#f_o')||{}).value||1,D=+($('#f_d')||{}).value||1;const rpn=S*O*D;const cls=rpn<=50?'b-ok':rpn<=100?'b-warn':rpn<=200?'b-org':'b-bad';const lbl=rpn<=50?'کم':rpn<=100?'متوسط':rpn<=200?'بالا':'بحرانی';const el=$('#fmprev');if(el)el.innerHTML='RPN (S×O×D) = <b>'+nd(S)+' × '+nd(O)+' × '+nd(D)+' = '+nd(rpn)+'</b> — <span class="chip '+cls+'">'+lbl+'</span>'};['f_s','f_o','f_d'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
  if(k==='lec'){const upd=()=>{const L=+($('#f_L')||{}).value||0,E=+($('#f_E')||{}).value||0,C=+($('#f_C')||{}).value||0;const sc=Math.round(L*E*C*100)/100;const lvl=lecLevel(sc);const cls=sc<20?'b-ok':sc<70?'b-info':sc<200?'b-warn':sc<400?'b-org':'b-bad';const el=$('#lecprev');if(el)el.innerHTML='امتیاز LEC = <b>'+nd(sc)+'</b> — <span class="chip '+cls+'">'+lvl+'</span>'};['f_L','f_E','f_C'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
@@ -2787,6 +2793,7 @@ function saveForm(k,id){
  if(k==='inspections'){
   if(window._emgEqId) rec.eqId=window._emgEqId;
    window._emgEqId=null;
+   if(EMG_TPLS[rec.tpl]){ if(!rec.eqId) bad=bad||'تجهیز اضطراری مربوط به این چک‌لیست'; } else { delete rec.eqId; }
    if(!rec.tpl)bad='نوع چک‌لیست';
   else if(!TPLS[rec.tpl])bad='چک‌لیست انتخاب‌شده منقضی شده — دوباره انتخاب کنید';
   else{
@@ -2837,6 +2844,7 @@ function saveForm(k,id){
  }
 
  queueRec(k, rec.id);
+ if(k==='inspections'){ syncEmgEquip(emgEqIdOfInsp(rec)); if(orig&&emgEqIdOfInsp(orig)&&emgEqIdOfInsp(orig)!==emgEqIdOfInsp(rec)) syncEmgEquip(emgEqIdOfInsp(orig)); }
 
  save();
  closeModal();
@@ -3907,10 +3915,11 @@ function inspDueList(includeNever){
   });
   (db.emgEquip||[]).forEach(r=>{
     if(!emgTplKey(r.item)) return;
-    const last=emgLastInsp(r);
-    if(!last){ if(includeNever) out.push({kind:'eq',id:r.id,label:r.item+' — '+(r.loc||'—'),last:'',next:'',left:null}); return; }
-    const next=jAddDays(last.date,emgPeriodDays(r)); const left=-jDaysAgo(next);
-    if(isFinite(left)) out.push({kind:'eq',id:r.id,label:r.item+' — '+(r.loc||'—'),last:last.date,next:next,left:left});
+    const lbl=r.item+' — '+(r.loc||'—');
+    const st=emgInspState(r);
+    if(st.left===null){ if(includeNever) out.push({kind:'eq',id:r.id,label:lbl,last:'',next:'',left:null}); return; }
+    if(!isFinite(st.left)) return;
+    out.push({kind:'eq',id:r.id,label:lbl,last:st.last?st.last.date:st.manual,next:st.next,left:st.left,never:!st.last});
   });
   return out;
 }
@@ -3925,10 +3934,16 @@ function dueBoard(k){
   const kind=k==='emgEquip'?'eq':'tpl';
   const rows=inspDueList(true).filter(x=>x.kind===kind).sort((a,b)=>{
     if(a.left===null) return 1; if(b.left===null) return -1; return a.left-b.left;});
-  if(!rows.length) return '';
-  return '<div class="card"><div class="sechead">📅 بازرسی‌های بعدی</div><div class="tscroll"><table class="tbl"><thead><tr><th>مورد</th><th>آخرین بازرسی</th><th>بازرسی بعدی</th><th>وضعیت</th></tr></thead><tbody>'
-    + rows.map(x=>'<tr><td>'+esc(x.label)+'</td><td>'+(x.last?esc(x.last):'—')+'</td><td>'+(x.next?esc(x.next):'—')+'</td><td>'+dueChip(x.left)+'</td></tr>').join('')
-    + '</tbody></table></div></div>';
+  let h='';
+  if(rows.length){
+    h+='<div class="card"><div class="sechead">📅 بازرسی‌های بعدی</div>'
+      +(kind==='eq'?'<div style="font-size:12px;color:var(--mut);margin-bottom:8px">آخرین و بعدیِ بازرسی و وضعیت هر تجهیز از روی چک‌لیست‌های ثبت‌شده محاسبه می‌شود. چک‌لیست «منتظر تایید» هم حساب می‌شود؛ چک‌لیست ردشده نه.</div>':'')
+      +'<div class="tscroll"><table class="tbl"><thead><tr><th>مورد</th><th>آخرین بازرسی</th><th>بازرسی بعدی</th><th>وضعیت</th></tr></thead><tbody>'
+      + rows.map(x=>'<tr><td>'+esc(x.label)+'</td><td>'+(x.last?esc(x.last):'—')+'</td><td>'+(x.next?esc(x.next):'—')+'</td><td>'+dueChip(x.left)+'</td></tr>').join('')
+      + '</tbody></table></div></div>';
+  }
+  if(kind==='eq') h+=emgOrphanBox();
+  return h;
 }
 function dueNextCell(tk){
   const last=(db.inspections||[]).filter(apprOK).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
@@ -4005,7 +4020,8 @@ function apprAct(k,id,action){
   else a.stage=(a.stage==='expert')?'manager':'approved';
   r.log=(r.log||[]).concat([{u:me.name,d:todayJ(),t:(action==='approve'?'تایید':'رد')+' ('+roleName(me.role)+')'+(reason?': '+reason:'')}]);
   queueRec(k,id); save();
-  toast(action==='approve'?'✔ تایید شد':'✖ رد شد');
+  if(k==='inspections') syncEmgEquip(emgEqIdOfInsp(r));
+   toast(action==='approve'?'✔ تایید شد':'✖ رد شد');
   renderSidebar();
   openDetail(k,id);
   if(curPage===k) renderRows();
@@ -4104,7 +4120,7 @@ function notifications(){
     if(x.kind==='eq'&&!canView('emgEquip')) return;
     dueItems.push({icon:x.kind==='tpl'?'📋':'🧯',kind:x.kind==='tpl'?'inspections':'emgEquip',chip:x.left<0?'b-bad':'b-warn',
       label:x.left<0?'بازرسی '+nd(-x.left)+' روز معوق':'بازرسی امروز سررسید است',
-      text:x.label,sub:'آخرین بازرسی: '+x.last+' — بعدی: '+x.next,id:x.kind==='eq'?x.id:undefined});
+      text:x.label,sub:'آخرین بازرسی: '+(x.last||'ثبت نشده')+' — بعدی: '+x.next,id:x.kind==='eq'?x.id:undefined});
   });
   out.unshift(...dueItems);
  }
@@ -4283,32 +4299,142 @@ function ensureEmgTpl(key){
   if(!TPLS[key]) TPLS[key] = JSON.parse(JSON.stringify(EMG_TPLS[key]));
   return true;
 }
+/* ---- منطق به‌روزرسانی لیست تجهیزات اضطراری از روی چک‌لیست‌های ثبت‌شده ----
+   ثبت «منتظر تایید» هم در زمان‌بندی حساب می‌شود تا لیست تجهیزات همان لحظهٔ ثبت چک‌لیست به‌روز شود؛
+   چک‌لیست ردشده هرگز حساب نمی‌شود. برای حساب‌کردن فقط تاییدشده‌ها این مقدار را false کنید. */
+const EMG_COUNT_PENDING = true;
+function emgInspCounts(i){
+  if(!i.appr || i.appr.stage==='approved') return true;
+  return EMG_COUNT_PENDING && i.appr.stage!=='rejected';
+}
+/* شناسه‌ی تجهیز یک بازرسی: eqId، یا کد داخل توضیحات (بازرسی‌های قدیمی) */
+function emgEqIdOfInsp(i){
+  if(!i) return '';
+  if(i.eqId) return i.eqId;
+  const m=/\(کد ([^)\s]+)\)/.exec(String(i.note||''));
+  return m?m[1]:'';
+}
+function eqLabelById(id){
+  const r=(db&&db.emgEquip||[]).find(x=>x.id===id);
+  return r?(r.item+' — '+(r.loc||'—')):String(id||'');
+}
 /* آخرین بازرسی یک تجهیز اضطراری (با شناسه‌ی تجهیز؛ بازرسی‌های قدیمی‌تر با کد داخل توضیحات) */
 function emgLastInsp(r){
   const key=emgTplKey(r.item); if(!key) return null;
-  const list=(db.inspections||[]).filter(apprOK).filter(i=>i.tpl===key && (i.eqId===r.id || (!i.eqId && String(i.note||'').indexOf('(کد '+r.id+')')>=0)))
-    .sort((a,b)=>String(b.date).localeCompare(String(a.date)));
-  return list[0]||null;
+  let best=null, bi=-1;
+  (db.inspections||[]).forEach((i,ix)=>{
+    if(!emgInspCounts(i)) return;
+    if(emgEqIdOfInsp(i)!==r.id) return;
+    if(!i.eqId && i.tpl!==key) return;
+    const d=String(i.date||''), bd=best?String(best.date||''):'';
+    if(!best || d>bd || (d===bd && ix>bi)){ best=i; bi=ix; }
+  });
+  return best;
 }
 function emgPeriodDays(r){
   const key=emgTplKey(r.item); if(!key) return 30;
   const t=(TPLS&&TPLS[key])||EMG_TPLS[key]||{};
   return +t.period||30;
 }
+/* وضعیت زمان‌بندی بازرسی یک تجهیز: آخرین بازرسی، موعد بعدی، روز باقی‌مانده، منتظر تایید بودن و تعداد مغایرت
+   اگر هنوز چک‌لیستی ثبت نشده: مبنا = «آخرین بازرسی» دستی، وگرنه تاریخ ثبت تجهیز */
+function emgInspState(r){
+  const per=emgPeriodDays(r), last=emgLastInsp(r);
+  if(last){
+    const next=jAddDays(last.date,per);
+    return {last:last,per:per,next:next,left:-jDaysAgo(next),pending:!!(last.appr&&last.appr.stage!=='approved'),fails:(last.fails||[]).length};
+  }
+  const manual=jParse(r.lastChk)?r.lastChk:'';
+  const base=manual||(jParse(r.createdJ)?r.createdJ:'');
+  if(!base) return {last:null,per:per,next:'',left:null,never:true,manual:''};
+  const next=jAddDays(base,per);
+  return {last:null,per:per,next:next,left:-jDaysAgo(next),never:true,manual:manual};
+}
+/* مقادیر «آخرین بازرسی / بازرسی بعدی / وضعیت» که از آخرین چک‌لیست به دست می‌آید (null = چک‌لیستی ثبت نشده)
+   وضعیت «خارج از سرویس» دستی است و هرگز خودکار تغییر نمی‌کند */
+function emgDerivedFields(r){
+  const last=emgLastInsp(r); if(!last) return null;
+  const out={lastChk:last.date,nextChk:jAddDays(last.date,emgPeriodDays(r))};
+  const S=(typeof L==='function'&&L('EMG_STATUS'))||[];
+  const ST_OK=S[0]||'سالم', ST_SVC=S[1]||'نیازمند سرویس', ST_OUT=S[2]||'خارج از سرویس';
+  if(r.status!==ST_OUT){
+    if((last.fails||[]).length) out.status=ST_SVC;
+    else if(!r.status || r.status===ST_SVC) out.status=ST_OK;
+  }
+  return out;
+}
+/* نوشتن مقادیر محاسبه‌شده روی رکورد تجهیز (فقط اگر تغییر کرده باشد)؛ eqId خالی = همهٔ تجهیزات */
+function syncEmgEquip(eqId){
+  try{
+    if(!db||!Array.isArray(db.emgEquip)||window._viewOnly) return 0;
+    let n=0;
+    db.emgEquip.forEach(r=>{
+      if(eqId && r.id!==eqId) return;
+      if(!emgTplKey(r.item)) return;
+      const d=emgDerivedFields(r); if(!d) return;
+      let ch=false;
+      Object.keys(d).forEach(k=>{ if(r[k]!==d[k]){ r[k]=d[k]; ch=true; } });
+      if(ch){ queueRec('emgEquip',r.id); n++; }
+    });
+    if(n) save();
+    return n;
+  }catch(e){ console.warn('همگام‌سازی تجهیزات اضطراری:',e); return 0; }
+}
+function emgSyncAllUI(){
+  const n=syncEmgEquip();
+  toast(n?('✔ '+nd(n)+' تجهیز از روی چک‌لیست‌ها به‌روز شد'):'همهٔ تجهیزات از قبل به‌روز بودند');
+  if(curPage==='emgEquip') refreshCurrent();
+}
+/* انتخاب تجهیز در فرم بازرسی: فقط برای چک‌لیست‌های تجهیزات اضطراری نشان داده می‌شود */
+function refreshEqSel(){
+  const sel=document.getElementById('f_eqId'); if(!sel) return;
+  const tsel=document.getElementById('f_tpl'); const tpl=tsel?tsel.value:'';
+  const isEmg=!!EMG_TPLS[tpl];
+  const ff=sel.closest('.ff'); if(ff) ff.style.display=isEmg?'':'none';
+  const want=sel.dataset.init!=='1'?(sel.dataset.v||''):sel.value;
+  sel.dataset.init='1';
+  const all=db.emgEquip||[];
+  const list=isEmg?all.filter(r=>emgTplKey(r.item)===tpl||r.id===want):[];
+  const cnt={}; list.forEach(r=>{ const l=r.item+'|'+(r.loc||''); cnt[l]=(cnt[l]||0)+1; });
+  sel.innerHTML='<option value="">— انتخاب تجهیز —</option>'+list.map(r=>{
+    const dup=cnt[r.item+'|'+(r.loc||'')]>1;
+    return '<option value="'+esc(r.id)+'"'+(r.id===want?' selected':'')+'>'+esc(r.item+' — '+(r.loc||'—')+(dup?' ('+r.id+')':''))+'</option>';
+  }).join('');
+}
+/* چک‌لیست‌های تجهیزات اضطراری که به هیچ تجهیزی وصل نیستند (در لیست تجهیزات حساب نمی‌شوند) */
+function emgOrphanInsps(){
+  const ids=new Set((db.emgEquip||[]).map(r=>r.id));
+  return (db.inspections||[]).filter(i=>EMG_TPLS[i.tpl] && !(i.appr&&i.appr.stage==='rejected') && !ids.has(emgEqIdOfInsp(i)))
+    .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+}
+function emgOrphanBox(){
+  const list=emgOrphanInsps(); if(!list.length) return '';
+  const rows=list.slice(0,10).map(i=>'<tr><td>'+esc(i.date||'—')+'</td><td>'+esc(TPLS[i.tpl]?TPLS[i.tpl].t:(i.tplTitle||i.tpl))+'</td><td>'+esc(i.inspBy||'—')+'</td><td>'
+    +(canEdit('inspections',i)?'<button class="ibtn" title="اتصال به تجهیز" onclick="openForm(\'inspections\',\''+i.id+'\')">✏️</button>':'—')+'</td></tr>').join('');
+  return '<div class="card" style="background:#fffbeb;border-color:#fde68a"><div class="sechead">⚠️ '+nd(list.length)+' چک‌لیست تجهیز اضطراری به هیچ تجهیزی وصل نیست</div>'
+    +'<div style="font-size:12px;color:var(--mut);margin-bottom:8px">این چک‌لیست‌ها در لیست تجهیزات حساب نمی‌شوند. با ویرایش هر مورد، تجهیز مربوطه را انتخاب کنید.</div>'
+    +'<div class="tscroll"><table class="tbl"><thead><tr><th>تاریخ</th><th>چک‌لیست</th><th>بازرس</th><th>اقدام</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +(list.length>10?'<div style="font-size:12px;color:var(--mut);margin-top:6px">و '+nd(list.length-10)+' مورد دیگر</div>':'')+'</div>';
+}
 /* نشان وضعیت بازرسی این دوره، کنار هر تجهیز در فهرست */
 function emgInspChip(r){
   if(!emgTplKey(r.item)) return '';
-  const last=emgLastInsp(r);
-  if(!last) return '<span class="chip b-mut">بدون بازرسی</span> ';
-  if(jDaysAgo(last.date)<emgPeriodDays(r)) return '<span class="chip b-ok" title="آخرین بازرسی">✔ ثبت شده — بعدی: '+esc(jAddDays(last.date,emgPeriodDays(r)))+'</span> ';
-  return '<span class="chip b-warn" title="آخرین بازرسی">سررسید بازرسی ('+esc(last.date)+')</span> ';
+  const s=emgInspState(r);
+  if(!s.last){
+    if(s.left!==null && isFinite(s.left) && s.left<=0) return '<span class="chip b-bad" title="هنوز چک‌لیستی برای این تجهیز ثبت نشده">بدون بازرسی — سررسید گذشته</span> ';
+    return '<span class="chip b-mut" title="هنوز چک‌لیستی برای این تجهیز ثبت نشده">بدون بازرسی</span> ';
+  }
+  const pend=s.pending?'<span class="chip b-info" title="این چک‌لیست هنوز تایید نهایی نشده">منتظر تایید</span> ':'';
+  const bad=s.fails?'<span class="chip b-bad" title="مغایرت در آخرین چک‌لیست">'+nd(s.fails)+' مغایرت</span> ':'';
+  if(s.left>0) return '<span class="chip b-ok" title="آخرین بازرسی: '+esc(s.last.date)+'">✔ ثبت شده — بعدی: '+esc(s.next)+'</span> '+pend+bad;
+  return '<span class="chip b-warn" title="آخرین بازرسی: '+esc(s.last.date)+'">سررسید بازرسی ('+esc(s.last.date)+')</span> '+pend+bad;
 }
 function openEmgInspection(eqId){
   const r = db.emgEquip.find(x=>x.id===eqId);
   if(!r){ toast('تجهیز یافت نشد'); return; }
   const key = emgTplKey(r.item);
   if(!ensureEmgTpl(key)){ toast('چک‌لیست این تجهیز تعریف نشده است'); return; }
-  const pre = { tpl: key, date: todayJ(), note: 'تجهیز: '+r.item+' — محل: '+(r.loc||'—')+' (کد '+r.id+')', _eqId: r.id };
+  const pre = { tpl: key, date: todayJ(), note: 'تجهیز: '+r.item+' — محل: '+(r.loc||'—')+' (کد '+r.id+')', _eqId: r.id, eqId: r.id };
   const last = emgLastInsp(r);
   if(last && jDaysAgo(last.date) < emgPeriodDays(r)){
     askConfirm('این تجهیز در تاریخ '+last.date+' بازرسی شده و هنوز در دوره‌ی جاری است. بازرسی تکراری ثبت نشود. آیا باز هم فرم جدید باز شود؟', function(){ openForm('inspections', null, pre); });
@@ -4556,7 +4682,7 @@ function openDetail(k,id){
  if(!isOwnRecord(k,r)){toast('فقط اطلاعات مربوط به خودتان قابل مشاهده است');return}
  let h='<div class="dhead"><span class="chip idc">'+esc(r.id)+'</span>'+(r.code?'<span class="chip b-org" style="direction:ltr;font-family:monospace">'+esc(r.code)+'</span>':'')+(M.status&&r.status?chip(r.status):'')+'<small style="color:var(--mut)">ثبت: '+esc(r.createdBy)+' / '+esc(r.createdJ)+'</small></div><div class="dgrid">';
  if(k==='ptw'){ h=h.replace(/<div class="dgrid">$/,'<div>')+ptwDocHTML(r,true); } else M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;const v=r[f.k];if(v===undefined||v===''||v===null)return;
-  let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=peopleOut(r,v);break;case 'chkl':out=esc((v||[]).join('، '));break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;default:out=esc(v)}
+  let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=peopleOut(r,v);break;case 'chkl':out=esc((v||[]).join('، '));break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;case 'eqsel':out=esc(eqLabelById(v));break;default:out=esc(v)}
   h+='<div class="dl">'+f.l+'</div><div class="dv">'+out+'</div>'});
  h+='</div>';
  h+=apprBoxHTML(k,r);
@@ -4701,8 +4827,10 @@ function setStat(k,id,val){
 function delRec(k,id){
  if(!canDel(k)){toast('اجازه حذف ندارید');return}
  askConfirm('از حذف این مورد («'+id+'») مطمئن هستید؟',function(){
+  const _gone=(db[k]||[]).find(x=>x.id===id);
   db[k]=db[k].filter(x=>x.id!==id);
   queueRec(k, id);
+  if(k==='inspections'&&_gone) syncEmgEquip(emgEqIdOfInsp(_gone));
   save();
   closeCal();
   closeModal();
