@@ -3939,7 +3939,7 @@ function dueBoard(k){
     h+='<div class="card"><div class="sechead">📅 بازرسی‌های بعدی</div>'
       +(kind==='eq'?'<div style="font-size:12px;color:var(--mut);margin-bottom:8px">آخرین و بعدیِ بازرسی و وضعیت هر تجهیز از روی چک‌لیست‌های ثبت‌شده محاسبه می‌شود. چک‌لیست «منتظر تایید» هم حساب می‌شود؛ چک‌لیست ردشده نه.</div>':'')
       +'<div class="tscroll"><table class="tbl"><thead><tr><th>مورد</th><th>آخرین بازرسی</th><th>بازرسی بعدی</th><th>وضعیت</th></tr></thead><tbody>'
-      + rows.map(x=>'<tr><td>'+esc(x.label)+'</td><td>'+(x.last?esc(x.last):'—')+'</td><td>'+(x.next?esc(x.next):'—')+'</td><td>'+dueChip(x.left)+'</td></tr>').join('')
+      + rows.map(x=>'<tr><td>'+esc(x.label)+'</td><td>'+(x.last?esc(x.last):'—')+'</td><td>'+(x.next?esc(x.next):'—')+'</td><td>'+(x.never&&!x.last?'<span class="chip b-bad">هنوز بازرسی نشده</span>':dueChip(x.left))+'</td></tr>').join('')
       + '</tbody></table></div></div>';
   }
   if(kind==='eq') h+=emgOrphanBox();
@@ -4119,7 +4119,7 @@ function notifications(){
     if(x.kind==='tpl'&&!canView('inspections')) return;
     if(x.kind==='eq'&&!canView('emgEquip')) return;
     dueItems.push({icon:x.kind==='tpl'?'📋':'🧯',kind:x.kind==='tpl'?'inspections':'emgEquip',chip:x.left<0?'b-bad':'b-warn',
-      label:x.left<0?'بازرسی '+nd(-x.left)+' روز معوق':'بازرسی امروز سررسید است',
+      label:(x.never&&!x.last)?'هنوز بازرسی نشده':x.left<0?'بازرسی '+nd(-x.left)+' روز معوق':'بازرسی امروز سررسید است',
       text:x.label,sub:'آخرین بازرسی: '+(x.last||'ثبت نشده')+' — بعدی: '+x.next,id:x.kind==='eq'?x.id:undefined});
   });
   out.unshift(...dueItems);
@@ -4337,7 +4337,7 @@ function emgPeriodDays(r){
   return +t.period||30;
 }
 /* وضعیت زمان‌بندی بازرسی یک تجهیز: آخرین بازرسی، موعد بعدی، روز باقی‌مانده، منتظر تایید بودن و تعداد مغایرت
-   اگر هنوز چک‌لیستی ثبت نشده: مبنا = «آخرین بازرسی» دستی، وگرنه تاریخ ثبت تجهیز */
+   اگر هنوز چک‌لیستی ثبت نشده: مبنا = «آخرین بازرسی» دستی (اگر پر شده)، وگرنه بدون مهلت و فوری */
 function emgInspState(r){
   const per=emgPeriodDays(r), last=emgLastInsp(r);
   if(last){
@@ -4345,9 +4345,9 @@ function emgInspState(r){
     return {last:last,per:per,next:next,left:-jDaysAgo(next),pending:!!(last.appr&&last.appr.stage!=='approved'),fails:(last.fails||[]).length};
   }
   const manual=jParse(r.lastChk)?r.lastChk:'';
-  const base=manual||(jParse(r.createdJ)?r.createdJ:'');
-  if(!base) return {last:null,per:per,next:'',left:null,never:true,manual:''};
-  const next=jAddDays(base,per);
+  /* بدون چک‌لیست و بدون «آخرین بازرسی» دستی: مهلتی وجود ندارد؛ همین حالا باید بازرسی شود */
+  if(!manual) return {last:null,per:per,next:'',left:0,never:true,manual:''};
+  const next=jAddDays(manual,per);
   return {last:null,per:per,next:next,left:-jDaysAgo(next),never:true,manual:manual};
 }
 /* مقادیر «آخرین بازرسی / بازرسی بعدی / وضعیت» که از آخرین چک‌لیست به دست می‌آید (null = چک‌لیستی ثبت نشده)
@@ -4421,7 +4421,7 @@ function emgInspChip(r){
   if(!emgTplKey(r.item)) return '';
   const s=emgInspState(r);
   if(!s.last){
-    if(s.left!==null && isFinite(s.left) && s.left<=0) return '<span class="chip b-bad" title="هنوز چک‌لیستی برای این تجهیز ثبت نشده">بدون بازرسی — سررسید گذشته</span> ';
+    if(s.left!==null && isFinite(s.left) && s.left<=0) return '<span class="chip b-bad" title="هنوز چک‌لیستی برای این تجهیز ثبت نشده">هنوز بازرسی نشده</span> ';
     return '<span class="chip b-mut" title="هنوز چک‌لیستی برای این تجهیز ثبت نشده">بدون بازرسی</span> ';
   }
   const pend=s.pending?'<span class="chip b-info" title="این چک‌لیست هنوز تایید نهایی نشده">منتظر تایید</span> ':'';
