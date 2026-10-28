@@ -2598,6 +2598,7 @@ function modPage(k){curPage=k;const M=MODS[k];
   if(k==='inspections'){ h+='<button class="btn ghost sm" onclick="exportInspectionsCSV()" title="جدول همه اقلام همه بازرسی‌ها برای Excel">📊 Excel</button>'+'<button class="btn ghost sm" onclick="exportInspectionsSummary(\'word\')">📈 گزارش تجمیعی Word</button>'+'<button class="btn ghost sm" onclick="exportInspectionsSummary(\'pdf\')">📈 گزارش تجمیعی PDF</button>'; }
  if(M.fields&&canCreate(k))h+='<button class="btn ghost sm" onclick="exportBlankForm(\''+k+'\',\'word\')" title="فرم خالی برای چاپ و تکمیل دستی">📝 فرم خالی Word</button>';
  h+='</div></div><div class="mstats" id="mstats"></div>';
+  if(k==='inspections'||k==='emgEquip') h+=dueBoard(k);
  if(k==='unsafe')h+=unsafeStats();
  h+='<div class="card"><div class="tscroll"><table class="tbl"><thead><tr>'+M.cols.map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'<th>عملیات</th></tr></thead><tbody id="rows"></tbody></table></div></div>';
  $('#content').innerHTML=h;renderRows()}
@@ -3667,7 +3668,7 @@ function settingsPage(){curPage='settings';
   h+='<div class="card"><div class="sechead">👥 کاربران</div><div class="tscroll"><table class="tbl"><thead><tr><th>نام</th><th>سمت</th><th>واحد</th><th>نقش</th><th>نام کاربری</th><th>اقدام</th></tr></thead><tbody>'+db.personnel.map((p,i)=>'<tr><td>'+esc(p.name)+'</td><td>'+esc(p.job)+'</td><td>'+esc(p.area)+'</td><td>'+roleChip(p.role)+'</td><td>'+(p.u?'<span class="chip b-mut" style="direction:ltr">'+esc(p.u)+'</span>':'<small>بدون حساب</small>')+'</td><td>'+(me.role==='manager'?'<button class="ibtn" onclick="personForm('+i+')">✏️</button> <button class="ibtn" onclick="delPerson('+i+')">🗑️</button>':'—')+'</td></tr>').join('')+'</tbody></table></div>'+(me.role==='manager'?'<div style="margin-top:10px"><button class="btn pri sm" onclick="personForm(-1)">➕ شخص جدید</button></div>':'')+'</div>';
   h+='<div class="grid2"><div class="card"><div class="sechead">🏭 واحدها</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+db.areas.map((a,i)=>'<span class="chip b-info">'+esc(a)+(me.role==='manager'?' <span style="cursor:pointer" onclick="delArea('+i+')">✖</span>':'')+'</span>').join('')+'</div>'+(me.role==='manager'?'<div style="display:flex;gap:8px"><input id="newarea" class="in" style="max-width:240px" placeholder="نام واحد"><button class="btn pri sm" onclick="addArea()">افزودن</button></div>':'')+'</div>';
   h+='<div class="card"><div class="sechead">🏅 امتیازدهی</div>'+scoreRules().map(r=>'<div class="emgrow"><span>'+esc(r.label)+'</span><span class="chip '+(r.pts>0?'b-ok':'b-bad')+'">'+(r.pts>0?'+':'')+nd(r.pts)+'</span></div>').join('')+(me.role==='manager'?'<div style="margin-top:8px"><button class="btn ghost sm" onclick="scoresPage()">🏅 مدیریت</button></div>':'')+'</div></div>';
-  h+='<div class="card"><div class="sechead">📋 چک‌لیست‌ها</div><div class="tscroll"><table class="tbl"><thead><tr><th>عنوان</th><th>اقلام</th><th>دوره</th><th>اقدام</th></tr></thead><tbody>'+Object.keys(TPLS).map(tk=>'<tr><td>'+esc(TPLS[tk].t)+'</td><td>'+nd(TPLS[tk].items.length)+'</td><td>'+nd(TPLS[tk].period)+'</td><td><button class="ibtn" title="فرم خالی Word" onclick="exportBlankChecklist(\''+tk+'\',\'word\')">📄</button> '+(canManageTpl()?'<button class="ibtn" onclick="tplForm(\''+tk+'\')">✏️</button>'+(me.role==='manager'?' <button class="ibtn" onclick="delTpl(\''+tk+'\')">🗑️</button>':''):'—')+'</td></tr>').join('')+'</tbody></table></div>'+(canManageTpl()?'<div style="margin-top:10px"><button class="btn pri sm" onclick="tplForm()">➕ چک‌لیست جدید</button></div>':'')+'</div>';
+  h+='<div class="card"><div class="sechead">📋 چک‌لیست‌ها</div><div class="tscroll"><table class="tbl"><thead><tr><th>عنوان</th><th>اقلام</th><th>دوره</th><th>بازرسی بعدی</th><th>اقدام</th></tr></thead><tbody>'+Object.keys(TPLS).map(tk=>'<tr><td>'+esc(TPLS[tk].t)+'</td><td>'+nd(TPLS[tk].items.length)+'</td><td>'+nd(TPLS[tk].period)+'</td><td>'+dueNextCell(tk)+'</td><td><button class="ibtn" title="فرم خالی Word" onclick="exportBlankChecklist(\''+tk+'\',\'word\')">📄</button> '+(canManageTpl()?'<button class="ibtn" onclick="tplForm(\''+tk+'\')">✏️</button>'+(me.role==='manager'?' <button class="ibtn" onclick="delTpl(\''+tk+'\')">🗑️</button>':''):'—')+'</td></tr>').join('')+'</tbody></table></div>'+(canManageTpl()?'<div style="margin-top:10px"><button class="btn pri sm" onclick="tplForm()">➕ چک‌لیست جدید</button></div>':'')+'</div>';
   if(canManageTpl()){
    h+='<div class="card"><div class="sechead">🏭 چک‌لیست 5S</div><div style="display:flex;gap:8px;flex-wrap:wrap">';
    s5Keys().forEach(k=>{const t=s5Tpl()[k];h+='<span class="chip b-info">'+esc(t.num)+'. '+esc(t.name)+' ('+nd(t.items.length)+' قلم)</span>';});
@@ -3848,6 +3849,8 @@ function navBadge(k){
  if(k==='equipCert'&&canView('equipCert'))return (db.equipCert||[]).filter(r=>{const l=dLeft(r.nextD);return l!==null&&l<0}).length;
  if(k==='legalReport'&&canView('legalReport'))return (db.legalReport||[]).filter(r=>!['ارسال شد','تایید دریافت'].includes(r.status)).length;
  if(k==='loto'&&canView('loto'))return (db.loto||[]).filter(r=>r.status==='فعال (قفل شده)').length;
+  if(k==='inspections'&&canView('inspections'))return inspDueList(false).filter(x=>x.kind==='tpl'&&x.left<=0).length;
+  if(k==='emgEquip'&&canView('emgEquip'))return inspDueList(false).filter(x=>x.kind==='eq'&&x.left<=0).length;
  return 0}
 /* ---- شمارنده‌ی «موارد جدید» در هر ماژول ----
    هر رکورد با شناسه و وضعیتش امضا می‌شود. رکوردی که امضایش قبلاً دیده نشده
@@ -3876,6 +3879,58 @@ function newItemCount(k){
   if(!Array.isArray(st[k])){ st[k] = recs.map(recSig); seenSave(); return 0; }
   const seen = new Set(st[k]);
   return recs.filter(r => !seen.has(recSig(r)) && r.createdBy !== me.name).length;
+}
+
+/* ---- تاریخ بازرسی بعدی بر اساس دوره‌ی تعریف‌شده (روز) ---- */
+function jAddDays(s,n){
+  const g=jParse(s); if(!g) return '';
+  const d=new Date(g.gy,g.gm-1,g.gd+Number(n||0));
+  const j=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());
+  return j.jy+'/'+p2(j.jm)+'/'+p2(j.jd);
+}
+/* همه‌ی بازرسی‌های زمان‌بندی‌شده: چک‌لیست‌های عمومی + تجهیزات اضطراری
+   left = روز باقی‌مانده تا بازرسی بعدی (صفر یا منفی یعنی سررسید رسیده) */
+function inspDueList(includeNever){
+  const out=[];
+  if(!db) return out;
+  Object.keys(TPLS||{}).forEach(tk=>{
+    if(EMG_TPLS[tk]) return;
+    const per=+((TPLS[tk]||{}).period)||0; if(!per) return;
+    const last=(db.inspections||[]).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
+    if(!last){ if(includeNever) out.push({kind:'tpl',id:tk,label:TPLS[tk].t,last:'',next:'',left:null}); return; }
+    const next=jAddDays(last.date,per); const left=-jDaysAgo(next);
+    if(isFinite(left)) out.push({kind:'tpl',id:tk,label:TPLS[tk].t,last:last.date,next:next,left:left});
+  });
+  (db.emgEquip||[]).forEach(r=>{
+    if(!emgTplKey(r.item)) return;
+    const last=emgLastInsp(r);
+    if(!last){ if(includeNever) out.push({kind:'eq',id:r.id,label:r.item+' — '+(r.loc||'—'),last:'',next:'',left:null}); return; }
+    const next=jAddDays(last.date,emgPeriodDays(r)); const left=-jDaysAgo(next);
+    if(isFinite(left)) out.push({kind:'eq',id:r.id,label:r.item+' — '+(r.loc||'—'),last:last.date,next:next,left:left});
+  });
+  return out;
+}
+function dueChip(left){
+  if(left===null) return '<span class="chip b-mut">بدون بازرسی</span>';
+  if(left<0) return '<span class="chip b-bad">'+nd(-left)+' روز معوق</span>';
+  if(left===0) return '<span class="chip b-warn">امروز سررسید است</span>';
+  return '<span class="chip b-ok">'+nd(left)+' روز مانده</span>';
+}
+/* جدول بازرسی‌های بعدی بالای فهرست ماژول‌های بازرسی و تجهیزات اضطراری */
+function dueBoard(k){
+  const kind=k==='emgEquip'?'eq':'tpl';
+  const rows=inspDueList(true).filter(x=>x.kind===kind).sort((a,b)=>{
+    if(a.left===null) return 1; if(b.left===null) return -1; return a.left-b.left;});
+  if(!rows.length) return '';
+  return '<div class="card"><div class="sechead">📅 بازرسی‌های بعدی</div><div class="tscroll"><table class="tbl"><thead><tr><th>مورد</th><th>آخرین بازرسی</th><th>بازرسی بعدی</th><th>وضعیت</th></tr></thead><tbody>'
+    + rows.map(x=>'<tr><td>'+esc(x.label)+'</td><td>'+(x.last?esc(x.last):'—')+'</td><td>'+(x.next?esc(x.next):'—')+'</td><td>'+dueChip(x.left)+'</td></tr>').join('')
+    + '</tbody></table></div></div>';
+}
+function dueNextCell(tk){
+  const last=(db.inspections||[]).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
+  if(!last) return '<span class="chip b-mut">هنوز بازرسی نشده</span>';
+  const next=jAddDays(last.date,(TPLS[tk]||{}).period); const left=-jDaysAgo(next);
+  return esc(next)+' '+dueChip(isFinite(left)?left:null);
 }
 
 /* نشان اولویت اعلان: فوری = قرمز، مهم = نارنجی، عادی = آبی روشن */
@@ -3937,6 +3992,19 @@ function notifications(){
     .filter(r=>(r.prio==='فوری'||r.prio==='مهم') && jDaysAgo(r.date)<=14)
     .sort((a,b)=>((a.prio==='فوری'?0:1)-(b.prio==='فوری'?0:1)) || String(b.date).localeCompare(String(a.date)));
   out.unshift(...recentAnn.map(r=>({icon:'📢',kind:'announce',chip:r.prio==='فوری'?'b-bad':'b-warn',label:'اعلان '+r.prio,text:r.title,sub:(r.body||'').slice(0,70)+' — '+r.date,id:r.id})));
+ }
+ /* بازرسی‌هایی که امروز سررسید شده‌اند یا معوق مانده‌اند */
+ if(canView('inspections')||canView('emgEquip')){
+  const dueItems=[];
+  inspDueList(false).forEach(x=>{
+    if(x.left>0) return;
+    if(x.kind==='tpl'&&!canView('inspections')) return;
+    if(x.kind==='eq'&&!canView('emgEquip')) return;
+    dueItems.push({icon:x.kind==='tpl'?'📋':'🧯',kind:x.kind==='tpl'?'inspections':'emgEquip',chip:x.left<0?'b-bad':'b-warn',
+      label:x.left<0?'بازرسی '+nd(-x.left)+' روز معوق':'بازرسی امروز سررسید است',
+      text:x.label,sub:'آخرین بازرسی: '+x.last+' — بعدی: '+x.next,id:x.kind==='eq'?x.id:undefined});
+  });
+  out.unshift(...dueItems);
  }
  return out;
 }
@@ -4130,7 +4198,7 @@ function emgInspChip(r){
   if(!emgTplKey(r.item)) return '';
   const last=emgLastInsp(r);
   if(!last) return '<span class="chip b-mut">بدون بازرسی</span> ';
-  if(jDaysAgo(last.date)<emgPeriodDays(r)) return '<span class="chip b-ok" title="آخرین بازرسی">✔ بازرسی این دوره ثبت شده ('+esc(last.date)+')</span> ';
+  if(jDaysAgo(last.date)<emgPeriodDays(r)) return '<span class="chip b-ok" title="آخرین بازرسی">✔ ثبت شده — بعدی: '+esc(jAddDays(last.date,emgPeriodDays(r)))+'</span> ';
   return '<span class="chip b-warn" title="آخرین بازرسی">سررسید بازرسی ('+esc(last.date)+')</span> ';
 }
 function openEmgInspection(eqId){
@@ -6380,5 +6448,6 @@ document.addEventListener('keydown', function(e){
   sync();
 })();
 </script>
+<script>setInterval(function(){try{renderSidebar()}catch(e){}},30*60*1000);</script>
 </body>
 </html>
