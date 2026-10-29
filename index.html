@@ -1341,7 +1341,7 @@ function jParts(s){const a=String(s||'').split('/').map(Number);if(a.length!==3|
 function jDaysAgo(s){const g=jParse(s);if(!g)return Infinity;return Math.floor((Date.now()-new Date(g.gy,g.gm-1,g.gd).getTime())/864e5)}
 function isOverdue(s){const n=jDaysAgo(s);return isFinite(n)&&n>0}
 function jAddM(s,mo){const p=jParts(s);if(!p)return '';const m0=p.jm-1+Number(mo||0);const jy=p.jy+Math.floor(m0/12);const jm=((m0%12)+12)%12+1;const jd=Math.min(p.jd,jMonthLen(jy,jm));return jy+'/'+p2(jm)+'/'+p2(jd)}
-const mKey=s=>String(s||'').slice(0,4)+'-'+String(s||'').slice(5,7);
+const mKey=s=>{const p=jParts(s);return p?p.jy+'-'+p2(p.jm):String(s||'').slice(0,4)+'-'+String(s||'').slice(5,7)};
 function mBack(k,n){let y=+k.split('-')[0],m=+k.split('-')[1];m-=n;while(m<1){m+=12;y--}return y+'-'+p2(m)}
 const monthLabel=k=>JMONTHS[+k.split('-')[1]]+' '+k.split('-')[0];
 
@@ -1582,7 +1582,7 @@ function calcScores(mk){
           const person=db.personnel.find(p=>p.name===r.createdBy);
           if(!person || person.role!=='worker') return;
         }
-        if(rl.match&&rl.match.createdByPerson){ if(!me||r.createdBy!==me.name) return; }
+        /* createdByPerson: امتیاز همیشه به خود ثبت‌کننده تعلق می‌گیرد (نه به کاربر وارد‌شده) */
         if(r.createdBy) add(r.createdBy, rl.key, rl.pts);
       });
     } else if(rl.src==='tbm' || rl.src==='toolbox' || rl.src==='tbm+toolbox'){
@@ -1605,7 +1605,7 @@ function calcScores(mk){
           if(n>0) add(r.person, rl.key, rl.pts, n);
           return;
         }
-        if(rl.match&&rl.match.unsafeGt!==undefined && +r.unsafe<=+rl.match.unsafeGt) return;
+        if(rl.match&&rl.match.unsafeGt!==undefined && (+r.unsafe||0)<=+rl.match.unsafeGt) return;
         add(r.person, rl.key, rl.pts);
       });
     }
@@ -2705,7 +2705,7 @@ function ctrl(f,v){
   case 'tplsel':return '<select class="in" data-k="tpl"'+id+'><option value="">— انتخاب چک‌لیست —</option>'+Object.keys(TPLS).map(k=>'<option '+(v===k?'selected':'')+' value="'+k+'">'+TPLS[k].t+' (هر '+TPLS[k].period+' روز)</option>').join('')+'</select>';
   case 'chkl':{const sel=Array.isArray(v)?v:[];return '<div class="pbox" style="grid-template-columns:1fr 1fr;max-height:260px">'+opts(f).map((o,i)=>'<label><input type="checkbox" cki="'+f.k+'" value="'+esc(o)+'" '+(sel.includes(o)?'checked':'')+'> '+(i+1)+'. '+esc(o)+'</label>').join('')+'</div>';}
   case 'people':return '<div class="pbox">'+db.personnel.map(p=>'<label><input type="checkbox" ppi="'+f.k+'" value="'+esc(p.name)+'" '+((v||[]).includes(p.name)?'checked':'')+'> '+esc(p.name)+'</label>').join('')+'</div>';
-  case 'date':return '<input class="in jdate"'+id+' data-k="'+f.k+'" type="text" inputmode="numeric" value="'+esc(v)+'" placeholder="1404/08/12" autocomplete="off" onclick="openCal(this)" title="برای انتخاب از تقویم جلالی کلیک کنید">';
+  case 'date':return '<input class="in jdate"'+id+' data-k="'+f.k+'" type="text" inputmode="numeric" value="'+esc(v)+'" placeholder="1405/08/07" autocomplete="off" onclick="openCal(this)" title="برای انتخاب از تقویم جلالی کلیک کنید">';
   case 'num':return '<input class="in"'+id+' data-k="'+f.k+'" type="number" inputmode="decimal" step="any" value="'+esc(v)+'">';
   case 'time':return '<input class="in"'+id+' data-k="'+f.k+'" type="time" value="'+esc(v)+'">';
   default:return '<input class="in"'+id+' data-k="'+f.k+'" type="text" value="'+esc(v)+'" placeholder="'+esc(f.ph||'')+'">'}
@@ -2900,6 +2900,13 @@ function saveForm(k,id){
  }
  collectSignature(rec);
  if(ATT_MODS.includes(k)){ attSync(); rec.attSigs=(rec.people||[]).filter(n=>_attWork[n]&&_attWork[n].img).map(n=>({n:n,img:_attWork[n].img})); }
+ M.fields.filter(f=>f.t==='date').forEach(f=>{
+   const v=rec[f.k];
+   if(!v) return;
+   const pp=jParts(v);
+   if(pp) rec[f.k]=pp.jy+'/'+p2(pp.jm)+'/'+p2(pp.jd);
+   else bad=bad||(f.l+' (تاریخ معتبر وارد کنید)');
+ });
  if(bad){toast('⚠️ تکمیل الزامی است: '+bad);return}
 
  if(k==='actions'){
