@@ -630,7 +630,6 @@ select.in option,select option{background-color:var(--card);color:var(--ink)}
 </style>
 </head>
 <body>
-<body>
 
 <div id="login">
  <div class="lbox">
@@ -1108,6 +1107,7 @@ function cacheDb(){ if(window._viewOnly) return;
 let _base = {};   // آخرین وضعیت شناخته‌شدهٔ ابر برای ماژول‌های رکوردی: {ماژول:{id:json}}
 let _lastCloudNorm = null;
 let _missedRemote = false;
+let _baselineOk = false;   // آیا _base واقعاً نسخه‌ی ابر است؟ (اگر نه، پیش از ارسال باید ادغام شود)
 function _newId(p){ return p+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8).toUpperCase(); }
 function _recMap(m){
   const o={};
@@ -1172,6 +1172,40 @@ function _buildUpdatePayload(snapP, snapD){
   return {updates, cur};
 }
 
+/* اگر خواندن اولیهٔ ابر ناموفق بوده، _base خالی است و ارسال، همه‌ی رکوردهای محلی (حتی قدیمی) را
+   روی نسخه‌ی جدیدتر همکاران می‌نویسد. پیش از ارسال، ابر را می‌خوانیم و تغییرات محلی ثبت‌نشده را نگه می‌داریم. */
+async function _ensureBaseline(){
+  if(_baselineOk) return true;
+  let c;
+  try{ const snap = await dbRef.once('value'); c = snap.val(); }
+  catch(e){ return false; }
+  if(c){
+    const sc = sanitizeData(c);
+    RECORD_MODS.forEach(m=>{
+      const dirty = _dirtyRecs[m] || {};
+      const localArr = Array.isArray(db[m]) ? db[m] : [];
+      const cloudArr = Array.isArray(sc[m]) ? sc[m] : [];
+      const lMap = {}; localArr.forEach(r=>{ if(r && r.id) lMap[r.id]=r; });
+      const cMap = {}; cloudArr.forEach(r=>{ if(r && r.id) cMap[r.id]=r; });
+      const merged = [];
+      cloudArr.forEach(r=>{ if(!r || !r.id) return; merged.push((dirty[r.id] && lMap[r.id]) ? lMap[r.id] : r); });
+      localArr.forEach(r=>{ if(r && r.id && dirty[r.id] && !cMap[r.id]) merged.push(r); });
+      db[m] = merged;
+    });
+    Object.keys(sc).forEach(k=>{
+      if(RECORD_MODS.indexOf(k)>=0) return;
+      if(_pendingModules[k]) return;
+      db[k] = sc[k];
+    });
+    _base = _baseFrom(sc);
+    cacheDb();
+  } else {
+    _base = {};
+  }
+  _baselineOk = true;
+  return true;
+}
+
 async function _flushDelta(){
   if(_isSaving) return;
   if(!hasPendingChanges()) return;
@@ -1186,6 +1220,10 @@ async function _flushDelta(){
   const snapD = JSON.parse(JSON.stringify(_dirtyRecs));
   let cur={};
   try {
+    if(!_baselineOk){
+      const okBase = await _ensureBaseline();
+      if(!okBase) throw new Error('baseline unavailable');
+    }
     const built = _buildUpdatePayload(snapP, snapD);
     cur = built.cur;
     if(Object.keys(built.updates).length){
@@ -1302,13 +1340,13 @@ function jParse(s){const a=String(s||'').split('/').map(Number);if(a.length!==3|
 function jParts(s){const a=String(s||'').split('/').map(Number);if(a.length!==3||!a[0]||a[1]<1||a[1]>12||a[2]<1||a[2]>31)return null;return{jy:a[0],jm:a[1],jd:a[2]}}
 function jDaysAgo(s){const g=jParse(s);if(!g)return Infinity;return Math.floor((Date.now()-new Date(g.gy,g.gm-1,g.gd).getTime())/864e5)}
 function isOverdue(s){const n=jDaysAgo(s);return isFinite(n)&&n>0}
-function jAddM(s,mo){const g=jParse(s);if(!g)return '';const d=new Date(g.gy,g.gm-1+Number(mo||0),g.gd);const j=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());return j.jy+'/'+p2(j.jm)+'/'+p2(j.jd)}
+function jAddM(s,mo){const p=jParts(s);if(!p)return '';const m0=p.jm-1+Number(mo||0);const jy=p.jy+Math.floor(m0/12);const jm=((m0%12)+12)%12+1;const jd=Math.min(p.jd,jMonthLen(jy,jm));return jy+'/'+p2(jm)+'/'+p2(jd)}
 const mKey=s=>String(s||'').slice(0,4)+'-'+String(s||'').slice(5,7);
 function mBack(k,n){let y=+k.split('-')[0],m=+k.split('-')[1];m-=n;while(m<1){m+=12;y--}return y+'-'+p2(m)}
 const monthLabel=k=>JMONTHS[+k.split('-')[1]]+' '+k.split('-')[0];
 
 /* ---------- تقویم جلالی ---------- */
-let calEl=null,calInput=null,calJy=1404,calJm=1;
+let calEl=null,calInput=null,calJy=(jParts(todayJ())||{jy:1405}).jy,calJm=1;
 function jMonthLen(jy,jm){if(jm<=6)return 31;if(jm<=11)return 30;const a=j2g(jy,12,1),b=j2g(jy+1,1,1);return Math.round((new Date(b.gy,b.gm-1,b.gd)-new Date(a.gy,a.gm-1,a.gd))/864e5)}
 function closeCal(){if(calEl){calEl.remove();calEl=null;calInput=null}}
 function calRepos(){
@@ -1328,7 +1366,7 @@ function calRepos(){
 function openCal(inp){
  if(calInput===inp&&calEl){closeCal();return}
  closeCal();calInput=inp;
- const cur=jParts(inp.value)||jParts(todayJ())||{jy:1404,jm:1};
+ const cur=jParts(inp.value)||jParts(todayJ());
  if(!cur){calInput=null;return}
  calJy=cur.jy;calJm=cur.jm;
  calEl=document.createElement('div');calEl.className='calpop';document.body.appendChild(calEl);
@@ -2802,7 +2840,7 @@ function saveForm(k,id){
   if(isNew&&APPR_MODS.includes(k)) rec.appr=apprInit(me.role);
   else if(!isNew&&APPR_MODS.includes(k)&&me.role!=='manager'&&(!rec.appr||rec.appr.stage==='rejected'||rec.appr.stage==='approved')) rec.appr=apprInit(roleOfName(rec.createdBy));
 
- if(k==='incidents' && me.role==='worker') { rec.type='شبه‌حادثه (Near Miss)'; }
+ if(k==='incidents' && me.role==='worker' && isNew) { rec.type='شبه‌حادثه (Near Miss)'; }
 
  let bad=null;
  $$('#mbody [data-k]').forEach(el=>{
@@ -2881,6 +2919,7 @@ function saveForm(k,id){
    rec.log.push({u:me.name,d:todayJ(),t:'ثبت اولیه'});
    db[k].push(rec);
  } else {
+   if(!Array.isArray(rec.log)) rec.log=[];
    rec.log.push({u:me.name,d:todayJ(),t:'ویرایش'});
    const ix=db[k].findIndex(x=>x.id===rec.id);
    if(ix>=0) db[k][ix]=rec; else db[k].push(rec);
@@ -5545,6 +5584,7 @@ function applyCloud(cloud){
     _isApplyingRemote = true;
     db = sc;
     _base = _baseFrom(sc);
+    _baselineOk = true;
     TPLS = db.tpls || defaultTPLS();
     S5 = db.s5_tpls || defaultS5TPLS();
     cacheDb();
@@ -5584,7 +5624,7 @@ dbRef.on('value', (snapshot) => {
  try{
   const snapshot = await dbRef.once('value');
   const data = snapshot.val();
-  readOk = true; cloudRaw = data;
+  readOk = true; cloudRaw = data; _baselineOk = true;
   if(data){ const sc = sanitizeData(data); _lastCloudNorm = stableJson(sc); _base = _baseFrom(sc); }
   if(data && data.personnel){
     db = sanitizeData(data); loaded = true;
