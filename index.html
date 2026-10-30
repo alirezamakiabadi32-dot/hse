@@ -4036,36 +4036,45 @@ function delTpl(tk){
  })}
 
 /* ---------- تنظیمات ---------- */
+function cfgSec(title,body,open){
+ return '<details class="card" '+(open?'open':'')+' style="padding:0;overflow:hidden"><summary style="list-style:none;cursor:pointer;padding:12px 16px;font-weight:700;font-size:13.5px;display:flex;justify-content:space-between;align-items:center;user-select:none">'+title+'<span style="color:var(--mut);font-size:11px">▾</span></summary><div style="padding:0 16px 14px">'+body+'</div></details>';
+}
 function settingsPage(){curPage='settings';
  try{
+  const mg=me.role==='manager';
   let h='<div class="ptitle"><h2>⚙️ تنظیمات</h2></div>';
-  if(me.role==='manager'){
-    h+='<div class="card" style="background:linear-gradient(120deg,#fee2e2,#fff7ed);border-color:#fecaca"><div class="sechead">🔐 کنترل دسترسی‌ها</div><div style="font-size:12.5px;line-height:2">تعیین دسترسی هر نقش به هر ماژول.</div><div style="margin-top:10px"><button class="btn pri" onclick="permsPage()">🔐 ورود به صفحه کنترل دسترسی</button></div></div>';
+  if(mg){
+    h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;background:#fff7ed;border-color:#fed7aa;margin-bottom:10px"><div><b style="font-size:13px">🔐 کنترل دسترسی‌ها</b><div style="font-size:12px;color:var(--mut)">تعیین دسترسی هر نقش به هر ماژول</div></div><button class="btn pri sm" onclick="permsPage()">ورود</button></div>';
   }
-  h+='<div class="card"><div class="sechead">👥 کاربران</div><div class="tscroll"><table class="tbl"><thead><tr><th>نام</th><th>سمت</th><th>واحد</th><th>نقش</th><th>نام کاربری</th><th>اقدام</th></tr></thead><tbody>'+db.personnel.map((p,i)=>'<tr><td>'+esc(p.name)+'</td><td>'+esc(p.job)+'</td><td>'+esc(p.area)+'</td><td>'+roleChip(p.role)+'</td><td>'+(p.u?'<span class="chip b-mut" style="direction:ltr">'+esc(p.u)+'</span>':'<small>بدون حساب</small>')+'</td><td>'+(me.role==='manager'?'<button class="ibtn" onclick="personForm('+i+')">✏️</button> <button class="ibtn" onclick="delPerson('+i+')">🗑️</button>':'—')+'</td></tr>').join('')+'</tbody></table></div>'+(me.role==='manager'?'<div style="margin-top:10px"><button class="btn pri sm" onclick="personForm(-1)">➕ شخص جدید</button></div>':'')+'</div>';
-  h+='<div class="grid2"><div class="card"><div class="sechead">🏭 واحدها</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+db.areas.map((a,i)=>'<span class="chip b-info">'+esc(a)+(me.role==='manager'?' <span style="cursor:pointer" onclick="delArea('+i+')">✖</span>':'')+'</span>').join('')+'</div>'+(me.role==='manager'?'<div style="display:flex;gap:8px"><input id="newarea" class="in" style="max-width:240px" placeholder="نام واحد"><button class="btn pri sm" onclick="addArea()">افزودن</button></div>':'')+'</div>';
-  h+='<div class="card"><div class="sechead">🏅 امتیازدهی</div>'+scoreRules().map(r=>'<div class="emgrow"><span>'+esc(r.label)+'</span><span class="chip '+(r.pts>0?'b-ok':'b-bad')+'">'+(r.pts>0?'+':'')+nd(r.pts)+'</span></div>').join('')+(me.role==='manager'?'<div style="margin-top:8px"><button class="btn ghost sm" onclick="scoresPage()">🏅 مدیریت</button></div>':'')+'</div></div>';
-  h+='<div class="card"><div class="sechead">📋 چک‌لیست‌ها</div><div class="tscroll"><table class="tbl"><thead><tr><th>عنوان</th><th>اقلام</th><th>دوره</th><th>بازرسی بعدی</th><th>اقدام</th></tr></thead><tbody>'+Object.keys(TPLS).map(tk=>'<tr><td>'+esc(TPLS[tk].t)+'</td><td>'+nd(TPLS[tk].items.length)+'</td><td>'+nd(TPLS[tk].period)+'</td><td>'+dueNextCell(tk)+'</td><td><button class="ibtn" title="فرم خالی Word" onclick="exportBlankChecklist(\''+tk+'\',\'word\')">📄</button> '+(canManageTpl()?'<button class="ibtn" onclick="tplForm(\''+tk+'\')">✏️</button>'+(me.role==='manager'?' <button class="ibtn" onclick="delTpl(\''+tk+'\')">🗑️</button>':''):'—')+'</td></tr>').join('')+'</tbody></table></div>'+(canManageTpl()?'<div style="margin-top:10px"><button class="btn pri sm" onclick="tplForm()">➕ چک‌لیست جدید</button></div>':'')+'</div>';
+  let users='<div class="tscroll"><table class="tbl"><thead><tr><th>نام</th><th>سمت</th><th>واحد</th><th>نقش</th><th>نام کاربری</th><th>اقدام</th></tr></thead><tbody>'+db.personnel.map((p,i)=>'<tr><td>'+esc(p.name)+'</td><td>'+esc(p.job)+'</td><td>'+esc(p.area)+'</td><td>'+roleChip(p.role)+'</td><td>'+(p.u?'<span class="chip b-mut" style="direction:ltr">'+esc(p.u)+'</span>':'<small>بدون حساب</small>')+'</td><td>'+(mg?'<button class="ibtn" onclick="personForm('+i+')">✏️</button> <button class="ibtn" onclick="delPerson('+i+')">🗑️</button>':'—')+'</td></tr>').join('')+'</tbody></table></div>'+(mg?'<div style="margin-top:10px"><button class="btn pri sm" onclick="personForm(-1)">➕ شخص جدید</button></div>':'');
+  h+=cfgSec('👥 کاربران ('+nd(db.personnel.length)+')',users,true);
+  let areas='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+db.areas.map((a,i)=>'<span class="chip b-info">'+esc(a)+(mg?' <span style="cursor:pointer" onclick="delArea('+i+')">✖</span>':'')+'</span>').join('')+'</div>'+(mg?'<div style="display:flex;gap:8px"><input id="newarea" class="in" style="max-width:240px" placeholder="نام واحد"><button class="btn pri sm" onclick="addArea()">افزودن</button></div>':'');
+  let score=scoreRules().map(r=>'<div class="emgrow"><span>'+esc(r.label)+'</span><span class="chip '+(r.pts>0?'b-ok':'b-bad')+'">'+(r.pts>0?'+':'')+nd(r.pts)+'</span></div>').join('')+(mg?'<div style="margin-top:8px"><button class="btn ghost sm" onclick="scoresPage()">🏅 مدیریت</button></div>':'');
+  h+='<div class="grid2">'+cfgSec('🏭 واحدها ('+nd(db.areas.length)+')',areas,false)+cfgSec('🏅 امتیازدهی',score,false)+'</div>';
+  let tpl='<div class="tscroll"><table class="tbl"><thead><tr><th>عنوان</th><th>اقلام</th><th>دوره</th><th>بازرسی بعدی</th><th>اقدام</th></tr></thead><tbody>'+Object.keys(TPLS).map(tk=>'<tr><td>'+esc(TPLS[tk].t)+'</td><td>'+nd(TPLS[tk].items.length)+'</td><td>'+nd(TPLS[tk].period)+'</td><td>'+dueNextCell(tk)+'</td><td><button class="ibtn" title="فرم خالی Word" onclick="exportBlankChecklist(\''+tk+'\',\'word\')">📄</button> '+(canManageTpl()?'<button class="ibtn" onclick="tplForm(\''+tk+'\')">✏️</button>'+(mg?' <button class="ibtn" onclick="delTpl(\''+tk+'\')">🗑️</button>':''):'—')+'</td></tr>').join('')+'</tbody></table></div>'+(canManageTpl()?'<div style="margin-top:10px"><button class="btn pri sm" onclick="tplForm()">➕ چک‌لیست جدید</button></div>':'');
+  h+=cfgSec('📋 چک‌لیست‌ها ('+nd(Object.keys(TPLS).length)+')',tpl,false);
   if(canManageTpl()){
-   h+='<div class="card"><div class="sechead">🏭 چک‌لیست 5S</div><div style="display:flex;gap:8px;flex-wrap:wrap">';
-   s5Keys().forEach(k=>{const t=s5Tpl()[k];h+='<span class="chip b-info">'+esc(t.num)+'. '+esc(t.name)+' ('+nd(t.items.length)+' قلم)</span>';});
-   h+='</div><div style="margin-top:10px"><button class="btn pri sm" onclick="s5TplForm()">✏️ ویرایش چک‌لیست 5S</button></div></div>';
+   let s5='<div style="display:flex;gap:8px;flex-wrap:wrap">';
+   s5Keys().forEach(k=>{const t=s5Tpl()[k];s5+='<span class="chip b-info">'+esc(t.num)+'. '+esc(t.name)+' ('+nd(t.items.length)+' قلم)</span>';});
+   s5+='</div><div style="margin-top:10px"><button class="btn pri sm" onclick="s5TplForm()">✏️ ویرایش چک‌لیست 5S</button></div>';
+   h+=cfgSec('🏭 چک‌لیست 5S',s5,false);
   }
   if(canManageLists()){
-   h+='<div class="card"><div class="sechead">📚 لیست‌های پویا</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">';
+   let lists='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">';
    Object.keys(DEFAULT_LISTS).forEach(lk=>{
     const items=L(lk);
-    h+='<div style="border:1px solid var(--line);border-radius:10px;padding:10px;background:#f8fafc"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:12.5px;color:var(--pri2)">'+esc(lk)+' ('+nd(items.length)+')</b><button class="btn ghost sm" onclick="quickAddToList(\''+lk+'\')" style="padding:2px 8px;font-size:11px">➕</button></div><div style="display:flex;flex-wrap:wrap;gap:4px;max-height:110px;overflow:auto">'+items.map(it=>'<span class="chip b-info" style="font-size:10.5px">'+esc(it)+' <span style="cursor:pointer;font-weight:700" onclick="askDelListItem(\''+lk+'\',\''+encodeURIComponent(it).replace(/'/g,'%27')+'\')">✖</span></span>').join('')+'</div></div>';
+    lists+='<div style="border:1px solid var(--line);border-radius:10px;padding:10px;background:#f8fafc"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:12.5px;color:var(--pri2)">'+esc(lk)+' ('+nd(items.length)+')</b><button class="btn ghost sm" onclick="quickAddToList(\''+lk+'\')" style="padding:2px 8px;font-size:11px">➕</button></div><div style="display:flex;flex-wrap:wrap;gap:4px;max-height:110px;overflow:auto">'+items.map(it=>'<span class="chip b-info" style="font-size:10.5px">'+esc(it)+' <span style="cursor:pointer;font-weight:700" onclick="askDelListItem(\''+lk+'\',\''+encodeURIComponent(it).replace(/'/g,'%27')+'\')">✖</span></span>').join('')+'</div></div>';
    });
-   h+='</div></div>';
+   lists+='</div>';
+   h+=cfgSec('📚 لیست‌های پویا',lists,false);
   }
-  h+='<div class="card"><div class="sechead">💾 پشتیبان‌گیری</div><div style="display:flex;gap:8px;flex-wrap:wrap">'
-  +'<button class="btn pri" onclick="doExport()">⬇️ دانلود پشتیبان</button>'
-  +'<button class="btn ghost" onclick="showBackupText()">📋 کپی</button>'
-  +'<label class="btn ghost" style="cursor:pointer">⬆️ بازیابی از فایل<input type="file" accept=".json" style="display:none" onchange="doImport(this)"></label>'
-  +'<button class="btn ghost" onclick="importPaste()">📥 چسباندن</button>'
-  +'<button class="btn ghost" onclick="diag()">🔍 بررسی سلامت</button>'
-  +(me.role==='manager'?'<button class="btn danger" onclick="doReset()">♻️ بازنشانی</button>':'')+'</div></div>';
+  h+='<div class="card" style="margin-top:4px;padding:12px 16px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:13.5px">💾 پشتیبان‌گیری</b><div style="display:flex;gap:6px;flex-wrap:wrap">'
+  +'<button class="btn pri sm" onclick="doExport()">⬇️ دانلود</button>'
+  +'<button class="btn ghost sm" onclick="showBackupText()">📋 کپی</button>'
+  +'<label class="btn ghost sm" style="cursor:pointer">⬆️ بازیابی<input type="file" accept=".json" style="display:none" onchange="doImport(this)"></label>'
+  +'<button class="btn ghost sm" onclick="importPaste()">📥 چسباندن</button>'
+  +'<button class="btn ghost sm" onclick="diag()">🔍 بررسی سلامت</button>'
+  +(mg?'<button class="btn danger sm" onclick="doReset()">♻️ بازنشانی</button>':'')+'</div></div></div>';
   $('#content').innerHTML=h;
  }catch(e){
   $('#content').innerHTML='<div class="card" style="border-color:#fecaca"><div class="sechead">⚠️ خطا</div><div>'+esc(e.message)+'</div></div>';
