@@ -641,6 +641,62 @@ select.in option,select option{background-color:var(--card);color:var(--ink)}
  .side-user{display:flex}
  #topbar .uchip{display:none!important}
 }
+
+/* ===== موبایل — تنظیم یکسان همه‌ی ماژول‌ها ===== */
+@media(max-width:640px){
+ /* شبکه‌ها و فرم‌ها: یک ستونه (و کارت‌های KPI دو ستونه) */
+ .grid2,.grid3,.fgrid,.dgrid,.pbox{grid-template-columns:1fr!important}
+ .grid4{grid-template-columns:1fr 1fr!important}
+ .grid4 .kpi,.grid4 .kpi-box{min-width:0}
+ div[style*="grid-template-columns"]:not(.perm-row){grid-template-columns:1fr!important}
+ .grid2[style],.grid3[style],.grid4[style]{gap:10px}
+
+ /* سربرگ هر صفحه و نوار ابزار: عمودی */
+ .ptitle{flex-direction:column;align-items:stretch;gap:8px}
+ .ptitle h2{font-size:15px;line-height:1.7}
+ .ptitle .toolbar{margin:0;width:100%}
+ .toolbar{flex-direction:column;align-items:stretch;gap:8px}
+ .toolbar .in,.toolbar select.in,.toolbar input.in,.toolbar .in.sm{width:100%!important;min-width:0!important}
+ .toolbar .btn{width:100%;justify-content:center}
+ .toolbar .btn.ghost.sm,.toolbar .btn.sm{width:auto}
+ .toolbar>.btn.sm{display:inline-flex}
+ .mstats{font-size:11.5px;line-height:1.8}
+
+ /* دکمه‌ها و هدف لمسی مناسب */
+ .btn{min-height:38px}
+ .btn.sm{min-height:34px}
+ .ibtn{min-width:34px;min-height:34px}
+ .chip{white-space:normal;line-height:1.7}
+ .sechead{flex-wrap:wrap}
+
+ /* صفحه‌بندی */
+ .pgbar{flex-direction:column;align-items:center;text-align:center}
+ .pgbtns{justify-content:center}
+ .pgbtns .btn{min-width:34px}
+
+ /* جدول‌ها: کارت‌وار (همه‌ی جدول‌های دارای سرستون) */
+ .tbl.mcards thead{display:none}
+ .tbl.mcards,.tbl.mcards tbody{display:block;width:100%}
+ .tbl.mcards tr{display:block;border:1px solid var(--line);border-radius:12px;background:var(--card);margin-bottom:10px;padding:6px 10px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+ .tbl.mcards td{display:flex;justify-content:space-between;align-items:center;gap:10px;border:0;padding:5px 0;text-align:right;white-space:normal;word-break:break-word}
+ .tbl.mcards td::before{content:attr(data-l);color:var(--mut);font-size:12px;flex-shrink:0;max-width:45%}
+ .tbl.mcards td[colspan],.tbl.mcards td:not([data-l]){display:block;text-align:center}
+ .tbl.mcards td[colspan]::before,.tbl.mcards td:not([data-l])::before{content:none}
+ /* جدول‌های کلید-مقدار بدون سرستون */
+ .tbl.mkv,.tbl.mkv tbody{display:block;width:100%}
+ .tbl.mkv tr{display:block;border-bottom:1px dashed var(--line);padding:6px 2px}
+ .tbl.mkv td{display:block;border:0;padding:3px 0;white-space:normal;word-break:break-word}
+ .tbl.mkv td:first-child{color:var(--mut);font-size:12px}
+
+ /* نمودارها و نوارها */
+ .hbars .hl{width:86px}
+ .hbars b{min-width:0}
+ .list-row{flex-wrap:wrap}
+ .list-row .lt{white-space:normal}
+ .emgrow{flex-wrap:wrap;gap:6px}
+ .mx td,.mx th{width:44px}
+ svg{max-width:100%;height:auto}
+}
 </style>
 </head>
 <body>
@@ -1591,6 +1647,8 @@ function calcScores(mk){
     if(rl.src==='incidents'){
       db.incidents.forEach(r=>{
         if(mKey(r.date||r.createdJ)!==mk) return;
+        /* فقط موارد «ثبت نهایی» امتیاز می‌گیرند (در انتظار تایید یا برگشت‌خورده امتیاز ندارند) */
+        if(!apprOK(r)) return;
         if(rl.match&&rl.match.typeContains && String(r.type||'').indexOf(rl.match.typeContains)<0) return;
         if(rl.match&&rl.match.createdByWorker){
           const person=db.personnel.find(p=>p.name===r.createdBy);
@@ -7104,6 +7162,34 @@ document.addEventListener('keydown', function(e){
     }catch(e){ console.warn('اتصال بازرسی‌های قدیمی:', e); }
   }
   const iv=setInterval(function(){ if(db && db.inspections && me){ clearInterval(iv); run(); } },1000);
+})();
+</script>
+
+<script>
+/* موبایل: هر جدول دارای سرستون، به نمای کارتی تبدیل می‌شود (برچسب ستون‌ها از سرستون خوانده می‌شود) */
+(function(){
+  function tag(){
+    document.querySelectorAll('table.tbl').forEach(function(t){
+      const ths=t.querySelectorAll('thead th');
+      if(!ths.length){ t.classList.add('mkv'); t.dataset.mobTagged='1'; return; }
+      t.classList.add('mcards');
+      const labels=[].map.call(ths,function(th){return th.textContent.trim()});
+      t.querySelectorAll('tbody tr').forEach(function(tr){
+        [].forEach.call(tr.children,function(td,i){
+          if(td.hasAttribute('colspan')) return;
+          const l=labels[i]||'';
+          if(td.getAttribute('data-l')!==l) td.setAttribute('data-l',l);
+        });
+      });
+      t.dataset.mobTagged='1';
+    });
+  }
+  let q=false;
+  new MutationObserver(function(){
+    if(q) return; q=true;
+    requestAnimationFrame(function(){ q=false; tag(); });
+  }).observe(document.body,{childList:true,subtree:true});
+  tag();
 })();
 </script>
 </body>
