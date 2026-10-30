@@ -2586,7 +2586,7 @@ function buildModuleReport(k){
   if(!M) return '<p>ماژول یافت نشد.</p>';
   const rows=(db[k]||[]).slice().sort((a,b)=>String(b.date||b.createdJ||'').localeCompare(String(a.date||a.createdJ||'')));
   if(!rows.length) return '<p style="color:#999">موردی ثبت نشده است.</p>';
-  let h='<table><thead><tr>'+M.cols.map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'</tr></thead><tbody>';
+  let h='<table><thead><tr>'+colsOf(k).map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'</tr></thead><tbody>';
   rows.forEach(r=>{
     h+='<tr>'+M.cols.map(c=>'<td>'+(stripHtml(fmtCell(k,r,c))||'—')+'</td>').join('')+(M.status?'<td>'+(r.status||'—')+'</td>':'')+'</tr>';
   });
@@ -2656,6 +2656,7 @@ function exportRecord(k,id,format){
   h+='<table><tbody>';
   M.fields.forEach(f=>{
     if(f.gate&&!f.gate.includes(me.role)) return;
+    if(incWorkerHidden(k,f)) return;
     const v=r[f.k];
     if(v===undefined||v===''||v===null) return;
     let out;
@@ -2815,7 +2816,7 @@ function renderRows(){
  rows.sort((a,b)=>String(b.date||b.createdJ||'').localeCompare(String(a.date||a.createdJ||'')));
  const dbw=$('#dueBoardWrap');if(dbw&&(k==='inspections'||k==='emgEquip')){const nh=dueBoard(k);if(dbw.dataset.h!==nh){dbw.innerHTML=nh;dbw.dataset.h=nh}}
  const tb=$('#rows');if(!tb)return;
- const ncols=M.cols.length+(M.status?1:0)+1;
+ const ncols=colsOf(k).length+(M.status?1:0)+1;
  /* صفحه‌بندی: با تغییر ماژول/جستجو/فیلتر به صفحهٔ ۱ برمی‌گردد؛ بعد از ویرایش/حذف همان صفحه می‌ماند */
  const sig=k+'|'+q+'|'+sf+'|'+(riskFilter?riskFilter.s+','+riskFilter.p:'');
  if(_pgState.tb!==tb||_pgState.sig!==sig){_pgState.tb=tb;_pgState.sig=sig;_pgState.page=1}
@@ -2824,7 +2825,7 @@ function renderRows(){
  const pStart=(_pgState.page-1)*PG_SIZE;
  const pageRows=rows.slice(pStart,pStart+PG_SIZE);
  tb.innerHTML=rows.length?pageRows.map(r=>{
-  let tds=M.cols.map(c=>'<td data-l="'+esc(colLabel(k,c))+'">'+fmtCell(k,r,c)+'</td>').join('');
+  let tds=colsOf(k).map(c=>'<td data-l="'+esc(colLabel(k,c))+'">'+fmtCell(k,r,c)+'</td>').join('');
   if(M.status)tds+='<td data-l="وضعیت">'+(r.status?chip(r.status):'—')+'</td>';
   let ops='';
   if(k==='emgEquip'&&emgTplKey(r.item)&&can('inspections','create'))ops+='<button class="ibtn" title="بازرسی (چک‌لیست همین تجهیز)" onclick="event.stopPropagation();openEmgInspection(\''+r.id+'\')">📋</button>';
@@ -2861,7 +2862,7 @@ function modPage(k){curPage=k;const M=MODS[k];
  h+='</div></div><div class="mstats" id="mstats"></div>';
   if(k==='inspections'||k==='emgEquip') h+='<div id="dueBoardWrap">'+dueBoard(k)+'</div>';
  if(k==='unsafe')h+=unsafeStats();
- h+='<div class="card"><div class="tscroll"><table class="tbl mcards"><thead><tr>'+M.cols.map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'<th>عملیات</th></tr></thead><tbody id="rows"></tbody></table></div></div>';
+ h+='<div class="card"><div class="tscroll"><table class="tbl mcards"><thead><tr>'+colsOf(k).map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'<th>عملیات</th></tr></thead><tbody id="rows"></tbody></table></div></div>';
  $('#content').innerHTML=h;renderRows()}
 
 /* ---------- فرم ---------- */
@@ -2937,6 +2938,17 @@ function drawJsaSteps(){
 function addJsaStep(){ saveJsaValuesFromDom(); _jsaSteps.push({step:'',hazard:'',ctrl:'',risk:'کم'}); drawJsaSteps(); }
 function delJsaStep(i){ saveJsaValuesFromDom(); if(_jsaSteps.length<=1){ toast('حداقل یک مرحله الزامی است'); return; } _jsaSteps.splice(i,1); drawJsaSteps(); }
 
+/* پرسنل اجرایی: در حوادث/شبه‌حادثه فقط فیلدهای تا «شرح کامل» را می‌بیند؛ بقیه (تکمیل‌شده توسط کارشناس/مدیر) پنهان است */
+function incWorkerHidden(k,f){
+  if(k!=='incidents'||!me||me.role!=='worker'||!f) return false;
+  const F=MODS.incidents.fields;
+  return F.indexOf(f) > F.findIndex(x=>x.k==='desc');
+}
+function colsOf(k){
+  const c=MODS[k].cols;
+  if(k==='incidents'&&me&&me.role==='worker') return c.filter(x=>x!=='injured'&&x!=='hasAnalysis');
+  return c;
+}
 function openForm(k,id,pre){
  const M=MODS[k];const rec=id?db[k].find(r=>r.id===id):null;
  if(id&&!canEdit(k,rec)){toast('اجازه ویرایش این مورد را ندارید');return}
@@ -2946,7 +2958,7 @@ function openForm(k,id,pre){
  window._openKey=k+'/'+(id||'');window._openRev=rec?(rec._rev||''):'';
  window._emgEqId=(k==='inspections'&&!id&&pre&&pre._eqId)?pre._eqId:null;
  let b='<div class="fgrid">';
- M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;
+ M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;if(incWorkerHidden(k,f))return;
   const v=rec?rec[f.k]:(pre&&pre[f.k]!==undefined?pre[f.k]:(f.def!==undefined?(typeof f.def==='function'?f.def():f.def):''));
   if(f.t==='hdr'){b+='<div class="ff wide" style="font-weight:700;color:var(--pri2);border-bottom:1px dashed var(--line);padding:6px 0 4px;margin-top:6px">'+f.l+'</div>';return}
   if(f.t==='chk'){b+='<div class="ff wide"><label class="ck"><input type="checkbox" data-k="'+f.k+'" '+(v?'checked':'')+'><span>'+f.l+'</span></label></div>';return}
@@ -2958,7 +2970,7 @@ function openForm(k,id,pre){
      setTimeout(()=>{ const el=$('#f_type'); if(el) el.value='شبه‌حادثه (Near Miss)'; },30);
    }
    if(me.role==='worker'){ _anaTab='fishbone'; }
-   b+='<div class="ff wide" style="margin-top:12px;grid-column:1/-1"><label>🔬 تحلیل حادثه</label>'+drawAnalysisArea(rec?rec.analyses:null)+'</div>';
+   else b+='<div class="ff wide" style="margin-top:12px;grid-column:1/-1"><label>🔬 تحلیل حادثه</label>'+drawAnalysisArea(rec?rec.analyses:null)+'</div>';
  }
  if(k==='jsa'){
    b+='<div class="ff wide" style="margin-top:12px;grid-column:1/-1"><label>🔧 مراحل شغلی و خطرات <i>*</i></label><div id="jsaStepsList"></div><button type="button" class="btn ghost sm" style="margin-top:8px" onclick="addJsaStep()">➕ افزودن مرحله</button></div>';
@@ -3062,7 +3074,7 @@ function saveForm(k,id){
    else if(cv.dataset.cleared==='1') delete rec.psigs[sk];
  }); }
  if(M.fields.some(f=>f.t==='chkl')) M.fields.filter(f=>f.t==='chkl').forEach(f=>{ rec[f.k]=$$('#mbody input[cki="'+f.k+'"]:checked').map(c=>c.value); });
- if(k==='incidents'){ rec.analyses=collectAnalyses(); }
+ if(k==='incidents' && me.role!=='worker'){ rec.analyses=collectAnalyses(); }
  if(k==='unsafe'){
    if(window._phData!==undefined)rec.photo=window._phData;
    window._phData=undefined;
@@ -3552,7 +3564,7 @@ function renderMethodTab(k){
  h+='<button class="btn ghost sm" onclick="exportModuleTable(\''+k+'\',\'print\')">🖨️ چاپ</button>';
  h+='</div>';
  h+='<div class="mstats" id="mstats"></div>';
- h+='<div class="card"><div class="tscroll"><table class="tbl mcards"><thead><tr>'+M.cols.map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'<th>عملیات</th></tr></thead><tbody id="rows"></tbody></table></div></div>';
+ h+='<div class="card"><div class="tscroll"><table class="tbl mcards"><thead><tr>'+colsOf(k).map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'<th>عملیات</th></tr></thead><tbody id="rows"></tbody></table></div></div>';
  $('#riskBody').innerHTML=h;
  renderRows();
 }
@@ -4287,8 +4299,9 @@ function apprBoxHTML(k,r){
   if(!APPR_MODS.includes(k)||!r.appr) return '';
   const a=r.appr;
   let h='<div class="card" style="margin-top:12px;background:var(--surf)"><div class="sechead">✍️ مسیر تایید — '+apprLabel(a)+'</div>';
-  if((a.hist||[]).length){
-    h+=(a.hist||[]).map(x=>'<div class="emgrow"><span>'+esc(x.n)+' ('+roleName(x.r)+')</span><span>'+(x.a==='approve'?'✔ تایید':'✖ رد')+' — '+esc(x.d)+(x.reason?' — '+esc(x.reason):'')+'</span></div>').join('');
+  const histVis=(a.hist||[]).filter(x=>!(k==='incidents'&&me.role==='worker')||x.a==='reject');
+  if(histVis.length){
+    h+=histVis.map(x=>'<div class="emgrow"><span>'+esc(x.n)+' ('+roleName(x.r)+')</span><span>'+(x.a==='approve'?'✔ تایید':'✖ رد')+' — '+esc(x.d)+(x.reason?' — '+esc(x.reason):'')+'</span></div>').join('');
   }
   if(apprCanAct(r)){
     h+='<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri sm" onclick="apprAct(\''+k+'\',\''+r.id+'\',\'approve\')">✅ تایید</button><button class="btn danger sm" onclick="apprAct(\''+k+'\',\''+r.id+'\',\'reject\')">✖ رد با ذکر دلیل</button></div>';
@@ -5001,13 +5014,13 @@ function openDetail(k,id){
  if(!canView(k)){toast('اجازه مشاهده این بخش را ندارید');return}
  if(!isOwnRecord(k,r)){toast('فقط اطلاعات مربوط به خودتان قابل مشاهده است');return}
  let h='<div class="dhead"><span class="chip idc">'+esc(r.id)+'</span>'+(r.code?'<span class="chip b-org" style="direction:ltr;font-family:monospace">'+esc(r.code)+'</span>':'')+(M.status&&r.status?chip(r.status):'')+'<small style="color:var(--mut)">ثبت: '+esc(r.createdBy)+' / '+esc(r.createdJ)+'</small></div><div class="dgrid">';
- if(k==='ptw'){ h=h.replace(/<div class="dgrid">$/,'<div>')+ptwDocHTML(r,true); } else M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;const v=r[f.k];if(v===undefined||v===''||v===null)return;
+ if(k==='ptw'){ h=h.replace(/<div class="dgrid">$/,'<div>')+ptwDocHTML(r,true); } else M.fields.forEach(f=>{if(f.gate&&!f.gate.includes(me.role))return;if(incWorkerHidden(k,f))return;const v=r[f.k];if(v===undefined||v===''||v===null)return;
   let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=peopleOut(r,v);break;case 'chkl':out=esc((v||[]).join('، '));break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;case 'eqsel':out=esc(eqLabelById(v));break;default:out=esc(v)}
   h+='<div class="dl">'+f.l+'</div><div class="dv">'+out+'</div>'});
  h+='</div>';
  h+=apprBoxHTML(k,r);
   if(r.signs && hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
- if(k==='incidents' && r.analyses){
+ if(k==='incidents' && r.analyses && me.role!=='worker'){
    const a=normalizeAnalyses(r.analyses);
    h+='<h4 class="msh">🔬 تحلیل حادثه</h4>';
    if(Object.values(a.fishbone||{}).some(x=>String(x).trim())){
@@ -5349,6 +5362,7 @@ function buildHaystack(kind, r){
   if(kind) parts.push(kind);
   (M.fields||[]).forEach(f=>{
     if(f.gate && (!me || !f.gate.includes(me.role))) return;
+    if(incWorkerHidden(kind,f)) return;
     const v=r[f.k];
     if(v===undefined||v===null||v==='') return;
     if(f.t==='people' && Array.isArray(v)){ parts.push(v.join(' ')); return; }
@@ -5364,7 +5378,7 @@ function buildHaystack(kind, r){
     if(r[kk]!==undefined && r[kk]!==null && r[kk]!=='') parts.push(String(r[kk]));
   });
   if(r.code) codeParts.push(String(r.code));
-  if(kind==='incidents' && r.analyses){
+  if(kind==='incidents' && r.analyses && me && me.role!=='worker'){
     const a=r.analyses;
     if(a.fishbone) Object.keys(a.fishbone).forEach(k=>{ if(a.fishbone[k]) parts.push('فیش‌بون '+k+' '+a.fishbone[k]); });
     if(a.why) Object.keys(a.why).forEach(k=>{ if(a.why[k]) parts.push('چرا '+k+' '+a.why[k]); });
