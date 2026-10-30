@@ -85,6 +85,11 @@ textarea.in{min-height:76px;resize:vertical}
 .tbl tr:hover td{background:var(--t-or);cursor:pointer}
 .tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
 .tscroll .tbl thead th{position:sticky;top:0;z-index:2}
+.pgbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 4px 2px;font-size:12.5px;color:var(--mut)}
+.pgbtns{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.pgbtns .btn.on{background:var(--pri);color:#fff;border-color:var(--pri);cursor:default}
+.pgbtns .btn:disabled{opacity:.4;cursor:default}
+.pgbtns .pgdots{padding:0 4px}
 .chip{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;white-space:nowrap}
 .b-ok{background:var(--t-ok);color:var(--c-ok)}.b-warn{background:var(--t-warn);color:var(--c-warn)}.b-bad{background:var(--t-bad);color:var(--c-bad)}
 .b-info{background:var(--t-info);color:var(--c-info)}.b-org{background:var(--t-or2);color:var(--c-org)}.b-mut{background:#e2e8f0;color:var(--mut)}
@@ -2616,7 +2621,14 @@ function colLabel(k,c){const f=(MODS[k].fields||[]).find(x=>x.k===c);return f?f.
 function fmtCell(k,r,c){
  const M=MODS[k],f=(M.fields||[]).find(x=>x.k===c);
  if(k==='emgEquip'&&(c==='lastChk'||c==='nextChk')){const d=emgDerivedFields(r);return esc((d?d[c]:r[c])||'—')}
- if(FN[c])return FN[c](r);
+ /* برخی توابع FN فقط برای یک ماژول نوشته شده‌اند؛ در ماژول‌های دیگر مقدار خود فیلد نمایش داده شود */
+ const FN_SKIP={actions:['due'],drills:['score']};
+ if(k==='actions'&&c==='due'){
+  const dv=r.due;if(!dv)return '—';
+  const open=['باز','در حال انجام'].includes(r.status);
+  return (open&&typeof isOverdue==='function'&&isOverdue(dv))?'<span class="chip b-bad">'+esc(dv)+' — معوق</span>':esc(dv);
+ }
+ if(FN[c]&&!(FN_SKIP[k]&&FN_SKIP[k].includes(c)))return FN[c](r);
  let v=r[c];
  if(f&&f.t==='chk')return v?'✔ بله':'—';
  if(f&&f.t==='people')return (v||[]).length?nd(v.length)+' نفر':'—';
@@ -2627,6 +2639,7 @@ function fmtCell(k,r,c){
 function isOwnRecord(k,r){
  if(!me) return false;
  if(me.role!=='worker') return true;
+ if(k==='announce'||k==='contacts') return true;
  if(!r) return false;
  if(k==='incidents') return r.createdBy===me.name||r.injured===me.name;
  if(k==='ptw') return r.createdBy===me.name||(r.workers||[]).includes(me.name);
@@ -2639,6 +2652,22 @@ function myRows(k){
  if(me.role==='worker') rows=rows.filter(r=>isOwnRecord(k,r));
  if(curPage==='risks'&&riskMethod==='matrix'&&riskFilter)rows=rows.filter(r=>+r.s===riskFilter.s&&+r.p===riskFilter.p);
  return rows
+}
+const PG_SIZE=25;
+const _pgState={tb:null,sig:'',page:1};
+function pgGo(p){
+ _pgState.page=p;renderRows();
+ const t=$('#rows');const cd=t&&t.closest('.card');
+ if(cd&&cd.scrollIntoView)cd.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function pgBarHtml(total,page,pages,from,to){
+ const nums=[];
+ for(let i=1;i<=pages;i++){ if(i===1||i===pages||Math.abs(i-page)<=1) nums.push(i); else if(nums[nums.length-1]!=='…') nums.push('…'); }
+ let h='<div class="pgbar"><span>نمایش '+nd(from)+' تا '+nd(to)+' از '+nd(total)+' مورد</span><span class="pgbtns">';
+ h+='<button class="btn ghost sm" '+(page<=1?'disabled':'')+' onclick="pgGo('+(page-1)+')">▶ قبلی</button>';
+ nums.forEach(n=>{ h+= n==='…' ? '<span class="pgdots">…</span>' : '<button class="btn ghost sm'+(n===page?' on':'')+'" '+(n===page?'disabled ':'')+'onclick="pgGo('+n+')">'+nd(n)+'</button>'; });
+ h+='<button class="btn ghost sm" '+(page>=pages?'disabled':'')+' onclick="pgGo('+(page+1)+')">بعدی ◀</button>';
+ return h+'</span></div>';
 }
 function renderRows(){
  let k=curPage;
@@ -2654,7 +2683,14 @@ function renderRows(){
  const dbw=$('#dueBoardWrap');if(dbw&&(k==='inspections'||k==='emgEquip')){const nh=dueBoard(k);if(dbw.dataset.h!==nh){dbw.innerHTML=nh;dbw.dataset.h=nh}}
  const tb=$('#rows');if(!tb)return;
  const ncols=M.cols.length+(M.status?1:0)+1;
- tb.innerHTML=rows.length?rows.map(r=>{
+ /* صفحه‌بندی: با تغییر ماژول/جستجو/فیلتر به صفحهٔ ۱ برمی‌گردد؛ بعد از ویرایش/حذف همان صفحه می‌ماند */
+ const sig=k+'|'+q+'|'+sf+'|'+(riskFilter?riskFilter.s+','+riskFilter.p:'');
+ if(_pgState.tb!==tb||_pgState.sig!==sig){_pgState.tb=tb;_pgState.sig=sig;_pgState.page=1}
+ const pages=Math.max(1,Math.ceil(rows.length/PG_SIZE));
+ if(_pgState.page>pages)_pgState.page=pages;
+ const pStart=(_pgState.page-1)*PG_SIZE;
+ const pageRows=rows.slice(pStart,pStart+PG_SIZE);
+ tb.innerHTML=rows.length?pageRows.map(r=>{
   let tds=M.cols.map(c=>'<td>'+fmtCell(k,r,c)+'</td>').join('');
   if(M.status)tds+='<td>'+(r.status?chip(r.status):'—')+'</td>';
   let ops='';
@@ -2665,6 +2701,10 @@ function renderRows(){
   if(canDel(k))ops+='<button class="ibtn" title="حذف" onclick="event.stopPropagation();delRec(\''+k+'\',\''+r.id+'\')">🗑️</button>';
   tds+='<td onclick="event.stopPropagation()">'+ops+'</td>';
   return '<tr onclick="openDetail(\''+k+'\',\''+r.id+'\')">'+tds+'</tr>'}).join(''):'<tr><td colspan="'+ncols+'" style="text-align:center;color:var(--mut);padding:22px">موردی یافت نشد</td></tr>';
+ const card=tb.closest('.card');
+ let pg=$('#pager');
+ if(!pg&&card){pg=document.createElement('div');pg.id='pager';card.appendChild(pg)}
+ if(pg)pg.innerHTML=pages>1?pgBarHtml(rows.length,_pgState.page,pages,pStart+1,Math.min(pStart+PG_SIZE,rows.length)):'';
  const st=$('#mstats');
  if(st){let s='<span class="big">'+nd(rows.length)+'</span> مورد';
   const cmk=mKey(todayJ());const scope=me.role==='worker'?myRows(k):db[k];const mon=scope.filter(r=>mKey(r.date||r.createdJ)===cmk).length;
