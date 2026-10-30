@@ -2124,7 +2124,7 @@ siteVisit:{t:'بازدید محل کار (SITE VISIT)',i:'🔍',
   {k:'owner',l:'مسئول رفع',t:'sel',o:P},
   {k:'due',l:'مهلت رفع',t:'date'}
  ],
- cols:['date','area','visitor','result']},
+ cols:['date','area','visitor','items','result']},
 legalReport:{t:'گزارش‌دهی قانونی حوادث',i:'⚖️',
  status:['تهیه نشده','تهیه شد','ارسال شد','تایید دریافت'],
  fields:[
@@ -2628,6 +2628,7 @@ function fmtCell(k,r,c){
   const open=['باز','در حال انجام'].includes(r.status);
   return (open&&typeof isOverdue==='function'&&isOverdue(dv))?'<span class="chip b-bad">'+esc(dv)+' — معوق</span>':esc(dv);
  }
+ if(k==='siteVisit'&&c==='items'){const a=Array.isArray(r.items)?r.items:[];if(!a.length)return '—';return '<span class="chip b-info">'+nd(a.length)+' از '+nd(SV_ITEMS.length)+'</span><div style="font-size:11.5px;color:var(--mut);margin-top:4px;white-space:normal;min-width:240px;line-height:1.8">'+a.map(x=>esc(x)).join('، ')+'</div>'}
  if(k==='inspections'&&(c==='eqItem'||c==='eqLoc')){const e=r.eqId?(db.emgEquip||[]).find(x=>x.id===r.eqId):null;return esc(e?(c==='eqItem'?e.item:(e.loc||'—')):'—')}
  if(FN[c]&&!(FN_SKIP[k]&&FN_SKIP[k].includes(c)))return FN[c](r);
  let v=r[c];
