@@ -1866,7 +1866,7 @@ inspections:{t:'بازرسی‌ها و چک‌لیست‌ها',i:'📋',
  fields:[{k:'tpl',l:'نوع چک‌لیست',t:'tplsel',req:1},{k:'date',l:'تاریخ بازرسی',t:'date',req:1,def:todayJ},
   {k:'eqId',l:'تجهیز اضطراری (فقط برای چک‌لیست تجهیزات)',t:'eqsel'},
   {k:'inspBy',l:'بازرس',t:'sel',o:P,def:()=>me.name},{k:'note',l:'توضیحات بازرس',t:'txt'}],
- cols:['date','tpl','score','inspBy']},
+ cols:['date','tpl','eqItem','eqLoc','score','inspBy']},
 ptw:{t:'فرم مجوز ایمنی انجام کار (PTW)',i:'🔥',
  status:['در انتظار بررسی','تایید کارشناس','تایید نهایی','خاتمه یافته','رد شده'],
  fields:[
@@ -2232,7 +2232,7 @@ function gasBad(r){const b=[],f=k=>(r[k]===''||r[k]==null||r[k]===undefined)?nul
  if(c!==null&&c>35)b.push('CO');
  if(h!==null&&h>10)b.push('H₂S');
  return b}
-const FNLBL={lotoChk:'بررسی‌های ایمنی',certDue:'وضعیت گواهی',gasRes:'نتیجه آزمون گاز',hwChk:'چک‌لیست ایمنی',legalDue:'وضعیت ارسال',complChip:'وضعیت انطباق',reviewDue:'بازنگری',level:'سطح ریسک',level2:'ریسک پس از کنترل',score:'نتیجه',cnt:'حاضران',due:'اعتبار',stockchip:'وضعیت موجودی',sdschip:'SDS',aging:'عمر آنومالی',photo:'عکس',hasAnalysis:'وضعیت تحلیل',s5_pct:'امتیاز 5S',s5_band:'سطح',s5_min:'ضعیف‌ترین رکن',rpn:'RPN (S×O×D)',lecScore:'امتیاز LEC',lecLevel:'سطح ریسک',stepCount:'تعداد مراحل',maxRisk:'بالاترین ریسک',progress:'پیشرفت',type:'نوع اقدام',code:'کد',effectiveness:'اثربخشی'};
+const FNLBL={eqItem:'تجهیز',eqLoc:'محل استقرار',lotoChk:'بررسی‌های ایمنی',certDue:'وضعیت گواهی',gasRes:'نتیجه آزمون گاز',hwChk:'چک‌لیست ایمنی',legalDue:'وضعیت ارسال',complChip:'وضعیت انطباق',reviewDue:'بازنگری',level:'سطح ریسک',level2:'ریسک پس از کنترل',score:'نتیجه',cnt:'حاضران',due:'اعتبار',stockchip:'وضعیت موجودی',sdschip:'SDS',aging:'عمر آنومالی',photo:'عکس',hasAnalysis:'وضعیت تحلیل',s5_pct:'امتیاز 5S',s5_band:'سطح',s5_min:'ضعیف‌ترین رکن',rpn:'RPN (S×O×D)',lecScore:'امتیاز LEC',lecLevel:'سطح ریسک',stepCount:'تعداد مراحل',maxRisk:'بالاترین ریسک',progress:'پیشرفت',type:'نوع اقدام',code:'کد',effectiveness:'اثربخشی'};
 
 /* ============================================================
    داده‌های نمونه
@@ -2628,6 +2628,7 @@ function fmtCell(k,r,c){
   const open=['باز','در حال انجام'].includes(r.status);
   return (open&&typeof isOverdue==='function'&&isOverdue(dv))?'<span class="chip b-bad">'+esc(dv)+' — معوق</span>':esc(dv);
  }
+ if(k==='inspections'&&(c==='eqItem'||c==='eqLoc')){const e=r.eqId?(db.emgEquip||[]).find(x=>x.id===r.eqId):null;return esc(e?(c==='eqItem'?e.item:(e.loc||'—')):'—')}
  if(FN[c]&&!(FN_SKIP[k]&&FN_SKIP[k].includes(c)))return FN[c](r);
  let v=r[c];
  if(f&&f.t==='chk')return v?'✔ بله':'—';
