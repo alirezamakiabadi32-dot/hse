@@ -2470,7 +2470,7 @@ function exportModuleTable(k,format){
   h+='<p>تاریخ گزارش: <b>'+nd(todayJ())+'</b> — تعداد رکورد: <b>'+nd(rows.length)+'</b> — تهیه‌کننده: '+esc(me.name)+'</p>';
   h+=buildModuleReport(k);
   const fn='HSE-'+k+'-'+todayJ().replace(/\//g,'-');
-  if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
+  if(format==='print') printHTML(h,fn); else if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
 }
 /* گزارش کامل یک ارزیابی 5S: اطلاعات پایه، نتیجه کلی و همه ارکان با همه اقلام و نمره‌ها */
 function s5DocHTML(r){
@@ -2721,6 +2721,7 @@ function modPage(k){curPage=k;const M=MODS[k];
  if(canCreate(k))h+='<button class="btn pri" onclick="openForm(\''+k+'\')">➕ ثبت جدید</button>';
  h+='<button class="btn ghost sm" onclick="exportModuleTable(\''+k+'\',\'word\')" title="خروجی Word">📄 Word</button>';
  h+='<button class="btn ghost sm" onclick="exportModuleTable(\''+k+'\',\'pdf\')" title="خروجی PDF">📄 PDF</button>';
+ h+='<button class="btn ghost sm" onclick="exportModuleTable(\''+k+'\',\'print\')" title="چاپ این فهرست">🖨️ چاپ</button>';
   if(k==='inspections'){ h+='<button class="btn ghost sm" onclick="exportInspectionsCSV()" title="جدول همه اقلام همه بازرسی‌ها برای Excel">📊 Excel</button>'+'<button class="btn ghost sm" onclick="exportInspectionsSummary(\'word\')">📈 گزارش تجمیعی Word</button>'+'<button class="btn ghost sm" onclick="exportInspectionsSummary(\'pdf\')">📈 گزارش تجمیعی PDF</button>'; }
  if(M.fields&&canCreate(k))h+='<button class="btn ghost sm" onclick="exportBlankForm(\''+k+'\',\'word\')" title="فرم خالی برای چاپ و تکمیل دستی">📝 فرم خالی Word</button>';
  if(k==='emgEquip'&&can('emgEquip','edit'))h+='<button class="btn ghost sm" onclick="emgSyncAllUI()" title="آخرین/بعدی بازرسی و وضعیت همهٔ تجهیزات را از روی چک‌لیست‌های ثبت‌شده به‌روز می‌کند">🔄 همگام‌سازی با چک‌لیست‌ها</button>';
@@ -3378,6 +3379,7 @@ function renderMatrixTab(){
  if(can('risks','create'))h+='<button class="btn pri" onclick="openForm(\'risks\')">➕ ثبت جدید</button>';
  h+='<button class="btn ghost sm" onclick="exportModuleTable(\'risks\',\'word\')">📄 Word</button>';
  h+='<button class="btn ghost sm" onclick="exportModuleTable(\'risks\',\'pdf\')">📄 PDF</button>';
+ h+='<button class="btn ghost sm" onclick="exportModuleTable(\'risks\',\'print\')">🖨️ چاپ</button>';
  h+='</div>';
  h+='<div class="mstats" id="mstats"></div><div class="card"><div class="tscroll"><table class="tbl"><thead><tr>'+M.cols.map(c=>'<th>'+esc(colLabel('risks',c))+'</th>').join('')+'<th>وضعیت</th><th>عملیات</th></tr></thead><tbody id="rows"></tbody></table></div></div>';
  $('#riskBody').innerHTML=h;
@@ -3391,6 +3393,7 @@ function renderMethodTab(k){
  if(can(k,'create')) h+='<button class="btn pri" onclick="openForm(\''+k+'\')">➕ ثبت جدید</button>';
  h+='<button class="btn ghost sm" onclick="exportModuleTable(\''+k+'\',\'word\')">📄 Word</button>';
  h+='<button class="btn ghost sm" onclick="exportModuleTable(\''+k+'\',\'pdf\')">📄 PDF</button>';
+ h+='<button class="btn ghost sm" onclick="exportModuleTable(\''+k+'\',\'print\')">🖨️ چاپ</button>';
  h+='</div>';
  h+='<div class="mstats" id="mstats"></div>';
  h+='<div class="card"><div class="tscroll"><table class="tbl"><thead><tr>'+M.cols.map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'<th>عملیات</th></tr></thead><tbody id="rows"></tbody></table></div></div>';
