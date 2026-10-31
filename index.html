@@ -1015,6 +1015,8 @@ function can(module, action){
 }
 function canCreate(k){ return can(k,'create'); }
 function canEdit(k,r){
+  /* ثبت‌کننده تا پیش از تایید نهایی می‌تواند رکورد خودش را ویرایش کند (به شرط داشتن دسترسی ثبت آن ماژول) */
+  if(r && r.appr && r.appr.stage!=='approved' && isMine(r) && canCreate(k)) return true;
   if(!can(k,'edit')) return false;
   if(me.role==='worker'){
     const M=MODS[k];
@@ -3458,7 +3460,7 @@ function dashMgmt(){
  const od=db.actions.filter(r=>['باز','در حال انجام'].includes(r.status)&&isOverdue(r.due)).slice(0,6);
  const pw=db.ptw.filter(r=>me.role==='manager'?r.status==='تایید کارشناس':r.status==='در انتظار بررسی').slice(0,5);
  const low=db.ppeCat.filter(r=>(+r.stock||0)<=(+r.min||0)).slice(0,5);
- const odInsp=Object.keys(TPLS).map(tk=>{const rs=db.inspections.filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)));const last=rs[0];const days=last?jDaysAgo(last.date):999;return {tk:tk,days:days}}).filter(x=>x.days>TPLS[x.tk].period);
+ const odInsp=Object.keys(TPLS).map(tk=>{const rs=(window._fullDb||db).inspections.filter(r=>r.tpl===tk&&inspCounts(r)).sort((a,b)=>String(b.date).localeCompare(String(a.date)));const last=rs[0];const days=last?jDaysAgo(last.date):999;return {tk:tk,days:days}}).filter(x=>x.days>TPLS[x.tk].period);
  const openUnsafe=db.unsafe.filter(r=>!['اصلاح شد','رد شده'].includes(r.status));
  const openActions=db.actions.filter(r=>['باز','در حال انجام'].includes(r.status));
  let h='<div class="grid4">'+kcard('روز بدون حادثه LTI',K.dNo===null?'∞':nd(K.dNo),'از آخرین جراحت دردسرساز','green')
@@ -3560,7 +3562,8 @@ h+='<button class="btn ghost sm" onclick="exportBlankS5(\'word\')" title="فرم
  h+='</div></div>';
  h+='<div class="s5-hero"><b>چرا 5S؟</b> نظام آراستگی محیط کار پایه کاهش ضایعات، افزایش بهره‌وری و ارتقای ایمنی است.</div>';
  h+='<div class="mstats" id="mstats"></div>';
- h+=s5StatsBlock();
+ /* آمار فقط روی موارد ثبت نهایی؛ فهرست همه‌ی ارزیابی‌ها (از جمله در انتظار تایید) کامل نشان داده می‌شود */
+ h+=window.finalOnly(s5StatsBlock)();
  h+='<div class="card"><div class="sechead">📋 فهرست ارزیابی‌های ثبت‌شده</div><div class="tscroll"><table class="tbl mcards"><thead><tr>'+M.cols.map(c=>'<th>'+esc(colLabel('s5',c))+'</th>').join('')+'<th>وضعیت</th><th>عملیات</th></tr></thead><tbody id="rows"></tbody></table></div></div>';
  $('#content').innerHTML=h; renderRows();
 }
@@ -4308,7 +4311,7 @@ function inspDueList(includeNever){
   Object.keys(TPLS||{}).forEach(tk=>{
     if(EMG_TPLS[tk]) return;
     const per=+((TPLS[tk]||{}).period)||0; if(!per) return;
-    const last=(db.inspections||[]).filter(apprOK).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
+    const last=(db.inspections||[]).filter(inspCounts).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
     if(!last){ if(includeNever) out.push({kind:'tpl',id:tk,label:TPLS[tk].t,last:'',next:'',left:null}); return; }
     const next=jAddDays(last.date,per); const left=-jDaysAgo(next);
     if(isFinite(left)) out.push({kind:'tpl',id:tk,label:TPLS[tk].t,last:last.date,next:next,left:left});
@@ -4346,7 +4349,7 @@ function dueBoard(k){
   return h;
 }
 function dueNextCell(tk){
-  const last=(db.inspections||[]).filter(apprOK).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
+  const last=(db.inspections||[]).filter(inspCounts).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
   if(!last) return '<span class="chip b-mut">هنوز بازرسی نشده</span>';
   const next=jAddDays(last.date,(TPLS[tk]||{}).period); const left=-jDaysAgo(next);
   return esc(next)+' '+dueChip(isFinite(left)?left:null);
@@ -4382,6 +4385,8 @@ function apprInit(role){
   return {stage:'approved',hist:[]};
 }
 function apprOK(r){ return !r.appr || r.appr.stage==='approved'; }
+/* بازرسی/چک‌لیست از لحظه‌ی ثبت برای سررسید حساب می‌شود (حتی منتظر تایید)، مگر رد شده باشد */
+function inspCounts(r){ return !(r.appr && r.appr.stage==='rejected'); }
 function apprCanAct(r){
   return !!r.appr && !isMine(r) && ((r.appr.stage==='expert'&&me.role==='expert')||(r.appr.stage==='manager'&&me.role==='manager'));
 }
@@ -7242,17 +7247,17 @@ document.addEventListener('keydown', function(e){
   }
   function finalOnly(fn){
     return function(){
-      const real=db, wasView=window._viewOnly;
-      window._viewOnly=true; db=finalDbView();
+      const real=db, wasView=window._viewOnly, wasFull=window._fullDb;
+      window._viewOnly=true; window._fullDb=real; db=finalDbView();
       try{ return fn.apply(this,arguments); }
-      finally{ db=real; window._viewOnly=wasView; }
+      finally{ db=real; window._viewOnly=wasView; window._fullDb=wasFull; }
     };
   }
   window.finalOnly=finalOnly;
   /* کارگر: داشبورد شخصی خودش (شامل موارد در انتظار خودش) همان قبلی می‌ماند */
   const dashMg=finalOnly(function(){ return dashMgmt(); });
   SPECIAL.dash.ren=function(){ return me.role==='worker' ? dashWorker() : dashMg(); };
-  ['kpi','risks','scores','s5','trends'].forEach(k=>{
+  ['kpi','scores','trends'].forEach(k=>{
     if(SPECIAL[k]) SPECIAL[k].ren=finalOnly(SPECIAL[k].ren);
   });
 })();
