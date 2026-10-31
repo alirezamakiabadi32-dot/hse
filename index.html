@@ -1840,7 +1840,7 @@ unsafe:{t:'آنومالی (وضعیت‌ها و رفتارهای ناایمن)',
   {k:'verifyJ',l:'تاریخ تأیید',t:'date',gate:['expert','manager']},
   {k:'capaRef',l:'کد اقدام اصلاحی مرتبط',t:'text',gate:['expert','manager']}
  ],
- cols:['date','cat','area','desc','photo','risk','responsible','aging']},
+ cols:['date','cat','area','desc','photo','risk','responsible','due','aging']},
 
 actions:{t:'اقدامات اصلاحی و پیشگیرانه (CAPA)',i:'🛠️',
  status:['باز','در حال انجام','انجام شد','در انتظار تأیید','تایید و بسته شد','رد شده'],
@@ -2813,6 +2813,15 @@ function fmtCell(k,r,c){
  if(k==='emgEquip'&&(c==='lastChk'||c==='nextChk')){const d=emgDerivedFields(r);return esc((d?d[c]:r[c])||'—')}
  /* برخی توابع FN فقط برای یک ماژول نوشته شده‌اند؛ در ماژول‌های دیگر مقدار خود فیلد نمایش داده شود */
  const FN_SKIP={actions:['due'],drills:['score']};
+ if(k==='unsafe'&&c==='due'){
+  const dv=r.due;if(!dv)return '<span class="chip b-mut">بدون مهلت</span>';
+  if(['اصلاح شد','رد شده'].includes(r.status))return esc(dv);
+  const left=-jDaysAgo(dv);
+  if(!isFinite(left))return esc(dv);
+  if(left<0)return '<span class="chip b-bad">'+esc(dv)+' — معوق ('+nd(-left)+' روز)</span>';
+  if(left<=3)return '<span class="chip b-warn">'+esc(dv)+' — '+nd(left)+' روز مانده</span>';
+  return esc(dv);
+ }
  if(k==='actions'&&c==='due'){
   const dv=r.due;if(!dv)return '—';
   const open=['باز','در حال انجام'].includes(r.status);
