@@ -2314,7 +2314,7 @@ function seed(){
  const d={areas:DEFAULT_LISTS.AREAS0.slice(),tpls:defaultTPLS(),s5_tpls:defaultS5TPLS(),scoreArch:[],scoreRules:defaultScoreRules(),permissions:defaultPerms(),lists:{},s5:[],fmea:[],jsa:[],lec:[]};
  Object.keys(DEFAULT_LISTS).forEach(k=>d.lists[k]=DEFAULT_LISTS[k].slice());
  const PS=[['علی رضایی','اپراتور کوره','سالن ذوب','worker','worker'],['حسین کریمی','قالب‌ساز','قالب‌سازی و مولر','worker','hossein'],['مهدی احمدی','ریخته‌گر','ریخته‌گری مذاب','worker','mehdi'],['رضا موسوی','اپراتور سندبلاست','سندبلاست و تمیزکاری','worker','reza'],['جواد نوری','جوشکار','برش و جوشکاری','worker','javad'],['سعید قاسمی','اپراتور مولر','قالب‌سازی و مولر','worker','saeed'],['امیر حیدری','اپراتور جرثقیل','سالن ذوب','worker','amir'],['محمد صادقی','انباردار','انبار مواد و کک','worker','mohammad'],['نرگس شریفی','کارشناس آزمایشگاه','آزمایشگاه','worker','narges'],['فاطمه یوسفی','مسئول اداری','اداری و رفاهی','worker','fateme'],['حسن عباسی','تعمیرکار مکانیک','تأسیسات','worker','hasan'],['ایمان توکلی','برقکار','تأسیسات','worker','iman'],['سارا محمدی','کارشناس HSE','اداری و رفاهی','expert','expert'],['رضا کریمی','مدیر کارخانه','اداری و رفاهی','manager','manager']].concat(PS_EXTRA);
- d.personnel=PS.map(x=>({id:uid('USR'),name:x[0],job:x[1],area:x[2],role:x[3],u:x[4],p:'1234'}));
+ d.personnel=PS.map(x=>({id:uid('USR'),name:x[0],job:x[1],area:x[2],role:x[3],u:x[4],p:'1234',mustChange:true}));
  Object.keys(PF).forEach(k=>{d[k]=[]});
  const R=(m,o)=>{const base={id:uid(PF[m]),createdBy:'سامانه',createdJ:o.date||todayJ(),log:[{u:'سامانه',d:o.date||todayJ(),t:'ثبت اولیه'}]};d[m].push(Object.assign(base,o));return base.id};
  const INC1=R('incidents',{date:jAgo(3),time:'10:15',area:'ریخته‌گری مذاب',type:'شبه‌حادثه (Near Miss)',title:'پاشش مذاب هنگام شارژ کوره',desc:'قطعات مرطوب همراه شارژ وارد کوره شد و پاشش مذاب رخ داد؛ فرد در فاصله امن بود.',injured:'خیر',immediate:'توقف شارژ و خشک‌سازی قطعات',rootCause:'ورود قطعات مرطوب به خط شارژ',corrective:'ساختن سایه‌بان انبار شارژ و کنترل رطوبت',status:'در حال بررسی',createdBy:'علی رضایی'});
@@ -4089,9 +4089,9 @@ function quickAddToList(listKey){
  openModal('➕ افزودن گزینه به «'+esc(listKey)+'»','<div class="ff"><label>مقدار جدید</label><input id="qa_val2" class="in" style="font-size:15px"></div>','<button class="btn pri" id="qa_btn2">➕ افزودن</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
  setTimeout(()=>{const i=$('#qa_val2');if(i)i.focus()},80);
  const b=$('#qa_btn2');
- function doAdd(){const v=$('#qa_val2').value;if(addListItem(listKey,v)){closeModal();refreshCurrent();toast('✔ افزوده شد')}}
- if(b)b.onclick=doAdd;
- setTimeout(()=>{const i=$('#qa_val2');if(i)i.onkeydown=function(e){if(e.key==='Enter')doAdd()}},100);
+ function doAddSecond(){const v=$('#qa_val2').value;if(addListItem(listKey,v)){closeModal();refreshCurrent();toast('✔ افزوده شد')}}
+ if(b)b.onclick=doAddSecond;
+ setTimeout(()=>{const i=$('#qa_val2');if(i)i.onkeydown=function(e){if(e.key==='Enter')doAddSecond()}},100);
 }
 function askDelListItem(listKey,encVal){
  const val=decodeURIComponent(encVal);
@@ -5820,7 +5820,21 @@ function roleLogin(role){loginRole=role;closeCal();
  $('#lu').value='';$('#lp').value='';setLerr('');
  try{$('#lu').focus()}catch(e){console.warn(e)}}
 function roleBack(){loginRole=null;$('#lformBox').classList.add('hidden');$('#lroles').classList.remove('hidden');setLerr('')}
+const LOCK_KEY='hse_lock_v1';
+function lockLoad(){ try{ const o=JSON.parse(localStorage.getItem(LOCK_KEY)||'{}'); return {n:+o.n||0, until:+o.until||0}; }catch(e){ return {n:0,until:0}; } }
+function lockSave(){ try{ localStorage.setItem(LOCK_KEY, JSON.stringify({n:_failCount, until:_lockUntil})); }catch(e){} }
 let _failCount = 0, _lockUntil = 0;
+(function(){ const st=lockLoad(); _failCount=st.n; _lockUntil=st.until; })();
+/* پرسش رمز جدید برای حساب‌هایی که هنوز رمز پیش‌فرض دارند */
+async function askNewPassword(f){
+  for(let i=0;i<3;i++){
+    const np=prompt('برای امنیت حساب، یک رمز جدید وارد کنید (حداقل ۶ نویسه؛ غیر از 1234 و نام کاربری):');
+    if(np===null) return null;
+    if(np.length>=6 && np!=='1234' && np.toLowerCase()!==String(f.u||'').toLowerCase()) return np;
+    alert('رمز انتخابی معتبر نیست. دوباره تلاش کنید.');
+  }
+  return null;
+}
 async function doLogin(){
  if(!loginRole)return;
  if(!db||!Array.isArray(db.personnel)){setLerr('داده‌ها هنوز بارگذاری نشده‌اند، لطفاً چند لحظه صبر کنید');return}
@@ -5845,12 +5859,21 @@ async function doLogin(){
    if(x.role===loginRole){ f=x; break; }
  }
  if(f){
-   _failCount=0;
+   _failCount=0; _lockUntil=0; lockSave();
+   /* رمز پیش‌فرض (1234) یا علامت «باید عوض شود»: قبل از ورود رمز جدید گرفته می‌شود */
+   if(f.mustChange || p==='1234'){
+     const np=await askNewPassword(f);
+     if(!np){ setLerr('برای ورود باید رمز جدید تعیین کنید'); return; }
+     f.p=await hashPw(f.u,np); delete f.mustChange;
+     queueRec('personnel',f.id); save({immediate:true});
+     login(f); return;
+   }
    if(!isPbkdf2(f.p)){ f.p=await hashPw(f.u,p); queueRec('personnel',f.id); save(); }
    login(f); return;
  }
  _failCount++;
  if(_failCount>=5){ _lockUntil=Date.now()+5*60000; _failCount=0; }
+ lockSave();
  setLerr(ex?'این حساب با نقش «'+ROLEINFO[loginRole][1]+'» هم‌خوانی ندارد':'نام کاربری یا رمز اشتباه است');
 }
 function login(p){me={name:p.name,role:p.role,id:p.id,area:p.area||''};try{sessionStorage.setItem('hse_me',JSON.stringify(me))}catch(e){console.warn(e)};startApp()}
@@ -5961,7 +5984,7 @@ dbRef.on('value', (snapshot) => {
    const haveU=new Set((db.personnel||[]).map(p=>p.u));
    PS_EXTRA.forEach(x=>{
      if(haveU.has(x[4])) return;
-     const rec={id:uid('USR'),name:x[0],job:x[1],area:x[2],role:x[3],u:x[4],p:'1234'};
+     const rec={id:uid('USR'),name:x[0],job:x[1],area:x[2],role:x[3],u:x[4],p:'1234',mustChange:true};
      db.personnel.push(rec); haveU.add(x[4]);
      try{ queueRec('personnel',rec.id); }catch(e){ console.warn(e) }
    });
@@ -5991,7 +6014,7 @@ dbRef.on('value', (snapshot) => {
  if(!db.s5_tpls) db.s5_tpls=defaultS5TPLS();
  if(!db.scoreRules || !Array.isArray(db.scoreRules) || !db.scoreRules.length) db.scoreRules=defaultScoreRules();
  db = sanitizePermissions(db);
- /* مهاجرت: همه رمزهای متنی (از جمله 1234) به هش SHA-256 تبدیل می‌شوند */
+ /* مهاجرت: همه رمزهای متنی (از جمله 1234) به هش PBKDF2 با نمک نام کاربری تبدیل می‌شوند */
  let _pwMigrated=false;
  if(_pwCryptoOk()){
    for(const p of (db.personnel||[])){
