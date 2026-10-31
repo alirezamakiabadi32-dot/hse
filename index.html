@@ -3104,7 +3104,12 @@ function saveForm(k,id){
  // FIX: rec فقط برای رکورد جدید ساخته شود
  if(isNew) rec={id:uid(PF[k]),createdBy:me.name,createdJ:todayJ(),log:[]};
   if(isNew&&APPR_MODS.includes(k)) rec.appr=apprInit(me.role);
-  else if(!isNew&&APPR_MODS.includes(k)&&me.role!=='manager'&&(!rec.appr||rec.appr.stage==='rejected'||rec.appr.stage==='approved')) rec.appr=apprInit(roleOfName(rec.createdBy));
+  else if(!isNew&&APPR_MODS.includes(k)&&(rec.appr?(rec.appr.stage==='rejected'||(rec.appr.stage==='approved'&&me.role!=='manager')):me.role!=='manager')){
+    const prevHist=(rec.appr&&rec.appr.hist)||[];
+    const fromExpertEdit=!!(rec.appr&&rec.appr.stage==='approved'&&me.role==='expert');
+    rec.appr=apprInit(fromExpertEdit?'expert':roleOfName(rec.createdBy));
+    rec.appr.hist=prevHist;
+  }
 
  if(k==='incidents' && me.role==='worker' && isNew) { rec.type='شبه‌حادثه (Near Miss)'; }
 
@@ -4344,7 +4349,7 @@ function apprInit(role){
 }
 function apprOK(r){ return !r.appr || r.appr.stage==='approved'; }
 function apprCanAct(r){
-  return !!r.appr && ((r.appr.stage==='expert'&&me.role==='expert')||(r.appr.stage==='manager'&&me.role==='manager'));
+  return !!r.appr && r.createdBy!==me.name && ((r.appr.stage==='expert'&&me.role==='expert')||(r.appr.stage==='manager'&&me.role==='manager'));
 }
 function apprLabel(a){
   return a.stage==='expert'?'ثبت اولیه — منتظر تایید کارشناس ایمنی':a.stage==='manager'?'ثبت اولیه — منتظر تایید مدیریت':a.stage==='rejected'?'برگشت داده شده به ثبت‌کننده':'ثبت نهایی';
@@ -5199,6 +5204,7 @@ function setStat(k,id,val){
  if(me.role==='worker'){toast('تغییر وضعیت فقط توسط کارشناس/مدیر');return}
  const r=db[k].find(x=>x.id===id);
  if(!r){toast('رکورد یافت نشد');return}
+ if(APPR_MODS.includes(k)&&r.appr&&r.appr.stage!=='approved'){toast('ابتدا مسیر تایید این مورد تکمیل شود'); openDetail(k,id); return}
  if(k==='unsafe'&&val==='ارجاع به اقدام'&&!r.capaRef){
    setTimeout(()=>capaFromUnsafe(id),300);
    return;
@@ -5250,11 +5256,16 @@ function ptwAct(id,to){
  const r=db.ptw.find(x=>x.id===id);
  if(me.role==='worker'){toast('این اقدام برای شما مجاز نیست');return}
  if(!can('ptw','edit')){toast('دسترسی تایید ندارید');return}
+ const selfPtw=(r.createdBy===me.name||r.reqName===me.name);
+ if((to==='تایید کارشناس'||to==='تایید نهایی')&&selfPtw){toast('نمی‌توانید مجوز خودتان را تایید کنید');return}
+ if(to==='تایید نهایی'&&r.expertBy===me.name){toast('تاییدکننده‌ی کارشناس نمی‌تواند تایید نهایی را هم انجام دهد');return}
  const ok=(to==='تایید کارشناس'&&['expert','manager'].includes(me.role)&&r.status==='در انتظار بررسی')
   ||(to==='تایید نهایی'&&me.role==='manager'&&r.status==='تایید کارشناس')
-  ||(to==='رد شده'&&['expert','manager'].includes(me.role)&&['در انتظار بررسی','تایید کارشناس'].includes(r.status))
+  /* کارشناس فقط در مرحله‌ی خودش رد کند؛ پس از تایید کارشناس، فقط مدیر می‌تواند رد کند */
+  ||(to==='رد شده'&&((me.role==='expert'&&r.status==='در انتظار بررسی')||(me.role==='manager'&&['در انتظار بررسی','تایید کارشناس'].includes(r.status))))
   ||(to==='خاتمه یافته'&&r.status==='تایید نهایی');
  if(!ok){toast('این اقدام در وضعیت فعلی مجاز نیست');return}
+ if(to==='تایید کارشناس') r.expertBy=me.name;
  r.status=to;
  if(!r.log) r.log=[];
  r.log.push({u:me.name,d:todayJ(),t:'مرحله: '+to});
