@@ -1018,7 +1018,7 @@ function canEdit(k,r){
   if(!can(k,'edit')) return false;
   if(me.role==='worker'){
     const M=MODS[k];
-    if(r.createdBy!==me.name) return false;
+    if(!isMine(r)) return false;
     if(r.appr && r.appr.stage!=='approved') return true;
     return !!M.status && (r.status===M.status[0] || !r.status);
   }
@@ -2844,8 +2844,8 @@ function isOwnRecord(k,r){
  if(me.role!=='worker') return true;
  if(k==='announce'||k==='contacts') return true;
  if(!r) return false;
- if(k==='incidents') return r.createdBy===me.name||r.injured===me.name;
- if(k==='ptw') return r.createdBy===me.name||(r.workers||[]).includes(me.name);
+ if(k==='incidents') return isMine(r)||r.injured===me.name;
+ if(k==='ptw') return isMine(r)||(r.workers||[]).includes(me.name);
  if(k==='ppeTx'||k==='medical') return r.person===me.name;
  if(k==='trainings'||k==='toolbox'||k==='tbm') return (r.people||[]).includes(me.name);
  return false;
@@ -3114,7 +3114,7 @@ function saveForm(k,id){
  if(!isNew&&!canEdit(k,rec)){toast('اجازه ویرایش ندارید');return}
 
  // FIX: rec فقط برای رکورد جدید ساخته شود
- if(isNew) rec={id:uid(PF[k]),createdBy:me.name,createdJ:todayJ(),log:[]};
+ if(isNew) rec={id:uid(PF[k]),createdBy:me.name,createdById:me.id,createdRole:me.role,createdJ:todayJ(),log:[]};
  if(isNew&&M.status) rec.status=M.status[0];
   if(isNew&&APPR_MODS.includes(k)) rec.appr=apprInit(me.role);
   else if(!isNew&&APPR_MODS.includes(k)){
@@ -3127,7 +3127,7 @@ function saveForm(k,id){
     if(reset){
       const prevHist=(rec.appr&&rec.appr.hist)||[];
       const fromExpertEdit=(st==='approved'&&me.role==='expert');
-      rec.appr=apprInit(fromExpertEdit?'expert':roleOfName(rec.createdBy));
+      rec.appr=apprInit(fromExpertEdit?'expert':creatorRole(rec));
       rec.appr.hist=prevHist;
     }
   }
@@ -3361,7 +3361,7 @@ function saveS5(){
  const rec=s5Wiz.rec;
  if(!rec.date||!rec.area||!rec.assessor){toast('اطلاعات پایه الزامی است');return}
  collectSignature(rec);
- rec.createdBy = rec.createdBy || me.name;
+ if(!rec.createdBy){ rec.createdBy=me.name; rec.createdById=me.id; rec.createdRole=me.role; }
  rec.createdJ = rec.createdJ || todayJ();
  rec.log = rec.log || [];
  if(!rec.id){
@@ -3371,7 +3371,7 @@ function saveS5(){
    if(!can('s5','edit')){toast('دسترسی ویرایش 5S ندارید');return}
    const i=db.s5.findIndex(r=>r.id===rec.id);
    rec.log.push({u:me.name,d:todayJ(),t:'ویرایش'});
-   if(me.role!=='manager'&&(!rec.appr||rec.appr.stage==='rejected'||rec.appr.stage==='approved')) rec.appr=apprInit(roleOfName(rec.createdBy));
+   if(me.role!=='manager'&&(!rec.appr||rec.appr.stage==='rejected'||rec.appr.stage==='approved')) rec.appr=apprInit(creatorRole(rec));
     if(i>=0) db.s5[i]=rec; else db.s5.push(rec);
  }
  queueRec('s5', rec.id);
@@ -3511,7 +3511,7 @@ function workerScoreCard(){
  '<div style="font-size:12px;color:var(--mut);margin-top:6px">💡 ثبت شبه‌حادثه و حضور در TBT/TBM امتیاز مثبت دارد.</div></div>';
 }
 function dashWorker(){
- const mine=db.incidents.filter(r=>r.createdBy===me.name);
+ const mine=db.incidents.filter(r=>isMine(r));
  const myPpe=db.ppeTx.filter(r=>r.person===me.name).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
  const myTr=db.trainings.filter(r=>(r.people||[]).includes(me.name));
  const mySess=db.toolbox.concat(db.tbm).filter(r=>(r.people||[]).includes(me.name)).sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,5);
@@ -4290,7 +4290,7 @@ function newItemCount(k){
   const st = seenLoad();
   if(!Array.isArray(st[k])){ st[k] = recs.map(recSig); seenSave(); return 0; }
   const seen = new Set(st[k]);
-  return recs.filter(r => !seen.has(recSig(r)) && r.createdBy !== me.name).length;
+  return recs.filter(r => !seen.has(recSig(r)) && !isMine(r)).length;
 }
 
 /* ---- تاریخ بازرسی بعدی بر اساس دوره‌ی تعریف‌شده (روز) ---- */
@@ -4363,6 +4363,19 @@ const APPR_EXCLUDE=['personnel','areas','ptw','scoreArch'];
 const APPR_MODS=RECORD_MODS.filter(k=>APPR_EXCLUDE.indexOf(k)<0);
 function roleName(r){ return ROLE_FA[r]||r; }
 function roleOfName(n){ const p=(db&&db.personnel||[]).find(x=>x.name===n); return p?p.role:'worker'; }
+/* هویت کاربر با شناسه‌ی یکتا سنجیده می‌شود، نه با نام: ممکن است دو نفر نام یکسان داشته باشند یا یک نام هم کارشناس و هم مدیر باشد */
+function isMine(r){
+  if(!r||!me) return false;
+  if(r.createdById) return r.createdById===me.id;
+  return r.createdBy===me.name;
+}
+/* نقش ثبت‌کننده‌ی رکورد: ابتدا از همان لحظه‌ی ثبت، سپس از شناسه، و فقط برای رکوردهای قدیمی از نام */
+function creatorRole(r){
+  if(r.createdRole) return r.createdRole;
+  const p=(db&&db.personnel||[]).find(x=>x.id && x.id===r.createdById);
+  if(p) return p.role;
+  return roleOfName(r.createdBy);
+}
 function apprInit(role){
   if(role==='worker') return {stage:'expert',hist:[]};
   if(role==='expert') return {stage:'manager',hist:[]};
@@ -4370,7 +4383,7 @@ function apprInit(role){
 }
 function apprOK(r){ return !r.appr || r.appr.stage==='approved'; }
 function apprCanAct(r){
-  return !!r.appr && r.createdBy!==me.name && ((r.appr.stage==='expert'&&me.role==='expert')||(r.appr.stage==='manager'&&me.role==='manager'));
+  return !!r.appr && !isMine(r) && ((r.appr.stage==='expert'&&me.role==='expert')||(r.appr.stage==='manager'&&me.role==='manager'));
 }
 function apprLabel(a){
   return a.stage==='expert'?'ثبت اولیه — منتظر تایید کارشناس ایمنی':a.stage==='manager'?'ثبت اولیه — منتظر تایید مدیریت':a.stage==='rejected'?'برگشت داده شده به ثبت‌کننده':'ثبت نهایی';
@@ -4399,7 +4412,7 @@ function apprBoxHTML(k,r){
   if(apprCanAct(r)){
     h+='<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri sm" onclick="apprAct(\''+k+'\',\''+r.id+'\',\'approve\')">✅ تایید</button><button class="btn danger sm" onclick="apprAct(\''+k+'\',\''+r.id+'\',\'reject\')">✖ رد با ذکر دلیل</button></div>';
   } else if(a.stage==='rejected'){
-    h+='<div style="margin-top:8px;font-size:12px;color:var(--mut)">'+(r.createdBy===me.name?'برای ارسال مجدد، فرم را ویرایش و ذخیره کنید.':'منتظر اصلاح و ارسال مجدد توسط ثبت‌کننده است.')+'</div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:var(--mut)">'+(isMine(r)?'برای ارسال مجدد، فرم را ویرایش و ذخیره کنید.':'منتظر اصلاح و ارسال مجدد توسط ثبت‌کننده است.')+'</div>';
   } else if(a.stage!=='approved'){
     h+='<div style="margin-top:8px;font-size:12px;color:var(--mut)">در انتظار اقدام '+roleName(a.stage)+'</div>';
   }
@@ -4516,7 +4529,7 @@ function notifications(){
  APPR_MODS.forEach(k=>{
    if(!Array.isArray(db[k])) return;
    db[k].forEach(r=>{
-     if(!r.appr||r.appr.stage!=='rejected'||r.createdBy!==me.name) return;
+     if(!r.appr||r.appr.stage!=='rejected'||!isMine(r)) return;
      out.push({icon:'↩️',kind:k,chip:'b-bad',label:'برگشت برای اصلاح',
        text:(MODS[k]?MODS[k].t:k)+' — '+recLabel(r),
        sub:'دلیل: '+(r.appr.reason||'—'),id:r.id});
@@ -4531,7 +4544,7 @@ function notifications(){
       if(!r.appr||r.appr.stage!==st) return;
       out.push({icon:'✍️',kind:k,chip:'b-org',label:'منتظر تایید شما',
         text:(MODS[k]?MODS[k].t:k)+' — '+recLabel(r),
-        sub:'ثبت‌کننده: '+r.createdBy+' ('+roleName(roleOfName(r.createdBy))+') — '+r.createdJ,id:r.id});
+        sub:'ثبت‌کننده: '+r.createdBy+' ('+roleName(creatorRole(r))+') — '+r.createdJ,id:r.id});
     });
   });
  }
@@ -5277,7 +5290,7 @@ function ptwAct(id,to){
  const r=db.ptw.find(x=>x.id===id);
  if(me.role==='worker'){toast('این اقدام برای شما مجاز نیست');return}
  if(!can('ptw','edit')){toast('دسترسی تایید ندارید');return}
- const selfPtw=(r.createdBy===me.name||r.reqName===me.name);
+ const selfPtw=(isMine(r)||r.reqName===me.name);
  if((to==='تایید کارشناس'||to==='تایید نهایی')&&selfPtw){toast('نمی‌توانید مجوز خودتان را تایید کنید');return}
  if(to==='تایید نهایی'&&r.expertBy===me.name){toast('تاییدکننده‌ی کارشناس نمی‌تواند تایید نهایی را هم انجام دهد');return}
  const ok=(to==='تایید کارشناس'&&['expert','manager'].includes(me.role)&&r.status==='در انتظار بررسی')
@@ -6784,7 +6797,7 @@ function capaFromInspection(id, i){
       (db[k]||[]).forEach(function(r){
         if(!r || !r.id || !isOwnRecord(k,r)) return;
         var base={k:k, mod:MODS[k].t, icon:MODS[k].i, title:safeTitleOf(k,r), status:r.status||'', rec:r};
-        if(r.createdBy===me.name && r.createdJ>=f && r.createdJ<=t)
+        if(isMine(r) && r.createdJ>=f && r.createdJ<=t)
           out.push(Object.assign({}, base, {date:r.createdJ, act:'ثبت'}));
         (r.log||[]).forEach(function(l){
           if(l && l.u===me.name && l.d>=f && l.d<=t) out.push(Object.assign({}, base, {date:l.d, act:l.t||''}));
