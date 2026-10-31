@@ -1018,7 +1018,9 @@ function canEdit(k,r){
   if(!can(k,'edit')) return false;
   if(me.role==='worker'){
     const M=MODS[k];
-    return r.createdBy===me.name && M.status && r.status===M.status[0];
+    if(r.createdBy!==me.name) return false;
+    if(r.appr && r.appr.stage!=='approved') return true;
+    return !!M.status && (r.status===M.status[0] || !r.status);
   }
   return true;
 }
@@ -2052,7 +2054,7 @@ bbs:{t:'مشاهدات رفتاری (BBS)',i:'👀',
   {k:'safe',l:'تعداد رفتارهای ایمن (هر مورد امتیاز مثبت)',t:'num'},{k:'unsafe',l:'تعداد رفتارهای ناایمن (هر مورد امتیاز منفی)',t:'num'},
   {k:'warned',l:'آیا به فرد تذکر داده شد؟ (سومین تذکر به مدیر/کارشناس هشدار می‌دهد)',t:'sel',o:['خیر','بله']},
   {k:'feedback',l:'بازخورد داده‌شده',t:'txt'}],
- cols:['date','area','cat','person','safe','unsafe','warned']},
+ cols:['date','area','cat','person','safe','unsafe','warned','photo']},
 audits:{t:'ممیزی‌های HSE',i:'🔎',
  fields:[{k:'date',l:'تاریخ',t:'date',req:1,def:todayJ},
   {k:'type',l:'نوع ممیزی',t:'sel',o:()=>L('AUDIT_TYPES'),list:'AUDIT_TYPES'},
@@ -3046,6 +3048,7 @@ function openForm(k,id,pre){
   b='<div class="qchips"><span class="qc-t">⚡ پرتکرار:</span>'+QUICK_ANOMALY.map(q=>'<button type="button" class="qc" onclick="quickAnomaly(this)">'+esc(q)+'</button>').join('')+'</div>'+b;
   b+='<div class="ff wide"><label>🖼️ عکس آنومالی (اختیاری — دوربین یا انتخاب از دستگاه)</label><div id="phWrap">'+photoBlock(rec&&rec.photo?rec.photo:null)+'</div></div>';
  }
+ if(k==='bbs')b+='<div class="ff wide"><label>🖼️ عکس مشاهده (اختیاری — دوربین یا انتخاب از دستگاه)</label><div id="phWrap">'+photoBlock(rec&&rec.photo?rec.photo:null)+'</div></div>';
  if(k==='inspections')b+='<div id="tplWrap" style="margin-top:12px"></div>';
  if(k==='risks')b+='<div class="lvprev" id="lvprev"></div>';
  if(k==='fmea')b+='<div class="lvprev" id="fmprev"></div>';
@@ -3112,12 +3115,21 @@ function saveForm(k,id){
 
  // FIX: rec فقط برای رکورد جدید ساخته شود
  if(isNew) rec={id:uid(PF[k]),createdBy:me.name,createdJ:todayJ(),log:[]};
+ if(isNew&&M.status) rec.status=M.status[0];
   if(isNew&&APPR_MODS.includes(k)) rec.appr=apprInit(me.role);
-  else if(!isNew&&APPR_MODS.includes(k)&&(rec.appr?(rec.appr.stage==='rejected'||(rec.appr.stage==='approved'&&me.role!=='manager')):me.role!=='manager')){
-    const prevHist=(rec.appr&&rec.appr.hist)||[];
-    const fromExpertEdit=!!(rec.appr&&rec.appr.stage==='approved'&&me.role==='expert');
-    rec.appr=apprInit(fromExpertEdit?'expert':roleOfName(rec.createdBy));
-    rec.appr.hist=prevHist;
+  else if(!isNew&&APPR_MODS.includes(k)){
+    /* ویرایش پس از ثبت: اگر تغییر، مرحله‌ی تاییدِ انجام‌شده را باطل کند، مسیر تایید از نو ساخته می‌شود */
+    const st=rec.appr?rec.appr.stage:null;
+    let reset;
+    if(me.role==='manager') reset=(st==='rejected');
+    else if(me.role==='expert') reset=(st===null||st==='rejected'||st==='approved');
+    else reset=(st!=='expert');
+    if(reset){
+      const prevHist=(rec.appr&&rec.appr.hist)||[];
+      const fromExpertEdit=(st==='approved'&&me.role==='expert');
+      rec.appr=apprInit(fromExpertEdit?'expert':roleOfName(rec.createdBy));
+      rec.appr.hist=prevHist;
+    }
   }
 
  if(k==='incidents' && me.role==='worker' && isNew) { rec.type='شبه‌حادثه (Near Miss)'; }
@@ -3147,7 +3159,7 @@ function saveForm(k,id){
  }); }
  if(M.fields.some(f=>f.t==='chkl')) M.fields.filter(f=>f.t==='chkl').forEach(f=>{ rec[f.k]=$$('#mbody input[cki="'+f.k+'"]:checked').map(c=>c.value); });
  if(k==='incidents' && me.role!=='worker'){ rec.analyses=collectAnalyses(); }
- if(k==='unsafe'){
+ if(k==='unsafe'||k==='bbs'){
    if(window._phData!==undefined)rec.photo=window._phData;
    window._phData=undefined;
  }
@@ -5146,7 +5158,7 @@ function openDetail(k,id){
    });
    h+='</div>';
  }
- if(k==='unsafe'&&r.photo)h+='<h4 class="msh">🖼️ عکس آنومالی</h4><img src="'+r.photo+'" alt="عکس" style="max-width:100%;max-height:320px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in" onclick="viewPhoto(this.src)">';
+ if((k==='unsafe'||k==='bbs')&&r.photo)h+='<h4 class="msh">🖼️ عکس آنومالی</h4><img src="'+r.photo+'" alt="عکس" style="max-width:100%;max-height:320px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in" onclick="viewPhoto(this.src)">';
  if(k==='inspections'&&r.tpl){h+='<h4 class="msh">نتایج اقلام ('+nd(r.score||0)+'٪ انطباق)</h4>';
   if(TPLS[r.tpl]){h+='<div class="tplres">'+TPLS[r.tpl].items.map((it,i)=>{const a=(r.answers||{})[i]||'na';const cl=a==='ok'?'b-ok':a==='fail'?'b-bad':'b-mut';const tx=a==='ok'?'مناسب':a==='fail'?'مغایرت':'نامرتبط';const ub=(a==='fail'&&canCreate('unsafe'))?' <button class="btn ghost sm" style="padding:3px 8px;font-size:11px" onclick="closeModal();convertInspItemToUnsafe(\''+r.id+'\','+i+')">⚠️ تبدیل به آنومالی</button>':'';return '<div class="tri"><span>'+esc(it)+'</span><span><span class="chip '+cl+'">'+tx+'</span>'+ub+'</span></div>'}).join('')+'</div>'}
   else h+='<div class="lvprev">قالب حذف شده. مغایرت‌ها: '+((r.fails&&r.fails.length)?esc(r.fails.join('، ')):'ندارد')+'</div>'}
