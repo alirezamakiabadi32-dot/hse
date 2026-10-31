@@ -5793,9 +5793,47 @@ function refreshCurrent(){
   setPage(curPage);
   requestAnimationFrame(()=>{ window.scrollTo(0,sy); const s2=document.querySelector('.tscroll'); if(s2) s2.scrollLeft=sx; });
 }
+/* ---- دکمه‌ی برگشت موبایل/مرورگر ----
+   یک ورودی تاریخچه همیشه «نگهبان» است؛ دکمه‌ی برگشت ابتدا به‌جای خروج، یک لایه‌ی باز را می‌بندد،
+   سپس به صفحه‌ی قبلی برمی‌گردد و فقط در داشبورد پیام می‌دهد. */
+var _navStack=[], _navSilent=false, _navArmed=false, _lastBackNote=0;
+function overlayClose(){
+  const m=document.getElementById('modal');
+  if(m && m.classList.contains('open')){ closeModal(); return true; }
+  const sd=document.getElementById('side');
+  if(sd && sd.classList.contains('open')){ closeSide(); return true; }
+  const bp=document.getElementById('bellpop');
+  if(bp && !bp.classList.contains('hidden')){ closeBell(); return true; }
+  if(typeof calEl!=='undefined' && calEl){ closeCal(); return true; }
+  return false;
+}
+function onBackPress(){
+  if(!me){ return; }
+  if(overlayClose()){}
+  else if(_navStack.length){
+    const prev=_navStack.pop();
+    _navSilent=true;
+    try{ setPage(prev); } finally{ _navSilent=false; }
+  } else if(curPage!=='dash'){
+    _navSilent=true;
+    try{ setPage('dash'); } finally{ _navSilent=false; }
+  } else {
+    const now=Date.now();
+    if(now-_lastBackNote>1500){ toast('برای خروج از سامانه از دکمه‌ی «خروج» استفاده کنید'); }
+    _lastBackNote=now;
+  }
+  history.pushState({hseGuard:1},'');
+}
+function armBackGuard(){
+  if(_navArmed) return;
+  _navArmed=true;
+  history.pushState({hseGuard:1},'');
+  window.addEventListener('popstate', onBackPress);
+}
 function setPage(k){const Pg=pageOf(k);
  if(!Pg || !canView(k)){ k='dash'; }
  if(!canView(k)){ toast('دسترسی به این بخش غیرفعال است'); return; }
+ if(!_navSilent && k!==curPage && curPage){ _navStack.push(curPage); if(_navStack.length>30) _navStack.shift(); }
  curPage=k;riskFilter=null;
  markModuleSeen(k);
  $('#ptitle').textContent=pageOf(k).i+' '+pageOf(k).t;
@@ -5888,7 +5926,7 @@ function logout(){ askConfirm('از حساب کاربری خارج می‌شوی
   me=null; location.reload();
 }); }
 window.addEventListener('beforeunload', function(e){ if(hasPendingChanges()){ e.preventDefault(); e.returnValue=''; } });
-function startApp(){$('#login').classList.add('hidden');$('#app').classList.remove('hidden');
+function startApp(){ _navStack=[]; armBackGuard();$('#login').classList.add('hidden');$('#app').classList.remove('hidden');
  $('#uname').textContent=me.name;$('#urole').textContent=ROLEINFO[me.role][1];$('#uav').textContent=ROLEINFO[me.role][0];
  const d=new Date();$('#tdate').textContent=['یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه','شنبه'][d.getDay()]+' '+nd(todayJ());
  setPage('dash')}
