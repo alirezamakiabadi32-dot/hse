@@ -893,6 +893,7 @@ const DEFAULT_LISTS = {
 };
 
 function L(key){
+  if(key==='AREAS0' && db && Array.isArray(db.areas)) return db.areas;
   if(!db || !db.lists) return DEFAULT_LISTS[key] || [];
   return db.lists[key] || DEFAULT_LISTS[key] || [];
 }
@@ -900,6 +901,13 @@ function addListItem(key, val){
   if(!canManageLists()){toast('فقط کارشناس ایمنی و مدیر می‌توانند آیتم جدید تعریف کنند');return false}
   val = String(val||'').trim();
   if(!val){toast('مقدار را وارد کنید');return false}
+  if(key==='AREAS0'){
+    if(db.areas.indexOf(val)>=0){toast('این واحد قبلاً وجود دارد');return false}
+    db.areas.push(val);
+    queueModule('areas');
+    save();
+    return true;
+  }
   if(!db.lists) db.lists = {};
   if(!db.lists[key]) db.lists[key] = (DEFAULT_LISTS[key]||[]).slice();
   if(db.lists[key].some(x=>x===val)){toast('این گزینه قبلاً وجود دارد');return false}
@@ -910,6 +918,12 @@ function addListItem(key, val){
 }
 function delListItem(key, val){
   if(!canManageLists()){toast('فقط کارشناس ایمنی و مدیر می‌توانند آیتم حذف کنند');return}
+  if(key==='AREAS0'){
+    db.areas = db.areas.filter(x=>x!==val);
+    queueModule('areas');
+    save();
+    return;
+  }
   if(!db.lists || !db.lists[key]) return;
   db.lists[key] = db.lists[key].filter(x=>x!==val);
   queueModule('lists');
@@ -7310,6 +7324,26 @@ document.addEventListener('keydown', function(e){
     requestAnimationFrame(function(){ q=false; tag(); });
   }).observe(document.body,{childList:true,subtree:true});
   tag();
+})();
+</script>
+
+<script>
+/* یک‌بار: واحدهایی که قبلاً از دکمه ➕ فرم‌ها در db.lists.AREAS0 ذخیره شده بودند، به db.areas منتقل می‌شوند */
+(function(){
+  const FLAG='hse_mig_areas_v1';
+  function run(){
+    try{
+      if(localStorage.getItem(FLAG)) return;
+      if(!me || !db || !Array.isArray(db.areas)) return;
+      let n=0;
+      ((db.lists&&db.lists.AREAS0)||[]).forEach(function(a){
+        if(a && db.areas.indexOf(a)<0){ db.areas.push(a); n++; }
+      });
+      if(n){ queueModule('areas'); save({immediate:true}); }
+      localStorage.setItem(FLAG,'1');
+    }catch(e){ console.warn('انتقال واحدها:', e); }
+  }
+  const iv=setInterval(function(){ if(db && Array.isArray(db.areas) && me){ clearInterval(iv); run(); } },1000);
 })();
 </script>
 </body>
