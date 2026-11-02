@@ -4178,7 +4178,7 @@ function settingsPage(){curPage='settings';
   +'<label class="btn ghost sm" style="cursor:pointer">⬆️ بازیابی<input type="file" accept=".json" style="display:none" onchange="doImport(this)"></label>'
   +'<button class="btn ghost sm" onclick="importPaste()">📥 چسباندن</button>'
   +'<button class="btn ghost sm" onclick="diag()">🔍 بررسی سلامت</button>'
-  +(mg?'<button class="btn danger sm" onclick="doReset()">♻️ بازنشانی</button>':'')+'</div></div></div>';
+  +'</div></div></div>';
   $('#content').innerHTML=h;
  }catch(e){
   $('#content').innerHTML='<div class="card" style="border-color:#fecaca"><div class="sechead">⚠️ خطا</div><div>'+esc(e.message)+'</div></div>';
