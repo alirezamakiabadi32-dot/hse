@@ -10,6 +10,7 @@
 <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -816,9 +817,20 @@ input,select,textarea{font-size:17px!important}
 /* ============================================================
    سامانه جامع HSE فولاد تنبور — نسخه ۴.۳ (اصلاح باگ‌ها)
 ============================================================ */
-const firebaseConfig = { databaseURL: "https://hseta-58036-default-rtdb.firebaseio.com/" };
+const firebaseConfig = {
+  apiKey: "AIzaSyDzypxZ-gZjOKaDngoxsgyw1PvcOG5eUYU",
+  authDomain: "hseta-58036.firebaseapp.com",
+  databaseURL: "https://hseta-58036-default-rtdb.firebaseio.com",
+  projectId: "hseta-58036",
+  storageBucket: "hseta-58036.firebasestorage.app",
+  messagingSenderId: "1080672335049",
+  appId: "1:1080672335049:web:2eac5161f41ab22dc10918"
+};
 firebase.initializeApp(firebaseConfig);
 const dbRef = firebase.database().ref('hse_data');
+let auth = null;
+try{ auth = firebase.auth(); }catch(e){ window._authErr = 'firebase.auth: ' + (e && e.message ? e.message : e); }
+if(!auth && !window._authErr) window._authErr = (typeof firebase==='undefined') ? 'کتابخانه‌ی firebase بارگذاری نشده' : 'firebase.auth موجود نیست (فایل auth بارگذاری نشده)';
 
 const LS='hse_foundry_cloud';
 let db=null, me=null, curPage='dash', riskFilter=null, riskMethod='matrix';
@@ -5974,48 +5986,65 @@ async function askNewPassword(f){
   }
   return null;
 }
+let _loginBusy = false;
+
 async function doLogin(){
- if(!loginRole)return;
- if(!db||!Array.isArray(db.personnel)){setLerr('داده‌ها هنوز بارگذاری نشده‌اند، لطفاً چند لحظه صبر کنید');return}
- if(Date.now() < _lockUntil){
-   const m = Math.ceil((_lockUntil-Date.now())/60000);
-   setLerr('تلاش‌های ناموفق زیاد؛ '+nd(m)+' دقیقهٔ دیگر دوباره تلاش کنید');
-   return;
- }
- if(!_pwCryptoOk()){setLerr('ورود فقط از طریق HTTPS یا localhost امکان‌پذیر است');return}
- const u=$('#lu').value.trim(), p=$('#lp').value;
- if(!u||!p){setLerr('نام کاربری و رمز را وارد کنید');return}
- const hit=async(x)=>{
-   if(!x.u||String(x.u).toLowerCase()!==u.toLowerCase()) return false;
-   if(isPbkdf2(x.p)) return verifyPw(x.p, x.u, p);
-   if(isHashedPw(x.p)) return x.p===legacyHashPw(x.u,p);
-   return x.p===p; /* رمز قدیمی متنی */
- };
- let f=null, ex=false;
- for(const x of db.personnel){
-   if(!(await hit(x))) continue;
-   ex=true;
-   if(x.role===loginRole){ f=x; break; }
- }
- if(f){
-   _failCount=0; _lockUntil=0; lockSave();
-   /* رمز پیش‌فرض (1234) یا علامت «باید عوض شود»: قبل از ورود رمز جدید گرفته می‌شود */
-   if(f.mustChange || p==='1234'){
-     const np=await askNewPassword(f);
-     if(!np){ setLerr('برای ورود باید رمز جدید تعیین کنید'); return; }
-     f.p=await hashPw(f.u,np); delete f.mustChange;
-     queueRec('personnel',f.id); save({immediate:true});
-     login(f); return;
+ _loginBusy = true;
+ try{
+   if(!loginRole) return;
+   if(!auth){ setLerr('سرویس ورود بارگذاری نشده است. علت: '+(window._authErr||'نامشخص')+' | وضعیت داده: '+(db?'بارگذاری شد':'بارگذاری نشد')); return; }
+   if(!db||!Array.isArray(db.personnel)){setLerr('داده‌ها هنوز بارگذاری نشده‌اند، لطفاً چند لحظه صبر کنید');return}
+   if(Date.now() < _lockUntil){
+     const m = Math.ceil((_lockUntil-Date.now())/60000);
+     setLerr('تلاش‌های ناموفق زیاد؛ '+nd(m)+' دقیقهٔ دیگر دوباره تلاش کنید');
+     return;
    }
-   if(!isPbkdf2(f.p)){ f.p=await hashPw(f.u,p); queueRec('personnel',f.id); save(); }
-   login(f); return;
+   const u=$('#lu').value.trim().toLowerCase(), p=$('#lp').value;
+   if(!u||!p){setLerr('نام کاربری و رمز را وارد کنید');return}
+   if(!/^[a-z0-9_.-]{3,}$/.test(u)){setLerr('نام کاربری معتبر نیست');return}
+   setLerr('در حال ورود...');
+
+   let user=null;
+   try{
+     user=(await auth.signInWithEmailAndPassword(u+'@hse.local', p)).user;
+   }catch(e){
+     _failCount++;
+     if(_failCount>=5){ _lockUntil=Date.now()+5*60000; _failCount=0; }
+     lockSave();
+     setLerr(e.code==='auth/too-many-requests' ? 'تلاش زیاد؛ کمی صبر کنید' : 'نام کاربری یا رمز اشتباه است');
+     return;
+   }
+
+   const tk = await user.getIdTokenResult();
+   const pp = db.personnel.find(x=>x.id===user.uid);
+   if(!pp || tk.claims.role!==loginRole){
+     await auth.signOut();
+     setLerr(!pp ? 'این حساب در فهرست پرسنل یافت نشد' : 'این حساب با نقش «'+ROLEINFO[loginRole][1]+'» هم‌خوانی ندارد');
+     return;
+   }
+
+   _failCount=0; _lockUntil=0; lockSave();
+
+   if(pp.mustChange){
+     const np = await askNewPassword(pp);
+     if(!np){ await auth.signOut(); setLerr('برای ورود باید رمز جدید تعیین کنید'); return; }
+     await user.updatePassword(np);
+     delete pp.mustChange;
+     queueRec('personnel', pp.id);
+     save({immediate:true});
+   }
+   login({...pp, role: tk.claims.role});
+ }finally{
+   _loginBusy = false;
  }
- _failCount++;
- if(_failCount>=5){ _lockUntil=Date.now()+5*60000; _failCount=0; }
- lockSave();
- setLerr(ex?'این حساب با نقش «'+ROLEINFO[loginRole][1]+'» هم‌خوانی ندارد':'نام کاربری یا رمز اشتباه است');
 }
-function login(p){me={name:p.name,role:p.role,id:p.id,area:p.area||''};try{sessionStorage.setItem('hse_me',JSON.stringify(me))}catch(e){console.warn(e)};startApp()}
+
+function login(p){
+ if(me && me.id===p.id) return;
+ me={name:p.name,role:p.role,id:p.id,area:p.area||''};
+ startApp();
+}
+
 function logout(){ askConfirm('از حساب کاربری خارج می‌شوید؟', async function(){
   if(hasPendingChanges()){
     toast('در حال ذخیرهٔ تغییرات...');
@@ -6023,7 +6052,9 @@ function logout(){ askConfirm('از حساب کاربری خارج می‌شوی
     await waitForFlush(10000);
     if(hasPendingChanges()){ toast('⚠️ ذخیره نشد؛ اتصال را بررسی کنید و دوباره خارج شوید'); return; }
   }
-  try{ sessionStorage.removeItem('hse_me'); localStorage.removeItem(LS); localStorage.removeItem(SYNC_KEY); }catch(e){ console.warn(e); }
+  try{ localStorage.removeItem(LS); localStorage.removeItem(SYNC_KEY); }catch(e){ console.warn(e); }
+  try{ sessionStorage.removeItem('hse_me'); }catch(e){}
+  await auth.signOut();
   me=null; location.reload();
 }); }
 window.addEventListener('beforeunload', function(e){ if(hasPendingChanges()){ e.preventDefault(); e.returnValue=''; } });
@@ -6155,13 +6186,6 @@ dbRef.on('value', (snapshot) => {
  db = sanitizePermissions(db);
  /* مهاجرت: همه رمزهای متنی (از جمله 1234) به هش PBKDF2 با نمک نام کاربری تبدیل می‌شوند */
  let _pwMigrated=false;
- if(_pwCryptoOk()){
-   for(const p of (db.personnel||[])){
-     if(p.u && p.p && !isPbkdf2(p.p) && !isHashedPw(p.p)){
-       try{ p.p = await hashPw(p.u, p.p); queueRec('personnel',p.id); _pwMigrated=true; }catch(e){console.warn(e)}
-     }
-   }
- }
  TPLS=db.tpls;
  S5=db.s5_tpls;
 
@@ -6187,9 +6211,13 @@ dbRef.on('value', (snapshot) => {
  if(legacyStore) save({immediate:true});
  if(_pwMigrated && !legacyStore) save();
 
- try{me=JSON.parse(sessionStorage.getItem('hse_me')||'null')}catch(e){me=null}
- if(me){const pp=db.personnel.find(x=>x.id===me.id);if(!pp)me=null;else{me.area=pp.area||'';me.name=pp.name;me.role=pp.role}}
- if(me)startApp();
+  auth.onAuthStateChanged(async function(user){
+    if(!user || _loginBusy || (me && me.id===user.uid)) return;
+    const pp = db.personnel.find(x=>x.id===user.uid);
+    const tk = await user.getIdTokenResult();
+    if(!pp || !tk.claims.role){ return; }
+    login({...pp, role: tk.claims.role});
+  });
 
  setTimeout(()=>{ try{ checkConnection(); }catch(e){console.warn(e)} }, 500);
 })();
@@ -7392,6 +7420,27 @@ document.addEventListener('keydown', function(e){
     }catch(e){ console.warn('انتقال واحدها:', e); }
   }
   const iv=setInterval(function(){ if(db && Array.isArray(db.areas) && me){ clearInterval(iv); run(); } },1000);
+})();
+</script>
+<script>
+/* تشخیص خطا روی صفحه‌ی ورود (بدون نیاز به Console) */
+(function(){
+  function show(msg){
+    var el=document.getElementById('lerr');
+    if(!el) return;
+    el.textContent=msg;
+    el.classList.remove('hidden');
+  }
+  window.addEventListener('error', function(e){
+    show('خطا: '+(e && e.message ? e.message : 'نامشخص'));
+  });
+  setTimeout(function(){
+    if(typeof firebase==='undefined'){
+      show('کتابخانه‌ی Firebase بارگذاری نشد. دسترسی به gstatic.com و firebaseio.com را بررسی کنید (ممکن است فیلتر یا نیاز به VPN باشد).');
+    }else if(!firebase.apps || !firebase.apps.length){
+      show('اتصال به Firebase برقرار نشد.');
+    }
+  }, 4000);
 })();
 </script>
 </body>
