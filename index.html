@@ -802,6 +802,7 @@ input,select,textarea{font-size:17px!important}
     <div id="bellpop" class="bellpop hidden"></div>
    </div>
    <div class="uchip" id="uchip" title="حساب کاربری"><span id="uav">🦺</span><div><b id="uname"></b><small id="urole"></small></div></div>
+   <button class="tbtn" onclick="openChangeMyPw()" title="تغییر رمز" aria-label="تغییر رمز">🔑<span class="tghide"> رمز</span></button>
    <button class="tbtn" onclick="logout()" title="خروج" aria-label="خروج">🚪<span class="tghide"> خروج</span></button>
   </div>
   <div id="content"><div class="skel-wrap" aria-hidden="true"><div class="skeleton skel-h"></div><div class="grid4"><div class="skeleton skel-k"></div><div class="skeleton skel-k"></div><div class="skeleton skel-k"></div><div class="skeleton skel-k"></div></div></div></div>
@@ -4198,21 +4199,22 @@ function askDelListItem(listKey,encVal){
 }
 function personForm(i){const p=(i>=0&&db.personnel[i])?db.personnel[i]:null;
  openModal(p?'✏️ ویرایش پرسنل':'➕ تعریف شخص جدید',
- '<div class="fgrid"><div class="ff"><label>نام <i>*</i></label><input id="pf_n" class="in" value="'+esc(p?p.name:'')+'"></div><div class="ff"><label>سمت</label><input id="pf_j" class="in" value="'+esc(p?p.job:'')+'"></div><div class="ff"><label>واحد</label><select id="pf_a" class="in">'+db.areas.map(a=>'<option '+(p&&p.area===a?'selected':'')+'>'+esc(a)+'</option>').join('')+'</select></div><div class="ff"><label>نقش <i>*</i></label><select id="pf_r" class="in">'+['worker','expert','manager'].map(r=>'<option value="'+r+'" '+((p?p.role:'worker')===r?'selected':'')+'>'+ROLE_CHIP[r][0]+'</option>').join('')+'</select></div><div class="ff"><label>نام کاربری</label><input id="pf_u" class="in" value="'+esc(p?p.u:'')+'" style="direction:ltr"></div><div class="ff"><label>رمز '+(p?'(برای تغییر، رمز جدید را وارد کنید)':'')+'</label><input id="pf_p" type="password" class="in" value="" autocomplete="new-password" style="direction:ltr"></div></div>',
+ '<div class="fgrid"><div class="ff"><label>نام <i>*</i></label><input id="pf_n" class="in" value="'+esc(p?p.name:'')+'"></div><div class="ff"><label>سمت</label><input id="pf_j" class="in" value="'+esc(p?p.job:'')+'"></div><div class="ff"><label>واحد</label><select id="pf_a" class="in">'+db.areas.map(a=>'<option '+(p&&p.area===a?'selected':'')+'>'+esc(a)+'</option>').join('')+'</select></div><div class="ff"><label>نقش <i>*</i></label><select id="pf_r" class="in">'+['worker','expert','manager'].map(r=>'<option value="'+r+'" '+((p?p.role:'worker')===r?'selected':'')+'>'+ROLE_CHIP[r][0]+'</option>').join('')+'</select></div><div class="ff"><label>نام کاربری</label><input id="pf_u" class="in" value="'+esc(p?p.u:'')+'" style="direction:ltr"></div><div class="ff wide"><div class="ck"><input type="checkbox" id="pf_mc" '+(p&&p.mustChange?'checked':'')+'><span>نیازمند تغییر رمز در ورود بعدی</span></div></div>',
  '<button class="btn pri" onclick="savePerson('+i+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
 }
 async function savePerson(i){
- const n=$('#pf_n').value.trim(),un=$('#pf_u').value.trim(),pw=$('#pf_p').value.trim(),role=$('#pf_r').value;
+ const n=$('#pf_n').value.trim(),un=$('#pf_u').value.trim(),role=$('#pf_r').value,mc=$('#pf_mc').checked;
  if(!n){toast('نام الزامی است');return}
- if(un&&db.personnel.some((p,j)=>p.u===un&&j!==i)){toast('نام کاربری تکراری');return}
+ if(!un){toast('نام کاربری الزامی است');return}
+ if(db.personnel.some((p,j)=>p.u===un&&j!==i)){toast('نام کاربری تکراری');return}
  const old=(i>=0&&db.personnel[i])?db.personnel[i]:null;
- if(old && un!==(old.u||'') && !pw){toast('با تغییر نام کاربری، رمز جدید را وارد کنید');return}
- if(!old && un && !pw){toast('برای حساب جدید رمز وارد کنید');return}
- const passField = pw ? (un? await hashPw(un,pw) : '') : (old? old.p : '');
- const rec={name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un,p:passField};
+ if(old && un!==(old.u||'')){toast('تغییر نام کاربری حساب موجود پشتیبانی نمی‌شود');return}
+ const rec={name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un};
  let id;
  if(old){ Object.assign(old,rec); id=old.id; }
- else { id=uid('USR'); db.personnel.push(Object.assign({id:id},rec)); }
+ else { id=uid('USR'); db.personnel.push(Object.assign({id:id,p:''},rec)); }
+ const pp=db.personnel.find(x=>x.id===id);
+ if(mc) pp.mustChange=true; else delete pp.mustChange;
  queueRec('personnel', id);
  save();closeModal();toast('✔ ذخیره شد');refreshCurrent()
 }
@@ -6045,6 +6047,44 @@ function login(p){
  startApp();
 }
 
+/* تغییر رمز توسط خود کاربر: احراز هویت مجدد با رمز فعلی، سپس ثبت رمز جدید در Firebase Auth */
+function openChangeMyPw(){
+  if(!me){toast('ابتدا وارد شوید');return}
+  openModal('🔑 تغییر رمز من',
+   '<div class="fgrid">'+
+   '<div class="ff wide"><label>رمز فعلی <i>*</i></label><input id="cp_old" type="password" class="in" style="direction:ltr" autocomplete="current-password"></div>'+
+   '<div class="ff"><label>رمز جدید <i>*</i></label><input id="cp_new" type="password" class="in" style="direction:ltr" autocomplete="new-password"></div>'+
+   '<div class="ff"><label>تکرار رمز جدید <i>*</i></label><input id="cp_new2" type="password" class="in" style="direction:ltr" autocomplete="new-password"></div>'+
+   '</div><div class="lnote">حداقل ۶ نویسه؛ غیر از 1234 و نام کاربری.</div>',
+   '<button class="btn pri" onclick="changeMyPw()">💾 تغییر رمز</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
+}
+async function changeMyPw(){
+  const oldP=$('#cp_old').value, np=$('#cp_new').value, np2=$('#cp_new2').value;
+  const u=auth&&auth.currentUser;
+  if(!u){toast('ابتدا وارد شوید');return}
+  if(!oldP||!np){toast('همهٔ فیلدها را پر کنید');return}
+  if(np!==np2){toast('رمز جدید با تکرار آن یکسان نیست');return}
+  if(np.length<6||np==='1234'||np.toLowerCase()===String(me.u||'').toLowerCase()){toast('رمز جدید معتبر نیست (حداقل ۶ نویسه، غیر از 1234 و نام کاربری)');return}
+  if(np===oldP){toast('رمز جدید باید با رمز فعلی متفاوت باشد');return}
+  try{
+    const cred=firebase.auth.EmailAuthProvider.credential(u.email, oldP);
+    await u.reauthenticateWithCredential(cred);
+    await u.updatePassword(np);
+  }catch(e){
+    const wrong = e.code==='auth/wrong-password' || e.code==='auth/invalid-credential';
+    toast(wrong ? '⛔ رمز فعلی اشتباه است' : '⛔ تغییر رمز ناموفق: '+(e.message||e.code));
+    return;
+  }
+  const pp=db.personnel.find(x=>x.id===me.id);
+  if(pp){
+    pp.p = await hashPw(pp.u||me.u, np);
+    delete pp.mustChange;
+    queueRec('personnel', pp.id);
+    save({immediate:true});
+  }
+  closeModal();
+  toast('✔ رمز شما تغییر کرد');
+}
 function logout(){ askConfirm('از حساب کاربری خارج می‌شوید؟', async function(){
   if(hasPendingChanges()){
     toast('در حال ذخیرهٔ تغییرات...');
