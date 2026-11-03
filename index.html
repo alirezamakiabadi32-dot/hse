@@ -802,6 +802,7 @@ input,select,textarea{font-size:17px!important}
     <div id="bellpop" class="bellpop hidden"></div>
    </div>
    <div class="uchip" id="uchip" title="حساب کاربری"><span id="uav">🦺</span><div><b id="uname"></b><small id="urole"></small></div></div>
+   <button class="tbtn" id="bioBtn" onclick="openBioSettings()" title="ورود با اثر انگشت / چهره" aria-label="ورود با اثر انگشت یا چهره">🔐<span class="tghide"> بیومتریک</span></button>
    <button class="tbtn" onclick="openChangeMyPw()" title="تغییر رمز" aria-label="تغییر رمز">🔑<span class="tghide"> رمز</span></button>
    <button class="tbtn" onclick="logout()" title="خروج" aria-label="خروج">🚪<span class="tghide"> خروج</span></button>
   </div>
@@ -6036,6 +6037,7 @@ async function doLogin(){
      save({immediate:true});
    }
    login({...pp, role: tk.claims.role});
+   try{ if(window.bioOffer) window.bioOffer(); }catch(e){ console.warn(e); }
  }finally{
    _loginBusy = false;
  }
@@ -6256,6 +6258,7 @@ dbRef.on('value', (snapshot) => {
     const pp = db.personnel.find(x=>x.id===user.uid);
     const tk = await user.getIdTokenResult();
     if(!pp || !tk.claims.role){ return; }
+    if(window.bioGate && (await window.bioGate(user.uid))===false) return;
     login({...pp, role: tk.claims.role});
   });
 
@@ -7481,6 +7484,134 @@ document.addEventListener('keydown', function(e){
       show('اتصال به Firebase برقرار نشد.');
     }
   }, 4000);
+})();
+</script>
+<script>
+/* ============================================================
+   ورود با اثر انگشت / تشخیص چهره (WebAuthn)
+   - از حسگر خود دستگاه استفاده می‌شود؛ هیچ داده‌ی بیومتریکی ذخیره یا ارسال نمی‌شود.
+   - نشست Firebase روی دستگاه می‌ماند و با هر بار بازکردن برنامه، تأیید بیومتریک لازم است.
+   - نیاز به HTTPS (یا localhost) و دستگاهی که قفل صفحه/اثر انگشت/چهره دارد.
+============================================================ */
+(function(){
+  const KEY='hse_bio_v1', ASKED='hse_bio_asked_v1';
+  const rd=k=>{ try{ return JSON.parse(localStorage.getItem(k)||'{}'); }catch(e){ return {}; } };
+  const wr=(k,o)=>{ try{ localStorage.setItem(k,JSON.stringify(o)); }catch(e){} };
+  const toB64=b=>btoa(String.fromCharCode.apply(null,new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  const fromB64=t=>{ t=t.replace(/-/g,'+').replace(/_/g,'/'); while(t.length%4) t+='='; return Uint8Array.from(atob(t),c=>c.charCodeAt(0)); };
+  const enabled=uid=>!!rd(KEY)[uid];
+
+  async function supported(){
+    try{
+      return !!(window.isSecureContext && window.PublicKeyCredential && navigator.credentials &&
+        PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable &&
+        await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
+    }catch(e){ return false; }
+  }
+
+  async function enable(uid,name){
+    const cred=await navigator.credentials.create({publicKey:{
+      challenge:crypto.getRandomValues(new Uint8Array(32)),
+      rp:{name:'HSE Tanbour'},
+      user:{id:new TextEncoder().encode(String(uid)), name:String(name||uid), displayName:String(name||uid)},
+      pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+      authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required',residentKey:'discouraged'},
+      timeout:60000, attestation:'none'
+    }});
+    const o=rd(KEY); o[uid]=toB64(cred.rawId); wr(KEY,o);
+  }
+  async function verify(uid){
+    const id=rd(KEY)[uid]; if(!id) return true;
+    await navigator.credentials.get({publicKey:{
+      challenge:crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials:[{type:'public-key',id:fromB64(id),transports:['internal']}],
+      userVerification:'required', timeout:60000
+    }});
+    return true;
+  }
+  function errMsg(e){
+    const n=e&&e.name;
+    if(n==='NotAllowedError') return 'تأیید لغو شد یا انجام نشد. دوباره تلاش کنید.';
+    if(n==='InvalidStateError') return 'این دستگاه قبلاً ثبت شده است.';
+    if(n==='SecurityError') return 'این قابلیت فقط روی آدرس امن (HTTPS) کار می‌کند.';
+    return 'خطا: '+((e&&e.message)||'نامشخص');
+  }
+
+  /* ---- صفحه‌ی قفل ---- */
+  let _gate=null;
+  window.bioGate=function(uid){
+    if(!enabled(uid)) return Promise.resolve(true);
+    if(_gate) return _gate;
+    _gate=new Promise(function(resolve){
+      const el=document.createElement('div');
+      el.id='bioLock';
+      el.setAttribute('style','position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;background:linear-gradient(135deg,#1c1030,#7c2d12 55%,#ea580c)');
+      el.innerHTML='<div style="background:rgba(255,255,255,.97);color:#0f172a;border-radius:18px;padding:28px;max-width:360px;width:100%;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.45)">'+
+        '<div style="font-size:48px">🔐</div>'+
+        '<h2 style="font-size:17px;margin:8px 0 6px">سامانه جامع HSE فولاد تنبور</h2>'+
+        '<p style="color:#64748b;font-size:13px;line-height:2;margin-bottom:14px">برای ورود، اثر انگشت یا چهره‌ی خود را تأیید کنید.</p>'+
+        '<button id="bioGo" class="btn pri" style="width:100%;min-height:46px;font-size:14px">تأیید اثر انگشت / چهره</button>'+
+        '<div id="bioErr" class="lerr hidden" style="margin-top:10px"></div>'+
+        '<button id="bioPw" class="btn ghost" style="width:100%;margin-top:10px">ورود با نام کاربری و رمز</button></div>';
+      document.body.appendChild(el);
+      const err=el.querySelector('#bioErr'), go=el.querySelector('#bioGo');
+      function done(v){ el.remove(); _gate=null; resolve(v); }
+      async function attempt(){
+        go.disabled=true; err.classList.add('hidden');
+        try{ await verify(uid); done(true); }
+        catch(e){ go.disabled=false; err.textContent=errMsg(e); err.classList.remove('hidden'); }
+      }
+      go.onclick=attempt;
+      el.querySelector('#bioPw').onclick=async function(){
+        try{ await auth.signOut(); }catch(e){ console.warn(e); }
+        done(false);
+      };
+      setTimeout(attempt,250);
+    });
+    return _gate;
+  };
+
+  /* ---- پیشنهاد یک‌باره بعد از ورود با رمز ---- */
+  window.bioOffer=async function(){
+    if(!me || enabled(me.id)) return;
+    const a=rd(ASKED); if(a[me.id]) return;
+    if(!(await supported())) return;
+    a[me.id]=1; wr(ASKED,a);
+    setTimeout(function(){
+      askConfirm('می‌خواهید دفعه‌ی بعد با اثر انگشت یا چهره وارد شوید؟',function(){ window.bioToggle(true); });
+    },1200);
+  };
+
+  /* ---- تنظیمات ---- */
+  window.openBioSettings=async function(){
+    if(!me){ toast('ابتدا وارد شوید'); return; }
+    const ok=await supported(), on=enabled(me.id);
+    let body;
+    if(!ok){
+      body='<div style="font-size:13px;line-height:2.1">این دستگاه یا مرورگر از ورود بیومتریک پشتیبانی نمی‌کند.<br>'+
+        '• سامانه باید از طریق آدرس امن <b dir="ltr">https://</b> باز شده باشد.<br>'+
+        '• دستگاه باید قفل صفحه (اثر انگشت، تشخیص چهره یا PIN) داشته باشد.<br>'+
+        '• مرورگر را به‌روز کنید (Chrome / Safari / Edge).</div>';
+      openModal('🔐 ورود با اثر انگشت / چهره',body,'<button class="btn ghost" onclick="closeModal()">بستن</button>');
+      return;
+    }
+    body='<div style="font-size:13px;line-height:2.1">وضعیت روی این دستگاه: '+(on?'<span class="chip b-ok">فعال</span>':'<span class="chip b-mut">غیرفعال</span>')+
+      '<br>با فعال‌سازی، هر بار که سامانه را باز کنید (بدون خروج قبلی)، به‌جای رمز، اثر انگشت یا چهره‌ی شما پرسیده می‌شود.<br>'+
+      '<span style="color:var(--mut);font-size:12px">اطلاعات بیومتریک شما فقط در خود گوشی می‌ماند و به سامانه ارسال نمی‌شود. با زدن «خروج»، دفعه‌ی بعد دوباره نام کاربری و رمز لازم است. هر اثر انگشت/چهره‌ای که روی این گوشی ثبت شده باشد وارد می‌شود.</span></div>';
+    openModal('🔐 ورود با اثر انگشت / چهره',body,
+      (on?'<button class="btn danger" onclick="bioToggle(false)">غیرفعال‌سازی</button>':'<button class="btn pri" onclick="bioToggle(true)">فعال‌سازی</button>')+
+      '<button class="btn ghost" onclick="closeModal()">بستن</button>');
+  };
+  window.bioToggle=async function(on){
+    if(!me) return;
+    if(on){
+      try{ await enable(me.id,me.name); closeModal(); toast('✔ ورود با اثر انگشت / چهره فعال شد'); }
+      catch(e){ toast('⛔ '+errMsg(e)); }
+    }else{
+      const o=rd(KEY); delete o[me.id]; wr(KEY,o);
+      closeModal(); toast('✔ ورود بیومتریک غیرفعال شد');
+    }
+  };
 })();
 </script>
 </body>
