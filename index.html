@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-visual">
 <meta name="theme-color" content="#101a2c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>سامانه جامع HSE فولاد تنبور</title>
@@ -7501,8 +7503,52 @@ document.addEventListener('keydown', function(e){
   const fromB64=t=>{ t=t.replace(/-/g,'+').replace(/_/g,'/'); while(t.length%4) t+='='; return Uint8Array.from(atob(t),c=>c.charCodeAt(0)); };
   const enabled=uid=>!!rd(KEY)[uid];
 
+  /* علت‌های رایج خطای «rp id not validated» را از قبل تشخیص می‌دهد */
+  function hostProblem(){
+    const h=location.hostname, pr=location.protocol;
+    if(/; wv\)|\bwv\b/.test(navigator.userAgent) || (/Android/.test(navigator.userAgent) && /Version\/[\d.]+ Chrome/.test(navigator.userAgent))) return 'برنامه داخل WebView اپلیکیشن (APK) باز شده است و اندروید اجازه‌ی WebAuthn را در آن نمی‌دهد. از قفل بیومتریک خود سازنده‌ی APK استفاده کنید یا سایت را در Chrome باز کنید.';
+    if(pr==='file:') return 'برنامه به‌صورت فایل (file://) باز شده است. آن را روی یک دامنه‌ی HTTPS بارگذاری کنید.';
+    try{ if(window.self!==window.top) return 'برنامه داخل یک قاب (iframe/پیش‌نمایش) باز شده است. آدرس اصلی را مستقیم در Chrome یا Safari باز کنید.'; }catch(e){ return 'برنامه داخل یک قاب باز شده است. آدرس اصلی را مستقیم در مرورگر باز کنید.'; }
+    if(/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.indexOf(':')>=0) return 'برنامه با آدرس IP ('+h+') باز شده است. WebAuthn فقط روی «دامنه» کار می‌کند، نه IP.';
+    if(pr!=='https:' && h!=='localhost') return 'آدرس HTTPS نیست ('+location.origin+'). باید با https:// باز شود.';
+    return '';
+  }
+  /* افزونه‌ی بومی Capacitor: @capgo/capacitor-native-biometric (نام افزونه: NativeBiometric) */
+  /* پل بومی اندروید (پروژه‌ی Android Studio): window.HSEAndroid */
+  window.__hseBioCb=window.__hseBioCb||{};
+  window.__hseBioDone=function(id,ok,msg){
+    const c=window.__hseBioCb[id]; if(!c) return; delete window.__hseBioCb[id];
+    if(ok) c.res(true); else c.rej(new Error(msg||'لغو شد'));
+  };
+  function nat(){
+    try{
+      const A=window.HSEAndroid;
+      if(A && typeof A.authenticate==='function') return {
+        isAvailable:function(){ return Promise.resolve({isAvailable:!!A.isAvailable()}); },
+        verifyIdentity:function(){ return new Promise(function(res,rej){
+          const id='b'+Date.now()+Math.floor(Math.random()*1e6);
+          window.__hseBioCb[id]={res:res,rej:rej}; A.authenticate(id);
+        }); }
+      };
+    }catch(e){}
+    try{
+      const C=window.Capacitor;
+      if(C && (!C.isNativePlatform || C.isNativePlatform()) && C.Plugins && C.Plugins.NativeBiometric) return C.Plugins.NativeBiometric;
+    }catch(e){}
+    return null;
+  }
+  async function natAvail(){
+    const N=nat(); if(!N) return false;
+    try{ const r=await N.isAvailable(); return !!(r && r.isAvailable); }catch(e){ return false; }
+  }
+  async function natVerify(){
+    await nat().verifyIdentity({reason:'ورود به سامانه HSE',title:'تأیید هویت',subtitle:'سامانه جامع HSE فولاد تنبور',description:'اثر انگشت یا چهره‌ی خود را تأیید کنید'});
+    return true;
+  }
   async function supported(){
     try{
+      if(nat()) return await natAvail();
+      if(hostProblem()) return false;
       return !!(window.isSecureContext && window.PublicKeyCredential && navigator.credentials &&
         PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable &&
         await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
@@ -7510,6 +7556,7 @@ document.addEventListener('keydown', function(e){
   }
 
   async function enable(uid,name){
+    if(nat()){ await natVerify(); const o=rd(KEY); o[uid]='native'; wr(KEY,o); return; }
     const cred=await navigator.credentials.create({publicKey:{
       challenge:crypto.getRandomValues(new Uint8Array(32)),
       rp:{name:'HSE Tanbour'},
@@ -7522,6 +7569,8 @@ document.addEventListener('keydown', function(e){
   }
   async function verify(uid){
     const id=rd(KEY)[uid]; if(!id) return true;
+    if(nat()) return await natVerify();
+    if(id==='native') throw new Error('قفل بیومتریک بومی در این محیط در دسترس نیست؛ با رمز وارد شوید.');
     await navigator.credentials.get({publicKey:{
       challenge:crypto.getRandomValues(new Uint8Array(32)),
       allowCredentials:[{type:'public-key',id:fromB64(id),transports:['internal']}],
@@ -7531,9 +7580,10 @@ document.addEventListener('keydown', function(e){
   }
   function errMsg(e){
     const n=e&&e.name;
+    if(nat()) return 'تأیید بیومتریک انجام نشد'+((e&&e.message)?': '+e.message:'.');
     if(n==='NotAllowedError') return 'تأیید لغو شد یا انجام نشد. دوباره تلاش کنید.';
     if(n==='InvalidStateError') return 'این دستگاه قبلاً ثبت شده است.';
-    if(n==='SecurityError') return 'این قابلیت فقط روی آدرس امن (HTTPS) کار می‌کند.';
+    if(n==='SecurityError') return (hostProblem()||'آدرس فعلی ('+location.origin+') برای این قابلیت معتبر نیست؛ باید دامنه‌ی HTTPS باشد.');
     return 'خطا: '+((e&&e.message)||'نامشخص');
   }
 
@@ -7588,7 +7638,10 @@ document.addEventListener('keydown', function(e){
     const ok=await supported(), on=enabled(me.id);
     let body;
     if(!ok){
-      body='<div style="font-size:13px;line-height:2.1">این دستگاه یا مرورگر از ورود بیومتریک پشتیبانی نمی‌کند.<br>'+
+      const hp=nat()?'حسگر اثر انگشت/چهره روی این گوشی فعال نیست یا هنوز ثبت نشده است (از تنظیمات گوشی ثبت کنید).':hostProblem();
+      body='<div style="font-size:13px;line-height:2.1">'+(hp?'<div class="lerr" style="margin-bottom:8px">'+hp+'</div>':'')+
+        '<span style="color:var(--mut);font-size:12px" dir="ltr">'+location.origin+'</span><br>'+
+        'ورود بیومتریک روی این صفحه فعال نمی‌شود.<br>'+
         '• سامانه باید از طریق آدرس امن <b dir="ltr">https://</b> باز شده باشد.<br>'+
         '• دستگاه باید قفل صفحه (اثر انگشت، تشخیص چهره یا PIN) داشته باشد.<br>'+
         '• مرورگر را به‌روز کنید (Chrome / Safari / Edge).</div>';
