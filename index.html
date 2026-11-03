@@ -7667,5 +7667,17 @@ document.addEventListener('keydown', function(e){
   };
 })();
 </script>
+<script>
+/* داخل APK ساخته‌شده با مبدل‌های WebView، WebAuthn کار نمی‌کند؛ دکمه‌ی 🔐 مخفی می‌شود */
+(function(){
+  try{
+    var ua=navigator.userAgent||'';
+    var wv=/; wv\)/.test(ua)||(/Android/.test(ua)&&/Version\/[\d.]+ Chrome/.test(ua));
+    if(wv && !window.HSEAndroid && !window.Capacitor){
+      var b=document.getElementById('bioBtn'); if(b) b.classList.add('hidden');
+    }
+  }catch(e){}
+})();
+</script>
 </body>
 </html>
