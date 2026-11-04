@@ -841,6 +841,8 @@ let _renderAfterModal=false;
 let _gsTimer=null;
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+/* فقط داده‌ی تصویر base64 معتبر (jpeg/png/webp/gif) اجازه دارد داخل src قرار بگیرد؛ هر چیز دیگر حذف می‌شود */
+const safeImg=s=>{const v=String(s==null?'':s);return /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(v)?v:''};
 const p2=n=>String(n).padStart(2,'0');
 const nd=n=>String(n).replace(/\d/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d]);
 const nfmt=n=>Number(n||0).toLocaleString('fa-IR');
@@ -4473,7 +4475,7 @@ function fabMenu(){
 const QUICK_ANOMALY=['انباشت مواد و بسته شدن مسیر عبور','عدم استفاده از PPE','سیم‌کشی برق لخت','نشتی روغن و لغزندگی کف','فقدان حفاظ قطعات متحرک','تهویه ناکافی / بوی گاز','نامرتبی و پرت بودن کف سالن','گرمای شدید و کمبود آب'];
 function quickAnomaly(btn){const t=$('#f_desc');if(!t)return;t.value=t.value?t.value.replace(/\s+$/,'')+' — '+btn.textContent:btn.textContent;try{t.dispatchEvent(new Event('input'))}catch(e){console.warn(e)}}
 function pickRisk(btn,k,val){const h=$('#f_'+k);if(h)h.value=val;const seg=btn.parentElement;[].forEach.call(seg.querySelectorAll('.rsk'),b=>b.classList.remove('on'));btn.classList.add('on')}
-function photoBlock(p){
+function photoBlock(p){ p=safeImg(p);
  if(p)return '<div class="phprev"><img src="'+p+'" alt="عکس" onclick="viewPhoto(this.src)"><button type="button" class="btn danger sm" onclick="delPhoto()">🗑️ حذف</button></div>';
  return '<div class="phpick" style="display:flex;gap:8px;flex-wrap:wrap">'
   +'<label class="btn ghost" style="cursor:pointer">📷 گرفتن عکس با دوربین<input type="file" accept="image/*" capture="environment" style="display:none" onchange="pickPhoto(this)"></label>'
@@ -5646,7 +5648,7 @@ function openDetail(k,id){
    });
    h+='</div>';
  }
- if((k==='unsafe'||k==='bbs')&&r.photo)h+='<h4 class="msh">🖼️ عکس آنومالی</h4><img src="'+r.photo+'" alt="عکس" style="max-width:100%;max-height:320px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in" onclick="viewPhoto(this.src)">';
+ if((k==='unsafe'||k==='bbs')&&safeImg(r.photo))h+='<h4 class="msh">🖼️ عکس آنومالی</h4><img src="'+safeImg(r.photo)+'" alt="عکس" style="max-width:100%;max-height:320px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in" onclick="viewPhoto(this.src)">';
  if(k==='inspections'&&r.tpl){h+='<h4 class="msh">نتایج اقلام ('+nd(r.score||0)+'٪ انطباق)</h4>';
   if(TPLS[r.tpl]){h+='<div class="tplres">'+TPLS[r.tpl].items.map((it,i)=>{const a=(r.answers||{})[i]||'na';const cl=a==='ok'?'b-ok':a==='fail'?'b-bad':'b-mut';const tx=a==='ok'?'مناسب':a==='fail'?'مغایرت':'نامرتبط';const ub=(a==='fail'&&canCreate('unsafe'))?' <button class="btn ghost sm" style="padding:3px 8px;font-size:11px" onclick="closeModal();convertInspItemToUnsafe(\''+r.id+'\','+i+')">⚠️ تبدیل به آنومالی</button>':'';return '<div class="tri"><span>'+esc(it)+'</span><span><span class="chip '+cl+'">'+tx+'</span>'+ub+'</span></div>'}).join('')+'</div>'}
   else h+='<div class="lvprev">قالب حذف شده. مغایرت‌ها: '+((r.fails&&r.fails.length)?esc(r.fails.join('، ')):'ندارد')+'</div>'}
@@ -6401,6 +6403,7 @@ async function doLogin(){
  _loginBusy = true;
  try{
    if(!loginRole) return;
+   if(window._bootError && (!db||!Array.isArray(db.personnel))){ setLerr(window._bootError); return; }
    if(!auth){ setLerr('سرویس ورود بارگذاری نشده است. علت: '+(window._authErr||'نامشخص')+' | وضعیت داده: '+(db?'بارگذاری شد':'بارگذاری نشد')); return; }
    if(!db||!Array.isArray(db.personnel)){setLerr('داده‌ها هنوز بارگذاری نشده‌اند، لطفاً چند لحظه صبر کنید');return}
    if(Date.now() < _lockUntil){
@@ -6593,8 +6596,19 @@ dbRef.on('value', (snapshot) => {
  }
 
  if(!db || !db.personnel || db.personnel.length === 0){
-   db = seed();
-   db = sanitizeData(db);
+   /* داده‌ی اولیه فقط برای نصب تازه ساخته می‌شود: یعنی خواندن ابر موفق بوده و دیتابیس واقعاً خالی است.
+      اگر ابر در دسترس نباشد، هیچ داده‌ی ساختگی جای داده‌ی واقعی نشان داده یا ذخیره نمی‌شود. */
+   if(readOk && cloudRaw===null){
+     db = seed();
+     db = sanitizeData(db);
+   } else {
+     window._bootError = readOk
+       ? 'فهرست پرسنل در پایگاه داده یافت نشد؛ برای بررسی با مدیر سامانه تماس بگیرید.'
+       : 'اتصال به پایگاه داده برقرار نشد و نسخه‌ی محلی هم در این مرورگر موجود نیست. اتصال اینترنت و دسترسی به سرویس Firebase را بررسی کنید و صفحه را دوباره باز کنید.';
+     db = null;
+     setLerr(window._bootError);
+     return;
+   }
  }
 
  if(!db.usersSyncV2){
