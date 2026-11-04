@@ -1094,6 +1094,7 @@ function addListItem(key, val){
   if(!db.lists[key]) db.lists[key] = (DEFAULT_LISTS[key]||[]).slice();
   if(db.lists[key].some(x=>x===val)){toast('این گزینه قبلاً وجود دارد');return false}
   db.lists[key].push(val);
+  if(key==='EMG_ITEMS' && ensureItemChecklist(val)) queueModule('tpls');
   queueModule('lists');
   save();
   return true;
@@ -3387,7 +3388,7 @@ function saveForm(k,id){
  if(k==='inspections'){
   if(window._emgEqId) rec.eqId=window._emgEqId;
    window._emgEqId=null;
-   if(EMG_TPLS[rec.tpl]){ if(!rec.eqId) bad=bad||'تجهیز اضطراری مربوط به این چک‌لیست'; } else { delete rec.eqId; }
+   if(isEmgTpl(rec.tpl)){ if(!rec.eqId) bad=bad||'تجهیز اضطراری مربوط به این چک‌لیست'; } else { delete rec.eqId; }
    if(!rec.tpl)bad='نوع چک‌لیست';
   else if(!TPLS[rec.tpl])bad='چک‌لیست انتخاب‌شده منقضی شده — دوباره انتخاب کنید';
   else{
@@ -4276,7 +4277,7 @@ function saveTpl(tk){
  const title=$('#tf_t').value.trim(),per=parseInt($('#tf_p').value,10),items=$('#tf_i').value.split('\n').map(x=>x.trim()).filter(Boolean);
  if(!title||!per||per<1||!items.length){toast('عنوان، دوره و حداقل یک قلم الزامی است');return}
  const key=(tk&&TPLS[tk])?tk:'TPL-'+String(Date.now()).slice(-6);
- TPLS[key]={t:title,period:per,items:items};
+ TPLS[key]=Object.assign({},(tk&&TPLS[tk])?TPLS[tk]:{},{t:title,period:per,items:items});
  db.tpls=TPLS;
  queueModule('tpls');
  save();closeModal();
@@ -4583,7 +4584,7 @@ function inspDueList(includeNever){
   const out=[];
   if(!db) return out;
   Object.keys(TPLS||{}).forEach(tk=>{
-    if(EMG_TPLS[tk]) return;
+    if(isEmgTpl(tk)) return;
     const per=+((TPLS[tk]||{}).period)||0; if(!per) return;
     const last=(db.inspections||[]).filter(inspCounts).filter(r=>r.tpl===tk).sort((a,b)=>String(b.date).localeCompare(String(a.date)))[0];
     if(!last){ if(includeNever) out.push({kind:'tpl',id:tk,label:TPLS[tk].t,last:'',next:'',left:null}); return; }
@@ -5100,7 +5101,93 @@ const EMG_TPLS = {
     'عدم رطوبت'
   ]}
 };
+/* ---- چک‌لیست اختصاصی هر تجهیزِ افزوده‌شده (با ➕) ---- */
+const EMG_GENERIC_TPL = {t:'بازرسی تجهیز اضطراری',period:30,items:[
+  'وجود تجهیز در محل مشخص و دسترسی آزاد',
+  'سالم بودن بدنه و اجزای تجهیز (بدون ترک، زنگ‌زدگی یا آسیب)',
+  'برچسب دستورالعمل و تاریخ معتبر، قابل خواندن',
+  'علامت‌گذاری و تابلوی راهنمای مناسب',
+  'عدم وجود مانع یا اجسام خارجی در مسیر دسترسی',
+  'آمادگی کامل برای استفاده در شرایط اضطراری'
+]};
+const EMG_NAME_STOP=['بازرسی','تجهیز','اضطراری','و','با','در','از','کیلوگرمی','کیلو','لیتری','لیتر'];
+function emgNorm(s){
+  return String(s||'')
+    .replace(/[\u200c\u200d\u064b-\u065f]/g,'')
+    .replace(/\u064a/g,'ی').replace(/\u0643/g,'ک')
+    .replace(/[\u06f0-\u06f9]/g,function(c){return String(c.charCodeAt(0)-0x06f0)})
+    .replace(/[\u0660-\u0669]/g,function(c){return String(c.charCodeAt(0)-0x0660)})
+    .toLowerCase().replace(/[^a-z0-9\u0620-\u06d3\s]+/g,' ').replace(/\s+/g,' ').trim();
+}
+function emgTokens(s){
+  return emgNorm(s).split(' ').filter(function(w){ return w && EMG_NAME_STOP.indexOf(w)<0 && !/^[0-9]+$/.test(w); });
+}
+function emgGrams(s){
+  const x=emgNorm(s).replace(/ /g,'');
+  const out=[];
+  for(let i=0;i<x.length-1;i++){ const g=x.substr(i,2); if(out.indexOf(g)<0) out.push(g); }
+  return out;
+}
+function emgSimilarity(a,b){
+  const ta=emgTokens(a), tb=emgTokens(b);
+  if(!ta.length||!tb.length) return 0;
+  let common=0; ta.forEach(function(w){ if(tb.indexOf(w)>=0) common++; });
+  const union=ta.concat(tb).filter(function(w,i,arr){return arr.indexOf(w)===i}).length;
+  const tok=union?common/union:0;
+  const ga=emgGrams(a), gb=emgGrams(b);
+  let shared=0; ga.forEach(function(g){ if(gb.indexOf(g)>=0) shared++; });
+  const dice=(ga.length+gb.length)?2*shared/(ga.length+gb.length):0;
+  return 0.7*tok+0.3*dice;
+}
+
+/* بهترین چک‌لیست مشابه برای یک تجهیز جدید (اگر شباهت کافی نبود: چک‌لیست عمومی) */
+function emgBestBase(item){
+  const pool={};
+  Object.keys(EMG_TPLS).forEach(function(k){ pool[k]=(TPLS&&TPLS[k])||EMG_TPLS[k]; });
+  if(TPLS) Object.keys(TPLS).forEach(function(k){ if(TPLS[k] && TPLS[k].emgItem) pool[k]=TPLS[k]; });
+  let best=null, bs=0;
+  Object.keys(pool).forEach(function(k){
+    const p=pool[k]; if(!p) return;
+    const s=emgSimilarity(item, p.emgItem||p.t);
+    if(s>bs){ bs=s; best=k; }
+  });
+  if(best===null || bs<0.3) return {tpl:EMG_GENERIC_TPL};
+  return {tpl:pool[best]};
+}
+/* کلید چک‌لیست اختصاصی یک تجهیز (ساخته‌شده با ➕) */
+function emgOwnTplKey(item){
+  const t=String(item||'');
+  if(!t || typeof TPLS==='undefined' || !TPLS) return null;
+  const ks=Object.keys(TPLS);
+  for(let i=0;i<ks.length;i++){ const x=TPLS[ks[i]]; if(x && x.emgItem===t) return ks[i]; }
+  return null;
+}
+/* آیا این کلید، چک‌لیست تجهیز اضطراری است (پیش‌فرض یا اختصاصی)؟ */
+function isEmgTpl(k){
+  return !!k && (!!EMG_TPLS[k] || !!(typeof TPLS!=='undefined' && TPLS && TPLS[k] && TPLS[k].emgItem));
+}
+/* ساخت چک‌لیست برای یک تجهیز جدید؛ تجهیزات پیش‌فرض همان چک‌لیست‌های آماده‌ی خودشان را دارند */
+function ensureItemChecklist(item){
+  item=String(item||'').trim();
+  if(!item || window._viewOnly || !db || typeof TPLS==='undefined' || !TPLS) return null;
+  if((DEFAULT_LISTS.EMG_ITEMS||[]).indexOf(item)>=0) return null;
+  if(emgOwnTplKey(item)) return null;
+  const base=emgBestBase(item).tpl;
+  const key='EQC-'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  TPLS[key]={t:'بازرسی '+item, period:(+base.period)||30, items:base.items.slice(), emgItem:item};
+  db.tpls=TPLS;
+  return key;
+}
+/* برای همه‌ی تجهیزات فهرست که هنوز چک‌لیست ندارند، چک‌لیست می‌سازد؛ تعداد ساخته‌شده‌ها را برمی‌گرداند */
+function ensureAllItemChecklists(){
+  if(!canManageTpl() || window._viewOnly) return 0;
+  let n=0;
+  (L('EMG_ITEMS')||[]).forEach(function(it){ if(ensureItemChecklist(it)) n++; });
+  return n;
+}
+
 function emgTplKey(item){
+  const own=emgOwnTplKey(item); if(own) return own;
   const t = String(item||'');
   if(t.indexOf('پودر')>=0) return 'emg_powder';
   if(t.indexOf('CO2')>=0) return 'emg_co2';
@@ -5114,7 +5201,7 @@ function emgTplKey(item){
 }
 /* اطمینان از وجود چک‌لیست تجهیز در داده‌های برنامه (برای همه کاربران) */
 function ensureEmgTpl(key){
-  if(!key || !EMG_TPLS[key]) return false;
+  if(!key || !isEmgTpl(key)) return false;
   if(typeof TPLS==='undefined' || !TPLS) return false;
   if(!TPLS[key]) TPLS[key] = JSON.parse(JSON.stringify(EMG_TPLS[key]));
   return true;
@@ -5201,15 +5288,20 @@ function syncEmgEquip(eqId){
   }catch(e){ console.warn('همگام‌سازی تجهیزات اضطراری:',e); return 0; }
 }
 function emgSyncAllUI(){
+  const made=ensureAllItemChecklists();
+  if(made){ queueModule('tpls'); save(); }
   const n=syncEmgEquip();
-  toast(n?('✔ '+nd(n)+' تجهیز از روی چک‌لیست‌ها به‌روز شد'):'همهٔ تجهیزات از قبل به‌روز بودند');
+  const parts=[];
+  if(made) parts.push('✔ '+nd(made)+' چک‌لیست ساخته شد');
+  if(n) parts.push((made?'':'✔ ')+nd(n)+' تجهیز از روی چک‌لیست‌ها به‌روز شد');
+  toast(parts.length?parts.join('، '):'همهٔ تجهیزات از قبل به‌روز بودند');
   if(curPage==='emgEquip') refreshCurrent();
 }
 /* انتخاب تجهیز در فرم بازرسی: فقط برای چک‌لیست‌های تجهیزات اضطراری نشان داده می‌شود */
 function refreshEqSel(){
   const sel=document.getElementById('f_eqId'); if(!sel) return;
   const tsel=document.getElementById('f_tpl'); const tpl=tsel?tsel.value:'';
-  const isEmg=!!EMG_TPLS[tpl];
+  const isEmg=isEmgTpl(tpl);
   const ff=sel.closest('.ff'); if(ff) ff.style.display=isEmg?'':'none';
   const want=sel.dataset.init!=='1'?(sel.dataset.v||''):sel.value;
   sel.dataset.init='1';
@@ -5224,7 +5316,7 @@ function refreshEqSel(){
 /* چک‌لیست‌های تجهیزات اضطراری که به هیچ تجهیزی وصل نیستند (در لیست تجهیزات حساب نمی‌شوند) */
 function emgOrphanInsps(){
   const ids=new Set((db.emgEquip||[]).map(r=>r.id));
-  return (db.inspections||[]).filter(i=>EMG_TPLS[i.tpl] && !(i.appr&&i.appr.stage==='rejected') && !ids.has(emgEqIdOfInsp(i)))
+  return (db.inspections||[]).filter(i=>isEmgTpl(i.tpl) && !(i.appr&&i.appr.stage==='rejected') && !ids.has(emgEqIdOfInsp(i)))
     .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
 }
 function emgOrphanBox(){
@@ -7611,6 +7703,22 @@ function capaFromInspection(id, i){
     }catch(e){ console.warn('چک‌لیست تجهیزات:', e); }
   }
   const iv = setInterval(() => { if(db && me && TPLS){ clearInterval(iv); run(); } }, 1000);
+})();
+</script>
+<script>
+/* یک‌بار: تجهیزاتی که قبل از این قابلیت با ➕ اضافه شده‌اند، چک‌لیست اختصاصی خود را می‌گیرند */
+(function(){
+  const FLAG='hse_emg_item_tpl_v1';
+  function run(){
+    try{
+      if(localStorage.getItem(FLAG)) return;
+      if(!me || !canManageTpl() || window._viewOnly) return;
+      const n=ensureAllItemChecklists();
+      localStorage.setItem(FLAG,'1');
+      if(n){ queueModule('tpls'); save({immediate:true}); if(typeof toast==='function') toast('✔ برای '+nd(n)+' تجهیز چک‌لیست ساخته شد'); }
+    }catch(e){ console.warn('چک‌لیست تجهیزات افزوده‌شده:', e); }
+  }
+  const iv=setInterval(function(){ if(db && me && TPLS){ clearInterval(iv); run(); } },1000);
 })();
 </script>
 
