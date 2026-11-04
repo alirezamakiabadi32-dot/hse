@@ -11,6 +11,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -816,7 +817,7 @@ input,select,textarea{font-size:17px!important}
 
 <script>
 /* ============================================================
-   سامانه جامع HSE فولاد تنبور — نسخه ۴.۳ (اصلاح باگ‌ها)
+   سامانه جامع HSE فولاد تنبور — نسخه ۴.۵ (پیوند CAPA با رکورد منبع)
 ============================================================ */
 const firebaseConfig = {
   apiKey: "AIzaSyDzypxZ-gZjOKaDngoxsgyw1PvcOG5eUYU",
@@ -910,7 +911,7 @@ const DEFAULT_LISTS = {
   AREAS0:['سالن ذوب','ریخته‌گری مذاب','قالب‌سازی و مولر','سندبلاست و تمیزکاری','برش و جوشکاری','حرارت‌کاری','انبار مواد و کک','آزمایشگاه','تأسیسات','اداری و رفاهی'],
   TBT:['پاشش مذاب و رعایت فاصله امن','جرثقیل، باندبندی و سیگنال دهی','استرس حرارتی و آب‌رسانی در شیفت','گاز CO و اهمیت تهویه سالن ذوب','ایمنی سندبلاست و حفاظت تنفسی','حریق و نحوه اطفای اضطراری','انرژی‌های خطرناک و LOTO','کار در ارتفاع و سرویس دودکش','مواد شیمیایی و MSDS رزین فوران','حمل دستی صحیح بار'],
   COURSES:['ایمنی کار با فلز مذاب و کوره','ایمنی جرثقیل و باندبندی بار','ورود به فضای بسته','کار در ارتفاع','اطفاء حریق و عملیات امداد','کمک‌های اولیه','مواد شیمیایی و MSDS','حفاظت تنفسی و سندبلاست','حفاظت شنوایی','برق صنعتی و LOTO'],
-  INC_TYPES:['شبه‌حادثه (Near Miss)','جراحت خفیف (First Aid)','درمان پزشکی (MTC)','جراحت دردسرساز (LTI)','حادثه با خسارت مالی','بیماری شغلی','حادثه زیست‌محیطی'],
+  INC_TYPES:['شبه‌حادثه (Near Miss)','جراحت خفیف (First Aid)','درمان پزشکی (MTC)','جراحت دردسرساز (LTI)','فوت (Fatality)','حادثه با خسارت مالی','بیماری شغلی','حادثه زیست‌محیطی'],
   BODY_PARTS:['سر و صورت','چشم','دست','پا','تنه','شنوایی','سیستم تنفسی','پوست','سایر'],
   UNSAFE_CATS:['وضعیت ناایمن','رفتار ناایمن'],
   PTW_TYPES:['کار گرم (جوش/برش/سنگ‌زنی)','ورود به فضای بسته','کار در ارتفاع','کار برق / LOTO','گودبرداری','حمل بار با جرثقیل','سایر'],
@@ -940,7 +941,7 @@ const DEFAULT_LISTS = {
   FMEA_SOD:['1','2','3','4','5','6','7','8','9','10'],
   LEC_L:['0.1','0.2','0.5','1','2','3','6','10'],
   LEC_E:['0.5','1','2','3','6','10'],
-  LEC_C:['1','2','5','7','15','40','100'],
+  LEC_C:['1','2','3','7','15','40','100'],
   JSA_RISK:['کم','متوسط','بالا','بحرانی'],
   LOTO_ENERGY:['برق','مکانیکی','هیدرولیک','پنوماتیک','حرارتی / مذاب','گاز','انرژی ذخیره‌شده (فنر، وزنه، فشار)','شیمیایی'],
   MOC_TYPES:['تغییر فرایند','تغییر تجهیز / ماشین‌آلات','تغییر مواد اولیه / مصرفی','تغییر نفرات / سازمان','تغییر رویه / دستورالعمل','تغییر موقت','تغییر اضطراری'],
@@ -953,6 +954,126 @@ const DEFAULT_LISTS = {
   LEGAL_COMPLIANCE:['منطبق','منطبق جزئی','نامنطبق','در دست بررسی']
 };
 
+/* ---------- ثابت‌ها و توابع کمکی HSE (طبقه‌بندی حوادث، شاخص‌ها، FMEA، پیوند ماژول‌ها) ---------- */
+const LTI_TYPE='جراحت دردسرساز (LTI)';
+const FATAL_TYPE='فوت (Fatality)';
+/* شاخص‌های ایمنی فقط از حوادث «قابل ثبت» محاسبه می‌شوند؛ خسارت مالی بدون آسیب، حادثه‌ی قابل ثبت نیست */
+const RECORDABLE_TYPES=['درمان پزشکی (MTC)',LTI_TYPE,FATAL_TYPE,'بیماری شغلی'];
+const LTI_TYPES=[LTI_TYPE,FATAL_TYPE];
+const isRecordable=r=>RECORDABLE_TYPES.indexOf(r&&r.type)>=0;
+const isLTI=r=>LTI_TYPES.indexOf(r&&r.type)>=0;
+/* FMEA: RPN به‌تنهایی کافی نیست؛ شدت ۹ و ۱۰ (پیامد ایمنی/مرگ) همیشه حداقل «بالا» است */
+function fmeaBand(rpn,S){
+ const v=+rpn||0; let b=v<=50?0:v<=100?1:v<=200?2:3;
+ if((+S||0)>=9) b=Math.max(b,2);
+ return [['b-ok','کم'],['b-warn','متوسط'],['b-org','بالا'],['b-bad','بحرانی']][b];
+}
+/* نام کاربری حساب جاری (me فقط نام و نقش را نگه می‌دارد) */
+function curUsername(){ const p=(db&&db.personnel||[]).find(x=>x.id===(me&&me.id)); return p?String(p.u||''):''; }
+/* ساخت گزارش قانونی از روی حادثه (فرم با اطلاعات حادثه پیش‌پر می‌شود) */
+function legalFromIncident(id){
+ const r=(db.incidents||[]).find(x=>x.id===id);
+ if(!r){toast('حادثه یافت نشد');return}
+ openForm('legalReport',null,{
+  date:r.date||todayJ(),
+  type:r.type===FATAL_TYPE?'حادثه منجر به فوت':'',
+  incRef:r.id+' — '+(r.title||''),
+  injured:r.injured||'',
+  lostDays:r.lostDays||'',
+  desc:'شرح حادثه: '+(r.desc||r.title||'')+(r.immediate?'\nاقدام فوری: '+r.immediate:'')
+ });
+}
+/* ---------- پیوند CAPA با رکورد منبع ----------
+   مرجع هر CAPA (ref) همیشه شناسه‌ی واقعی رکورد منبع است و از فهرست انتخاب می‌شود.
+   فیلد برگشتی در رکورد منبع (capaRef / actRef) فقط خواندنی است و خودکار تنظیم می‌شود. */
+const CAPA_SRC_MODS={
+ 'حادثه / شبه‌حادثه':['incidents'],
+ 'آنومالی':['unsafe'],
+ 'ارزیابی ریسک':['risks'],
+ 'ممیزی':['audits'],
+ 'مانور':['drills'],
+ 'بازرسی':['inspections','equipCert'],
+ 'سایر':['legalReg','envMon'],
+ '5S':['s5'],
+ 'مجوز کار':['ptw']
+};
+const CAPA_LINK_FIELD={incidents:'capaRef',unsafe:'capaRef',risks:'capaRef',audits:'actRef',drills:'actRef',legalReg:'actRef',envMon:'actRef',equipCert:'actRef'};
+const CAPA_SRC_ALL=[].concat(...Object.values(CAPA_SRC_MODS));
+function isCapaSourceMod(k){ return CAPA_SRC_ALL.indexOf(k)>=0; }
+/* رکورد منبع را از روی شناسه پیدا می‌کند (شناسه‌ها پیشوند ماژول دارند و یکتا هستند) */
+function findSourceRec(id){
+ if(!id) return null;
+ for(const m of CAPA_SRC_ALL){ const o=(db[m]||[]).find(x=>x&&x.id===id); if(o) return {m:m,o:o}; }
+ return null;
+}
+/* مرجع متنی قدیمی (مثلاً INC-0002) را به شناسه‌ی واقعی رکورد تبدیل می‌کند؛ اگر پیدا نشود خالی برمی‌گردد */
+function resolveSourceId(ref){
+ const s=String(ref||'').trim(); if(!s) return '';
+ const ids=[]; RECORD_MODS.forEach(m=>(db[m]||[]).forEach(x=>{ if(x&&x.id) ids.push(x.id); }));
+ if(ids.indexOf(s)>=0) return s;
+ const hits=ids.filter(id=>id.indexOf(s+'-')===0);
+ return hits.length===1?hits[0]:'';
+}
+function capaSrcLabel(m,o){
+ const cut=(v,n)=>{ v=String(v||''); return v.length>n?v.slice(0,n)+'…':v; };
+ const dt=o.date?' ('+o.date+')':'';
+ switch(m){
+  case 'incidents': return cut(o.title,60)+dt;
+  case 'unsafe': return cut(o.desc,60)+dt;
+  case 'risks': return cut(o.hazard||o.act,60);
+  case 'audits': return cut(o.finding,30)+' — '+cut(o.req,30);
+  case 'drills': return cut(o.kind,40)+dt;
+  case 'inspections': return (TPLS[o.tpl]?TPLS[o.tpl].t:'بازرسی')+dt;
+  case 'equipCert': return cut(o.item,60);
+  case 'legalReg': return cut(o.title,60);
+  case 'envMon': return cut(o.param,30)+' — '+cut(o.point,30);
+  case 's5': return 'ارزیابی 5S — '+cut(o.area,40)+dt;
+  case 'ptw': return cut(o.equip||o.desc,60)+(o.startD?' ('+o.startD+')':'');
+ }
+ return '';
+}
+/* گزینه‌های «رکورد منبع» بر اساس نوع منبع انتخاب‌شده */
+function capaRefOpts(src){
+ const out=[];
+ (CAPA_SRC_MODS[src]||[]).forEach(m=>(db[m]||[]).forEach(o=>{ if(o&&o.id) out.push({v:o.id,l:o.id+' — '+capaSrcLabel(m,o)}); }));
+ return out;
+}
+/* وقتی CAPA حذف یا از منبع جدا می‌شود، پیوند برگشتیِ همان CAPA از منبع پاک می‌شود */
+function unlinkCapaFromSource(c){
+ const hit=c&&c.ref?findSourceRec(c.ref):null, f=hit&&CAPA_LINK_FIELD[hit.m];
+ if(f && hit.o[f]===c.code){ hit.o[f]=''; queueRec(hit.m,hit.o.id); }
+}
+/* همگام‌سازی پیوند CAPA با منبع (هنگام ثبت؛ هم ثبت جدید و هم ویرایش) */
+function syncCapaLinks(c,prev){
+ if(prev && prev.ref && prev.ref!==c.ref) unlinkCapaFromSource(prev);
+ const hit=c.ref?findSourceRec(c.ref):null;
+ if(!hit) return;
+ const o=hit.o, f=CAPA_LINK_FIELD[hit.m];
+ let changed=false;
+ if(hit.m==='unsafe' && ['ثبت شده','در حال رسیدگی'].includes(o.status)){ o.status='ارجاع به اقدام'; changed=true; }
+ if(hit.m==='incidents' && ['گزارش اولیه','در حال بررسی'].includes(o.status)){ o.status='در حال اقدام'; changed=true; }
+ if(f && o[f]!==c.code){
+   const cur=o[f];
+   const curLive=!!cur && (db.actions||[]).some(a=>a.code===cur && a.id!==c.id);
+   if(!curLive){ o[f]=c.code; changed=true; (o.log=o.log||[]).push({u:me.name,d:todayJ(),t:'ارجاع به CAPA '+c.code}); }
+ }
+ if(changed) queueRec(hit.m,o.id);
+}
+/* در رکورد منبع: فهرست همه‌ی CAPAهای مرتبط (بر اساس مرجع هر CAPA) */
+function linkedCapaBox(k,r){
+ if(!r||!isCapaSourceMod(k)) return '';
+ const list=(db.actions||[]).filter(a=>a.ref===r.id);
+ if(!list.length) return '';
+ return '<div class="lvprev" style="margin-top:12px"><b>🛠️ اقدام‌های اصلاحی مرتبط ('+nd(list.length)+'):</b>'+
+  list.map(a=>'<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn ghost sm" onclick="closeModal();openDetail(\'actions\',\''+a.id+'\')">'+esc(a.code||a.id)+'</button>'+chip(a.status||'')+'<span style="color:var(--mut);font-size:12px">'+nd(a.progress||0)+'٪ — مهلت: '+esc(a.due||'—')+'</span></div>').join('')+'</div>';
+}
+/* در CAPA: نمایش و پیوند به رکورد منبع */
+function capaSourceBox(k,r){
+ if(k!=='actions'||!r||!r.ref) return '';
+ const hit=findSourceRec(r.ref);
+ if(!hit) return '<div class="lvprev" style="margin-top:12px"><b>🔗 منبع:</b> '+esc(r.src||'')+' — '+esc(r.ref)+' <span class="chip b-bad">یافت نشد</span></div>';
+ return '<div class="lvprev" style="margin-top:12px"><b>🔗 منبع این اقدام:</b> '+esc(r.src||'')+' — '+esc(hit.o.id)+' <button class="btn ghost sm" onclick="closeModal();openDetail(\''+hit.m+'\',\''+hit.o.id+'\')">مشاهده منبع</button></div>';
+}
 function L(key){
   if(key==='AREAS0' && db && Array.isArray(db.areas)) return db.areas;
   if(!db || !db.lists) return DEFAULT_LISTS[key] || [];
@@ -1082,8 +1203,10 @@ function perms(){
 const WORKER_VIEW=['dash','incidents','ptw','ppeTx','medical','trainings','toolbox','tbm'];
 function can(module, action){
   if(!me) return false;
-  if(me.role==='worker' && action==='view' && !WORKER_VIEW.includes(module)) return false;
   if(me.role==='manager') return true;
+  const ov = me.perm && me.perm[module] && me.perm[module][action];
+  if(typeof ov==='boolean') return ov;
+  if(me.role==='worker' && action==='view' && !WORKER_VIEW.includes(module)) return false;
   const P = perms();
   if(!P[module] || !P[module][action]) return false;
   return !!P[module][action][me.role];
@@ -1895,7 +2018,8 @@ incidents:{t:'حوادث و شبه‌حادثه‌ها',i:'🚨',
   {k:'corrective',l:'اقدام اصلاحی',t:'txt',gate:['expert','manager']},
   {k:'preventive',l:'اقدام پیشگیرانه',t:'txt',gate:['expert','manager']},
   {k:'cost',l:'خسارت مالی (ریال)',t:'num',gate:['expert','manager']},
-  {k:'capaRef',l:'کد CAPA مرتبط',t:'text',gate:['expert','manager']}],
+  {k:'capaRef',l:'کد CAPA مرتبط (خودکار)',t:'text',ro:1,gate:['expert','manager']},
+  {k:'riskRef',l:'ارزیابی ریسک مرتبط',t:'sel',o:()=>riskRefOpts(),gate:['expert','manager']}],
  cols:['date','type','area','title','injured','hasAnalysis']},
 
 unsafe:{t:'آنومالی (وضعیت‌ها و رفتارهای ناایمن)',i:'⚠️',
@@ -1917,7 +2041,8 @@ unsafe:{t:'آنومالی (وضعیت‌ها و رفتارهای ناایمن)',
   {k:'fixedJ',l:'تاریخ رفع',t:'date'},
   {k:'verifyBy',l:'تأییدکننده رفع',t:'sel',o:P,gate:['expert','manager']},
   {k:'verifyJ',l:'تاریخ تأیید',t:'date',gate:['expert','manager']},
-  {k:'capaRef',l:'کد اقدام اصلاحی مرتبط',t:'text',gate:['expert','manager']}
+  {k:'capaRef',l:'کد اقدام اصلاحی مرتبط (خودکار)',t:'text',ro:1,gate:['expert','manager']},
+   {k:'riskRef',l:'ارزیابی ریسک مرتبط',t:'sel',o:()=>riskRefOpts(),gate:['expert','manager']}
  ],
  cols:['date','cat','area','desc','photo','risk','responsible','due','aging']},
 
@@ -1926,7 +2051,7 @@ actions:{t:'اقدامات اصلاحی و پیشگیرانه (CAPA)',i:'🛠️
  fields:[
   {k:'code',l:'کد اقدام',t:'text',gate:['expert','manager'],ph:'خودکار تولید می‌شود'},
   {k:'src',l:'منبع',t:'sel',o:()=>L('ACTION_SRC'),list:'ACTION_SRC',req:1},
-  {k:'ref',l:'کد مرجع (مثال: INC-0002)',t:'text'},
+  {k:'ref',l:'رکورد منبع (بر اساس «منبع» فهرست می‌شود)',t:'sel',o:()=>[]},
   {k:'type',l:'نوع اقدام',t:'sel',o:['اصلاحی (Corrective)','پیشگیرانه (Preventive)','بهبود (Improvement)'],req:1},
   {k:'desc',l:'شرح اقدام',t:'txt',req:1},
   {k:'rootCause',l:'علت ریشه‌ای',t:'txt'},
@@ -1942,7 +2067,8 @@ actions:{t:'اقدامات اصلاحی و پیشگیرانه (CAPA)',i:'🛠️
   {k:'verify',l:'تأییدکننده',t:'sel',o:P},
   {k:'verifyJ',l:'تاریخ تأیید',t:'date',gate:['expert','manager']},
   {k:'verifyNote',l:'نظر تأییدکننده',t:'txt',gate:['expert','manager']},
-  {k:'effectiveness',l:'اثربخشی اقدام',t:'sel',o:['اثربخش','نیازمند بهبود','بی‌اثر'],gate:['expert','manager']}
+  {k:'effectiveness',l:'اثربخشی اقدام',t:'sel',o:['اثربخش','نیازمند بهبود','بی‌اثر'],gate:['expert','manager']},
+   {k:'riskRef',l:'ارزیابی ریسک مرتبط',t:'sel',o:()=>riskRefOpts()}
  ],
  cols:['code','src','ref','type','desc','owner','prio','progress','due','effectiveness']},
 
@@ -1954,7 +2080,8 @@ risks:{t:'شناسایی خطر و ارزیابی ریسک (ماتریس ۵×۵)
   {k:'s',l:'شدت (قبل از کنترل)',t:'sel',o:()=>L('RISK_LEVELS'),req:1,list:'RISK_LEVELS'},{k:'p',l:'احتمال (قبل از کنترل)',t:'sel',o:()=>L('RISK_LEVELS'),req:1,list:'RISK_LEVELS'},
   {k:'addCtrl',l:'کنترل‌های تکمیلی مورد نیاز',t:'txt'},
   {k:'rs',l:'شدت پس از کنترل',t:'sel',o:()=>L('RISK_LEVELS'),list:'RISK_LEVELS'},{k:'rp',l:'احتمال پس از کنترل',t:'sel',o:()=>L('RISK_LEVELS'),list:'RISK_LEVELS'},
-  {k:'owner',l:'مسئول پیگیری',t:'sel',o:P},{k:'review',l:'تاریخ بازنگری بعدی',t:'date'}],
+  {k:'owner',l:'مسئول پیگیری',t:'sel',o:P},{k:'review',l:'تاریخ بازنگری بعدی',t:'date'},
+   {k:'capaRef',l:'کد CAPA مرتبط (خودکار)',t:'text',ro:1,gate:['expert','manager']}],
  cols:['act','area','hazard','level','level2','owner']},
 
 fmea:{t:'FMEA — تحلیل حالت خرابی و اثرات',i:'⚙️',
@@ -2090,7 +2217,8 @@ envMon:{t:'پایش زیست‌محیطی',i:'🌫️',
  fields:[{k:'date',l:'تاریخ',t:'date',req:1,def:todayJ},
   {k:'point',l:'نقطه پایش',t:'sel',o:()=>L('ENV_POINTS'),list:'ENV_POINTS'},
   {k:'param',l:'پارامتر',t:'text',req:1},{k:'val',l:'مقدار',t:'num'},{k:'unit',l:'واحد',t:'text'},
-  {k:'limit',l:'حد استاندارد',t:'num'},{k:'result',l:'نتیجه',t:'sel',o:()=>L('ENV_RESULTS'),list:'ENV_RESULTS'},{k:'note',l:'توضیحات',t:'txt'}],
+  {k:'limit',l:'حد استاندارد',t:'num'},{k:'result',l:'نتیجه',t:'sel',o:()=>L('ENV_RESULTS'),list:'ENV_RESULTS'},{k:'note',l:'توضیحات',t:'txt'},
+   {k:'actRef',l:'کد اقدام اصلاحی (CAPA) (خودکار)',t:'text',ro:1}],
  cols:['date','point','param','val','unit','result']},
 chem:{t:'مواد شیمیایی و MSDS',i:'🧪',
  fields:[{k:'name',l:'نام ماده',t:'text',req:1},{k:'use',l:'کاربرد در فرآیند',t:'text'},
@@ -2106,7 +2234,7 @@ drills:{t:'مانورها و واکنش اضطراری',i:'🧯',
   {k:'kind',l:'سناریو',t:'sel',o:()=>L('DRILL_KINDS'),list:'DRILL_KINDS'},
   {k:'scenario',l:'شرح سناریو',t:'txt'},{k:'parts',l:'شرکت‌کنندگان (نفر)',t:'num'},{k:'dur',l:'مدت (دقیقه)',t:'num'},
   {k:'findings',l:'نقاط قوت و ضعف',t:'txt'},{k:'score',l:'ارزیابی کلان',t:'sel',o:()=>L('DRILL_SCORES'),list:'DRILL_SCORES'},
-  {k:'actRef',l:'کد اقدام مرتبط',t:'text'}],
+  {k:'actRef',l:'کد اقدام مرتبط (خودکار)',t:'text',ro:1}],
  cols:['date','kind','parts','score']},
 emgEquip:{t:'تجهیزات اضطراری',i:'🧨',
  fields:[{k:'item',l:'نوع تجهیز',t:'sel',req:1,o:()=>L('EMG_ITEMS'),list:'EMG_ITEMS'},
@@ -2138,7 +2266,7 @@ audits:{t:'ممیزی‌های HSE',i:'🔎',
   {k:'scope',l:'دامنه ممیزی',t:'text'},{k:'auditor',l:'ممیز',t:'text'},
   {k:'finding',l:'نتیجه',t:'sel',o:()=>L('AUDIT_FINDINGS'),list:'AUDIT_FINDINGS'},
   {k:'req',l:'الزام / بند',t:'text'},{k:'desc',l:'شرح یافته',t:'txt'},
-  {k:'actRef',l:'کد اقدام اصلاحی',t:'text'},{k:'status',l:'وضعیت یافته',t:'sel',o:()=>L('AUDIT_STATUS'),list:'AUDIT_STATUS'}],
+  {k:'actRef',l:'کد اقدام اصلاحی (خودکار)',t:'text',ro:1},{k:'status',l:'وضعیت یافته',t:'sel',o:()=>L('AUDIT_STATUS'),list:'AUDIT_STATUS'}],
  cols:['date','type','finding','actRef','status']},
 docs:{t:'اسناد و مدارک HSE',i:'📁',
  fields:[{k:'code',l:'کد سند',t:'text',req:1},{k:'title',l:'عنوان سند / رویه',t:'text',req:1},
@@ -2201,7 +2329,8 @@ equipCert:{t:'بازرسی و گواهی تجهیزات حساس',i:'🏗️',
   {k:'certNo',l:'شماره گواهی',t:'text'},
   {k:'inspector',l:'بازرس / مرجع صادرکننده',t:'text'},
   {k:'result',l:'نتیجه بازرسی',t:'sel',o:()=>L('EQUIP_RESULTS'),list:'EQUIP_RESULTS'},
-  {k:'note',l:'توضیحات و نواقص',t:'txt'}],
+  {k:'note',l:'توضیحات و نواقص',t:'txt'},
+   {k:'actRef',l:'کد اقدام اصلاحی (CAPA) (خودکار)',t:'text',ro:1}],
  cols:['type','item','loc','nextD','certDue','result']},
 
 confined:{t:'فضای محصور',i:'🕳️',
@@ -2277,7 +2406,7 @@ legalReport:{t:'گزارش‌دهی قانونی حوادث',i:'⚖️',
   {k:'date',l:'تاریخ حادثه',t:'date',req:1,def:todayJ},
   {k:'type',l:'نوع گزارش',t:'sel',o:()=>L('LEGAL_REPORT_TYPES'),req:1,list:'LEGAL_REPORT_TYPES'},
   {k:'agency',l:'مرجع دریافت‌کننده',t:'sel',o:()=>L('LEGAL_AGENCIES'),req:1,list:'LEGAL_AGENCIES'},
-  {k:'incRef',l:'حادثه مرتبط (کد یا عنوان)',t:'text'},
+  {k:'incRef',l:'حادثه مرتبط',t:'sel',o:()=>incRefOpts()},
   {k:'injured',l:'شخص آسیب‌دیده',t:'sel',o:()=>['خیر'].concat(P())},
   {k:'lostDays',l:'روزهای کاری از دست‌رفته',t:'num'},
   {k:'deadline',l:'مهلت قانونی ارسال',t:'date'},
@@ -2296,7 +2425,7 @@ legalReg:{t:'الزامات قانونی و انطباق',i:'📜',
   {k:'evidence',l:'مستندات انطباق',t:'txt'},
   {k:'date',l:'تاریخ آخرین ارزیابی',t:'date',def:todayJ},
   {k:'nextD',l:'تاریخ بازنگری بعدی',t:'date'},
-  {k:'actRef',l:'کد اقدام اصلاحی (CAPA)',t:'text'}],
+  {k:'actRef',l:'کد اقدام اصلاحی (CAPA) (خودکار)',t:'text',ro:1}],
  cols:['cat','title','ref','complChip','reviewDue']},
 
 s5:{t:'ارزیابی 5S (نظام آراستگی محیط کار)',i:'🏭',
@@ -2340,7 +2469,7 @@ const FN={
  s5_pct:r=>{const sc=s5ScoreOf(r);return '<b style="color:'+(sc.pct>=85?'var(--ok)':sc.pct>=70?'#2563eb':sc.pct>=50?'var(--warn)':'var(--bad)')+'">'+nd(sc.pct)+'٪</b>'},
  s5_band:r=>s5BandChip(s5ScoreOf(r).band),
  s5_min:r=>{const m=s5MinKey(r);return m?'<span class="chip b-warn">'+esc(m.name)+' ('+nd(m.pct)+'٪)</span>':'—'},
- rpn:r=>{const v=+r.rpn||0;const cls=v<=50?'b-ok':v<=100?'b-warn':v<=200?'b-org':'b-bad';const lbl=v<=50?'کم':v<=100?'متوسط':v<=200?'بالا':'بحرانی';return v?'<span class="chip '+cls+'">'+nd(v)+' — '+lbl+'</span>':'—'},
+ rpn:r=>{const v=+r.rpn||0;if(!v)return '—';const fb=fmeaBand(v,r.s);return '<span class="chip '+fb[0]+'">'+nd(v)+' — '+fb[1]+'</span>'},
  lecScore:r=>{const v=+r.score||0;const cls=v<20?'b-ok':v<70?'b-info':v<200?'b-warn':v<400?'b-org':'b-bad';return v?'<span class="chip '+cls+'">'+nd(v)+'</span>':'—'},
  lecLevel:r=>{const v=+r.score||0;const lvl=lecLevel(v);const cls=v<20?'b-ok':v<70?'b-info':v<200?'b-warn':v<400?'b-org':'b-bad';return '<span class="chip '+cls+'">'+lvl+'</span>'},
  stepCount:r=>'<span class="chip b-info">'+nd((r.steps||[]).length)+' مرحله</span>',
@@ -2398,7 +2527,7 @@ function seed(){
  const R=(m,o)=>{const base={id:uid(PF[m]),createdBy:'سامانه',createdJ:o.date||todayJ(),log:[{u:'سامانه',d:o.date||todayJ(),t:'ثبت اولیه'}]};d[m].push(Object.assign(base,o));return base.id};
  const INC1=R('incidents',{date:jAgo(3),time:'10:15',area:'ریخته‌گری مذاب',type:'شبه‌حادثه (Near Miss)',title:'پاشش مذاب هنگام شارژ کوره',desc:'قطعات مرطوب همراه شارژ وارد کوره شد و پاشش مذاب رخ داد؛ فرد در فاصله امن بود.',injured:'خیر',immediate:'توقف شارژ و خشک‌سازی قطعات',rootCause:'ورود قطعات مرطوب به خط شارژ',corrective:'ساختن سایه‌بان انبار شارژ و کنترل رطوبت',status:'در حال بررسی',createdBy:'علی رضایی'});
  const INC2=R('incidents',{date:jAgo(9),time:'13:40',area:'قالب‌سازی و مولر',type:'جراحت خفیف (First Aid)',title:'برخورد دست با لبه تیز قالب',injured:'حسین کریمی',bodyPart:'دست',immediate:'کمک‌های اولیه',status:'بسته شده',createdBy:'حسین کریمی'});
- const INC3=R('incidents',{date:jAgo(20),time:'22:05',area:'سالن ذوب',type:'درمان پزشکی (MTC)',title:'سوختگی سطحی ناشی از پاشش سرباره',injured:'مهدی احمدی',bodyPart:'پا',lostDays:2,immediate:'خنک‌سازی و انتقال به درمانگاه',status:'در حال اقدام',createdBy:'سارا محمدی'});
+ const INC3=R('incidents',{date:jAgo(20),time:'22:05',area:'سالن ذوب',type:'جراحت دردسرساز (LTI)',title:'سوختگی سطحی ناشی از پاشش سرباره',injured:'مهدی احمدی',bodyPart:'پا',lostDays:2,immediate:'خنک‌سازی و انتقال به درمانگاه',status:'در حال اقدام',createdBy:'سارا محمدی'});
  R('incidents',{date:jAgo(48),time:'08:30',area:'برش و جوشکاری',type:'جراحت دردسرساز (LTI)',title:'پرتاب ذره به چشم هنگام سنگ‌زنی',injured:'جواد نوری',bodyPart:'چشم',lostDays:6,immediate:'شست‌وشو و ارجاع به چشم‌پزشک',status:'بسته شده',createdBy:'سارا محمدی'});
  d.incidents.find(r=>r.id===INC1).analyses={
    fishbone:{man:'عدم آموزش کافی درباره خطر رطوبت',machine:'سیستم خشک‌کن سینی شارژ معیوب',method:'رویه شارژ بدون بازرسی رطوبت',material:'قطعات مرطوب انبار',environment:'بارش باران و نفوذ رطوبت به انبار',management:'نظارت ناکافی بر انبار شارژ'},
@@ -2990,7 +3119,7 @@ function renderRows(){
   const cmk=mKey(todayJ());const scope=me.role==='worker'?myRows(k):db[k];const mon=scope.filter(r=>mKey(r.date||r.createdJ)===cmk).length;
   s+=' | ثبت این ماه: <b>'+nd(mon)+'</b>';
   if(k==='actions'){const od=db.actions.filter(r=>['باز','در حال انجام'].includes(r.status)&&isOverdue(r.due)).length;s+=' | معوق: <b style="color:var(--bad)">'+nd(od)+'</b>'}
-  if(k==='incidents'){const lti=(me.role==='worker'?myRows('incidents'):db.incidents).filter(r=>r.type==='جراحت دردسرساز (LTI)').length;s+=' | LTI: <b>'+nd(lti)+'</b>'}
+  if(k==='incidents'){const lti=(me.role==='worker'?myRows('incidents'):db.incidents).filter(isLTI).length;s+=' | LTI: <b>'+nd(lti)+'</b>'}
   st.innerHTML=s}
  requestAnimationFrame(()=>{const s=$('.tscroll');if(s)s.scrollLeft=prevScroll});
 }
@@ -3029,7 +3158,7 @@ function ctrl(f,v){
   case 'date':return '<input class="in jdate"'+id+' data-k="'+f.k+'" type="text" inputmode="numeric" value="'+esc(v)+'" placeholder="1405/08/07" autocomplete="off" onclick="openCal(this)" title="برای انتخاب از تقویم جلالی کلیک کنید">';
   case 'num':return '<input class="in"'+id+' data-k="'+f.k+'" type="number" inputmode="decimal" step="any" value="'+esc(v)+'">';
   case 'time':return '<input class="in"'+id+' data-k="'+f.k+'" type="time" value="'+esc(v)+'">';
-  default:return '<input class="in"'+id+' data-k="'+f.k+'" type="text" value="'+esc(v)+'" placeholder="'+esc(f.ph||'')+'">'}
+  default:return '<input class="in"'+id+' data-k="'+f.k+'" type="text" value="'+esc(v)+'" placeholder="'+esc(f.ph||'')+'"'+(f.ro?' disabled':'')+'>'}
 }
 function opts(f){return typeof f.o==='function'?f.o():(f.o||[])}
 
@@ -3138,9 +3267,24 @@ function openForm(k,id,pre){
  if(ATT_MODS.includes(k)) $$('#mbody input[ppi="people"]').forEach(c=>c.onchange=attRefresh);
  if(k==='inspections'){const sel=$('#f_tpl');if(sel){const fill=()=>{renderTplItems(sel.value,rec?rec.answers:null);refreshEqSel()};sel.onchange=fill;fill()}}
  if(k==='risks'){const upd=()=>{const e1=$('#f_s'),e2=$('#f_p');const s=+(e1&&e1.value)||0,p=+(e2&&e2.value)||0;const el=$('#lvprev');if(el)el.innerHTML='سطح ریسک فعلی: '+lvlChip(s*p)};['f_s','f_p'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
- if(k==='fmea'){const upd=()=>{const S=+($('#f_s')||{}).value||1,O=+($('#f_o')||{}).value||1,D=+($('#f_d')||{}).value||1;const rpn=S*O*D;const cls=rpn<=50?'b-ok':rpn<=100?'b-warn':rpn<=200?'b-org':'b-bad';const lbl=rpn<=50?'کم':rpn<=100?'متوسط':rpn<=200?'بالا':'بحرانی';const el=$('#fmprev');if(el)el.innerHTML='RPN (S×O×D) = <b>'+nd(S)+' × '+nd(O)+' × '+nd(D)+' = '+nd(rpn)+'</b> — <span class="chip '+cls+'">'+lbl+'</span>'};['f_s','f_o','f_d'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
+ if(k==='fmea'){const upd=()=>{const S=+($('#f_s')||{}).value||1,O=+($('#f_o')||{}).value||1,D=+($('#f_d')||{}).value||1;const rpn=S*O*D;const _fb=fmeaBand(rpn,S);const cls=_fb[0];const lbl=_fb[1];const el=$('#fmprev');if(el)el.innerHTML='RPN (S×O×D) = <b>'+nd(S)+' × '+nd(O)+' × '+nd(D)+' = '+nd(rpn)+'</b> — <span class="chip '+cls+'">'+lbl+'</span>'};['f_s','f_o','f_d'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
  if(k==='lec'){const upd=()=>{const L=+($('#f_L')||{}).value||0,E=+($('#f_E')||{}).value||0,C=+($('#f_C')||{}).value||0;const sc=Math.round(L*E*C*100)/100;const lvl=lecLevel(sc);const cls=sc<20?'b-ok':sc<70?'b-info':sc<200?'b-warn':sc<400?'b-org':'b-bad';const el=$('#lecprev');if(el)el.innerHTML='امتیاز LEC = <b>'+nd(sc)+'</b> — <span class="chip '+cls+'">'+lvl+'</span>'};['f_L','f_E','f_C'].forEach(i=>{const e=$('#'+i);if(e)e.onchange=upd});upd()}
- if(k==='jsa'){setTimeout(()=>{initJsaSteps(rec?rec.steps:null)},80)}
+ if(k==='actions'){
+    const sSel=$('#f_src'), rSel=$('#f_ref');
+    if(sSel&&rSel){
+      const fill=(first)=>{
+        let cur=rSel.value||'';
+        const list=capaRefOpts(sSel.value);
+        if(!first && cur && !list.some(o=>o.v===cur)) cur='';
+        const legacy=(first&&cur&&!list.some(o=>o.v===cur));
+        rSel.innerHTML='<option value="">— بدون مرجع —</option>'+list.map(o=>'<option value="'+esc(o.v)+'">'+esc(o.l)+'</option>').join('')+(legacy?'<option selected value="'+esc(cur)+'">'+esc(cur)+' (قدیمی)</option>':'');
+        rSel.value=cur;
+      };
+      sSel.onchange=()=>fill(false);
+      fill(true);
+    }
+  }
+  if(k==='jsa'){setTimeout(()=>{initJsaSteps(rec?rec.steps:null)},80)}
  if(k==='ptw'){ PTW_NAME_SIG.forEach(([nk,sk])=>{
    const inp=document.querySelector('#mbody [data-k="'+nk+'"]'); if(!inp) return; const ff=inp.closest('.ff'); if(!ff) return;
    const sg=((rec&&rec.psigs)||{})[sk];
@@ -3276,21 +3420,27 @@ function saveForm(k,id){
    if(pp) rec[f.k]=pp.jy+'/'+p2(pp.jm)+'/'+p2(pp.jd);
    else bad=bad||(f.l+' (تاریخ معتبر وارد کنید)');
  });
+ /* اعتبارسنجی طبقه‌بندی حادثه: روز کاری از دست‌رفته و نوع رویداد باید با هم سازگار باشند */
+ if(!bad && k==='incidents'){
+   const ld=+rec.lostDays||0; let incMsg=null;
+   if(ld>0 && rec.type!==LTI_TYPE && rec.type!==FATAL_TYPE){
+     if(me.role==='worker') rec.type=LTI_TYPE; /* پرسنل اجرایی نمی‌تواند جراحت را کم‌گزارش کند؛ کارشناس بازبینی می‌کند */
+     else incMsg='با وجود روز کاری از دست‌رفته، نوع رویداد باید «جراحت دردسرساز (LTI)» یا «فوت» باشد';
+   }
+   if(!incMsg && rec.type===LTI_TYPE && ld<=0) incMsg='برای جراحت دردسرساز (LTI)، تعداد روزهای کاری از دست‌رفته باید بیشتر از صفر باشد';
+   if(incMsg){toast('⚠️ '+incMsg);return}
+ }
  if(bad){toast('⚠️ تکمیل الزامی است: '+bad);return}
 
  if(k==='actions'){
    if(!rec.code) rec.code = genActionCode();
    if(rec.status==='انجام شد' && (!rec.progress||+rec.progress<100)) rec.progress=100;
-   if(rec.status==='تایید و بسته شد') rec.progress=100;
-   if(rec.ref && isNew){
-     const u=db.unsafe.find(x=>x.id===rec.ref);
-     if(u){ u.capaRef=rec.code; if(u.status==='ثبت شده'||u.status==='در حال رسیدگی') u.status='ارجاع به اقدام'; queueRec('unsafe',u.id); }
-     const inc=db.incidents.find(x=>x.id===rec.ref);
-     if(inc){ inc.capaRef=rec.code; queueRec('incidents',inc.id); }
-   }
+   if(rec.status==='تایید و بسته شد'){ rec.progress=100; capaSyncSource(rec); }
+   syncCapaLinks(rec, orig);
  }
 
- rec._rev=Date.now()+'|'+me.name;
+ if(k==='moc'){ const g=mocGate(rec,rec.status); if(g.length){ toast('⚠️ برای وضعیت «'+rec.status+'» ابتدا لازم است: '+g.join('، ')); return } }
+  rec._rev=Date.now()+'|'+me.name;
   // FIX: push/update رکورد
  if(isNew){
    rec.log.push({u:me.name,d:todayJ(),t:'ثبت اولیه'});
@@ -3464,12 +3614,14 @@ function saveS5(){
 ============================================================ */
 function kpis(){
  const jy=todayJ().slice(0,4);
+ const inY=r=>String(r.date||'').indexOf(jy)===0;
  const hrs=db.hours.filter(h=>String(h.month||'').startsWith(jy)).reduce((a,b)=>a+(+b.hours||0),0);
- const INC=db.incidents;
- const rec=INC.filter(r=>['درمان پزشکی (MTC)','جراحت دردسرساز (LTI)','حادثه با خسارت مالی','بیماری شغلی'].includes(r.type)).length;
- const lti=INC.filter(r=>['جراحت دردسرساز (LTI)','حادثه با خسارت مالی'].includes(r.type)).length;
+ /* صورت و مخرج کسر باید یک دوره باشند: فقط حوادث همین سال شمسی */
+ const INC=db.incidents.filter(inY);
+ const rec=INC.filter(isRecordable).length;
+ const lti=INC.filter(isLTI).length;
  const nm=INC.filter(r=>String(r.type).indexOf('شبه')>=0).length;
- const ltis=INC.filter(r=>r.type==='جراحت دردسرساز (LTI)');
+ const ltis=db.incidents.filter(isLTI);
  const dNo=ltis.length?Math.min.apply(null,ltis.map(r=>jDaysAgo(r.date))):null;
  const od=db.actions.filter(r=>['باز','در حال انجام'].includes(r.status)&&isOverdue(r.due)).length;
  return {hrs:hrs,rec:rec,lti:lti,nm:nm,dNo:dNo,od:od,trir:hrs?rec*200000/hrs:0,ltifr:hrs?lti*1e6/hrs:0,jy:jy}
@@ -4150,7 +4302,7 @@ function settingsPage(){curPage='settings';
   if(mg){
     h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;background:#fff7ed;border-color:#fed7aa;margin-bottom:10px"><div><b style="font-size:13px">🔐 کنترل دسترسی‌ها</b><div style="font-size:12px;color:var(--mut)">تعیین دسترسی هر نقش به هر ماژول</div></div><button class="btn pri sm" onclick="permsPage()">ورود</button></div>';
   }
-  let users='<div class="tscroll"><table class="tbl"><thead><tr><th>نام</th><th>سمت</th><th>واحد</th><th>نقش</th><th>نام کاربری</th><th>اقدام</th></tr></thead><tbody>'+db.personnel.map((p,i)=>'<tr><td>'+esc(p.name)+'</td><td>'+esc(p.job)+'</td><td>'+esc(p.area)+'</td><td>'+roleChip(p.role)+'</td><td>'+(p.u?'<span class="chip b-mut" style="direction:ltr">'+esc(p.u)+'</span>':'<small>بدون حساب</small>')+'</td><td>'+(mg?'<button class="ibtn" onclick="personForm('+i+')">✏️</button> <button class="ibtn" onclick="delPerson('+i+')">🗑️</button>':'—')+'</td></tr>').join('')+'</tbody></table></div>'+(mg?'<div style="margin-top:10px"><button class="btn pri sm" onclick="personForm(-1)">➕ شخص جدید</button></div>':'');
+  let users='<div class="tscroll"><table class="tbl"><thead><tr><th>نام</th><th>سمت</th><th>واحد</th><th>نقش</th><th>نام کاربری</th><th>اقدام</th></tr></thead><tbody>'+db.personnel.map((p,i)=>'<tr><td>'+esc(p.name)+(p.perm&&Object.keys(p.perm).length?' <span class="chip b-warn" title="دسترسی اختصاصی">🔐</span>':'')+'</td><td>'+esc(p.job)+'</td><td>'+esc(p.area)+'</td><td>'+roleChip(p.role)+'</td><td>'+(p.u?'<span class="chip b-mut" style="direction:ltr">'+esc(p.u)+'</span>':'<small>بدون حساب</small>')+'</td><td>'+(mg?'<button class="ibtn" onclick="personForm('+i+')">✏️</button> <button class="ibtn" onclick="delPerson('+i+')">🗑️</button>':'—')+'</td></tr>').join('')+'</tbody></table></div>'+(mg?'<div style="margin-top:10px"><button class="btn pri sm" onclick="personForm(-1)">➕ شخص جدید</button></div>':'');
   h+=cfgSec('👥 کاربران ('+nd(db.personnel.length)+')',users,true);
   let areas='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+db.areas.map((a,i)=>'<span class="chip b-info">'+esc(a)+(mg?' <span style="cursor:pointer" onclick="delArea('+i+')">✖</span>':'')+'</span>').join('')+'</div>'+(mg?'<div style="display:flex;gap:8px"><input id="newarea" class="in" style="max-width:240px" placeholder="نام واحد"><button class="btn pri sm" onclick="addArea()">افزودن</button></div>':'');
   let score=scoreRules().map(r=>'<div class="emgrow"><span>'+esc(r.label)+'</span><span class="chip '+(r.pts>0?'b-ok':'b-bad')+'">'+(r.pts>0?'+':'')+nd(r.pts)+'</span></div>').join('')+(mg?'<div style="margin-top:8px"><button class="btn ghost sm" onclick="scoresPage()">🏅 مدیریت</button></div>':'');
@@ -4197,31 +4349,77 @@ function askDelListItem(listKey,encVal){
  if(!canManageLists()){toast('دسترسی ندارید');return}
  askConfirm('گزینه «'+val+'» حذف شود؟',function(){delListItem(listKey,val);refreshCurrent();toast('حذف شد')});
 }
-function personForm(i){const p=(i>=0&&db.personnel[i])?db.personnel[i]:null;
- openModal(p?'✏️ ویرایش پرسنل':'➕ تعریف شخص جدید',
- '<div class="fgrid"><div class="ff"><label>نام <i>*</i></label><input id="pf_n" class="in" value="'+esc(p?p.name:'')+'"></div><div class="ff"><label>سمت</label><input id="pf_j" class="in" value="'+esc(p?p.job:'')+'"></div><div class="ff"><label>واحد</label><select id="pf_a" class="in">'+db.areas.map(a=>'<option '+(p&&p.area===a?'selected':'')+'>'+esc(a)+'</option>').join('')+'</select></div><div class="ff"><label>نقش <i>*</i></label><select id="pf_r" class="in">'+['worker','expert','manager'].map(r=>'<option value="'+r+'" '+((p?p.role:'worker')===r?'selected':'')+'>'+ROLE_CHIP[r][0]+'</option>').join('')+'</select></div><div class="ff"><label>نام کاربری</label><input id="pf_u" class="in" value="'+esc(p?p.u:'')+'" style="direction:ltr"></div><div class="ff wide"><div class="ck"><input type="checkbox" id="pf_mc" '+(p&&p.mustChange?'checked':'')+'><span>نیازمند تغییر رمز در ورود بعدی</span></div></div>',
- '<button class="btn pri" onclick="savePerson('+i+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
+const USE_FUNCTIONS=false; /* true فقط بعد از نصب Cloud Functions (نیازمند پلن Blaze) */
+async function adminFn(name,data){ if(!USE_FUNCTIONS) throw {code:'functions/not-found'}; const r=await firebase.app().functions('us-central1').httpsCallable(name)(data); return r.data; }
+function _fnMissing(e){ return !!e && (e.name==='TypeError' || e.code==='functions/not-found' || e.code==='functions/unavailable' || e.code==='functions/internal'); }
+let _secApp=null;
+function secAuth(){ if(!_secApp) _secApp=firebase.initializeApp(firebaseConfig,'hse-admin'); return _secApp.auth(); }
+function genPwFill(){
+ const c='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+ const v=[...crypto.getRandomValues(new Uint8Array(10))].map(x=>c[x%c.length]).join('');
+ const e=$('#pf_pw'); if(e){e.value=v; e.type='text'}
+}
+function personForm(i){
+ if(!me||me.role!=='manager'){toast('فقط مدیر');return}
+ const p=(i>=0&&db.personnel[i])?db.personnel[i]:null, ov=(p&&p.perm)||{};
+ const sel=(m,a)=>{const v=ov[m]&&ov[m][a];return '<select class="in" style="width:70px;padding:3px" data-pm="'+m+'" data-pa="'+a+'"><option value="">نقش</option><option value="y"'+(v===true?' selected':'')+'>✔</option><option value="n"'+(v===false?' selected':'')+'>✖</option></select>'};
+ const acts=[['view','مشاهده'],['create','ایجاد'],['edit','ویرایش'],['del','حذف']];
+ const pt='<div class="tscroll" style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>ماژول</th>'+acts.map(a=>'<th>'+a[1]+'</th>').join('')+'</tr></thead><tbody>'+allModulesForPerms().map(m=>'<tr><td>'+(m.icon||'')+' '+esc(m.label)+'</td>'+acts.map(a=>'<td>'+sel(m.key,a[0])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
+ const pwBox=(p&&!USE_FUNCTIONS)
+  ?'<div class="ff"><label>رمز عبور</label><div class="lnote" style="text-align:right;margin:0">تغییر رمز دیگران بدون سرور ممکن نیست؛ کاربر از دکمهٔ 🔑 بالای صفحه رمز خودش را عوض می‌کند.</div></div>'
+  :p
+  ?'<div class="ff"><label>رمز جدید (اختیاری)</label><div style="display:flex;gap:6px"><input id="pf_pw" type="password" class="in" style="direction:ltr" autocomplete="new-password" placeholder="خالی = بدون تغییر"><button type="button" class="btn ghost sm" onclick="genPwFill()" title="تولید رمز تصادفی">🎲</button></div></div>'
+  :'<div class="ff"><label>رمز اولیه <i>*</i></label><div style="display:flex;gap:6px"><input id="pf_pw" type="password" class="in" style="direction:ltr" autocomplete="new-password"><button type="button" class="btn ghost sm" onclick="genPwFill()" title="تولید رمز تصادفی">🎲</button></div></div>';
+ openModal(p?'✏️ ویرایش کاربر':'➕ تعریف کاربر جدید',
+ '<div class="fgrid"><div class="ff"><label>نام <i>*</i></label><input id="pf_n" class="in" value="'+esc(p?p.name:'')+'"></div><div class="ff"><label>سمت</label><input id="pf_j" class="in" value="'+esc(p?p.job:'')+'"></div><div class="ff"><label>واحد</label><select id="pf_a" class="in">'+db.areas.map(a=>'<option '+(p&&p.area===a?'selected':'')+'>'+esc(a)+'</option>').join('')+'</select></div><div class="ff"><label>نقش <i>*</i></label><select id="pf_r" class="in">'+['worker','expert','manager'].map(r=>'<option value="'+r+'" '+((p?p.role:'worker')===r?'selected':'')+'>'+ROLE_CHIP[r][0]+'</option>').join('')+'</select></div><div class="ff"><label>نام کاربری <i>*</i></label><input id="pf_u" class="in" value="'+esc(p?p.u:'')+'" style="direction:ltr" autocomplete="off"'+(p&&p.u?' readonly':'')+'></div>'+pwBox+'<div class="ff wide"><div class="ck"><input type="checkbox" id="pf_mc" '+((p?p.mustChange:true)?'checked':'')+'><span>نیازمند تغییر رمز در ورود بعدی</span></div></div><div class="ff wide"><div class="sechead">🔐 دسترسی‌های اختصاصی این کاربر</div><div class="lnote" style="text-align:right">«نقش» = مطابق جدول دسترسی نقش ·  ✔ = مجاز  ·  ✖ = ممنوع</div>'+pt+'</div></div>',
+ '<button class="btn pri" id="pf_save" onclick="savePerson('+i+')">💾 ذخیره</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
 }
 async function savePerson(i){
- const n=$('#pf_n').value.trim(),un=$('#pf_u').value.trim(),role=$('#pf_r').value,mc=$('#pf_mc').checked;
- if(!n){toast('نام الزامی است');return}
- if(!un){toast('نام کاربری الزامی است');return}
- if(db.personnel.some((p,j)=>p.u===un&&j!==i)){toast('نام کاربری تکراری');return}
+ if(!me||me.role!=='manager'){toast('فقط مدیر');return}
  const old=(i>=0&&db.personnel[i])?db.personnel[i]:null;
- if(old && un!==(old.u||'')){toast('تغییر نام کاربری حساب موجود پشتیبانی نمی‌شود');return}
+ const n=$('#pf_n').value.trim(), role=$('#pf_r').value, mc=$('#pf_mc').checked;
+ const un=(old&&old.u)?old.u:$('#pf_u').value.trim().toLowerCase();
+ if(!n){toast('نام الزامی است');return}
+ if(!old||!old.u){
+  if(!/^[a-z0-9_.-]{3,}$/.test(un)){toast('نام کاربری: حداقل ۳ نویسه، فقط حروف انگلیسی، عدد و _ . -');return}
+  if(db.personnel.some((p,j)=>(p.u||'').toLowerCase()===un&&j!==i)){toast('نام کاربری تکراری');return}
+ }
+ const pw=($('#pf_pw')||{}).value||'';
+ if(!old&&!pw){toast('رمز اولیه الزامی است');return}
+ if(pw&&(pw.length<6||pw==='1234'||pw.toLowerCase()===un)){toast('رمز معتبر نیست (حداقل ۶ نویسه، غیر از 1234 و نام کاربری)');return}
+ const perm={};
+ $$('#mbody select[data-pm]').forEach(s=>{ if(s.value){ const m=s.dataset.pm; (perm[m]=perm[m]||{})[s.dataset.pa]=(s.value==='y'); } });
  const rec={name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un};
- let id;
- if(old){ Object.assign(old,rec); id=old.id; }
- else { id=uid('USR'); db.personnel.push(Object.assign({id:id,p:''},rec)); }
+ const b=$('#pf_save'); if(b) b.disabled=true;
+ let id=old?old.id:null;
+ try{
+  if(old){
+   if(old.u&&(pw||role!==old.role)){
+    try{ await adminFn('adminSaveUser',{uid:old.id,role:role,password:pw||undefined}); }
+    catch(e){ if(!(_fnMissing(e)&&!pw)) throw e; }
+   }
+  }else{
+   try{ id=(await adminFn('adminSaveUser',{username:un,password:pw,role:role})).uid; }
+   catch(e){ if(!_fnMissing(e)) throw e; const sa=secAuth(); id=(await sa.createUserWithEmailAndPassword(un+'@hse.local',pw)).user.uid; await sa.signOut(); }
+  }
+ }catch(e){
+  if(b) b.disabled=false;
+  toast(e.code==='auth/email-already-in-use'||e.code==='functions/already-exists'?'این نام کاربری قبلاً در سامانه ورود ساخته شده است':_fnMissing(e)?'تابع سرور (Cloud Function) نصب نشده؛ تغییر رمز ممکن نیست':'⛔ '+(e.message||e.code));
+  return;
+ }
+ if(old) Object.assign(old,rec); else db.personnel.push(Object.assign({id:id,p:''},rec));
  const pp=db.personnel.find(x=>x.id===id);
+ if(pw&&_pwCryptoOk()) pp.p=await hashPw(un,pw);
  if(mc) pp.mustChange=true; else delete pp.mustChange;
+ if(Object.keys(perm).length) pp.perm=perm; else delete pp.perm;
  queueRec('personnel', id);
- save();closeModal();toast('✔ ذخیره شد');refreshCurrent()
+ save({immediate:true}); closeModal(); toast('✔ ذخیره شد'); refreshCurrent();
 }
 function delPerson(i){const p=db.personnel[i];if(!p)return;
  if(!can('personnel','del')){toast('اجازه حذف ندارید');return}
  if(p.id===me.id){toast('حساب خودتان قابل حذف نیست');return}
  askConfirm('«'+p.name+'» حذف شود؟',function(){
+   adminFn('adminDeleteUser',{uid:p.id}).catch(function(){});
    db.personnel.splice(i,1);
    queueRec('personnel', p.id);
    scrubPersonName(p.name);
@@ -4673,9 +4871,109 @@ document.addEventListener('click',function(e){
 });
 
 /* ---------- CAPA & Unsafe helpers ---------- */
+/* ===== ارتباط آنومالی ↔ ارزیابی ریسک ↔ CAPA ===== */
+const RISK_SLA={'بحرانی':7,'بالا':30,'متوسط':90,'کم':180}; /* مهلت پیش‌فرض CAPA (روز) بر اساس سطح ریسک — قابل تغییر */
+function incRefOpts(){ return (db.incidents||[]).map(r=>r.id+' — '+(r.title||'')); }
+function riskRefOpts(){ return (db.risks||[]).map(r=>r.id+' — '+(r.hazard||r.act||'')); }
+function riskOf(v){ const id=String(v||'').split(' — ')[0].trim(); return id?(db.risks||[]).find(x=>x.id===id):null; }
+function riskScoreOf(r){ return (+r.s||0)*(+r.p||0); }
+function riskLvl(r){ const sc=riskScoreOf(r); return sc?lvlName(sc):''; }
+const LVL_RANK={'':0,'کم':1,'متوسط':2,'بالا':3,'بحرانی':4};
+function maxLvl(a,b){ return LVL_RANK[a||'']>=LVL_RANK[b||'']?(a||''):(b||''); }
+function prioByLvl(n){ return n==='بحرانی'?'فوری':n==='بالا'?'بالا':n==='متوسط'?'متوسط':'کم'; }
+function dueByLvl(n){ return RISK_SLA[n]?jAddDays(todayJ(),RISK_SLA[n]):''; }
+function capaFromRisk(id){
+ const r=(db.risks||[]).find(x=>x.id===id);
+ if(!r){toast('ارزیابی ریسک یافت نشد');return}
+ if(r.capaRef){ const ex=db.actions.find(a=>a.code===r.capaRef); if(ex){toast('قبلاً ارجاع شده — کد: '+r.capaRef);openDetail('actions',ex.id);return} }
+ const lv=riskLvl(r);
+ openForm('actions',null,{
+  src:'ارزیابی ریسک', ref:r.id, riskRef:r.id+' — '+(r.hazard||r.act||''),
+  type:'پیشگیرانه (Preventive)', prio:prioByLvl(lv),
+  desc:'اجرای کنترل‌های تکمیلی برای خطر «'+(r.hazard||'')+'» در فعالیت «'+(r.act||'')+'»'+(r.area?' ('+r.area+')':'')+':\n'+(r.addCtrl||''),
+  owner:r.owner||'', verify:me.name, startD:todayJ(), due:dueByLvl(lv)
+ });
+}
+function riskLinkBox(k,r){
+ if(me.role==='worker') return '';
+ if(k==='unsafe'||k==='actions'||k==='incidents'){
+  const rk=riskOf(r.riskRef||(k==='actions'&&r.src==='ارزیابی ریسک'?r.ref:''));
+  if(!rk) return '';
+  const l1=riskLvl(rk), l2=(+rk.rs&&+rk.rp)?lvlName(rk.rs*rk.rp):'';
+  let h='<div class="lvprev" style="margin-top:12px"><b>📊 ارزیابی ریسک مرتبط:</b> '+esc(rk.id)+' — '+esc(rk.hazard||rk.act||'')+'<br>ریسک اولیه: '+lvlChip(riskScoreOf(rk))+' ← پس از کنترل: '+(l2?lvlChip(rk.rs*rk.rp):'<span class="chip b-mut">ثبت نشده</span>');
+  if(k==='incidents') h+='<div style="color:var(--bad);font-size:12px;margin-top:6px">⚠️ حادثه روی خطری رخ داده که قبلاً ارزیابی شده؛ احتمال و کنترل‌های آن را بازنگری کنید.</div>';
+  if(k==='actions'&&r.status==='تایید و بسته شد'&&(!l2||l2===l1)) h+='<div style="color:var(--bad);font-size:12px;margin-top:6px">⚠️ این CAPA بسته شده ولی ریسک باقی‌مانده بازنگری نشده است.</div><button class="btn pri sm" style="margin-top:6px" onclick="closeModal();openForm(\'risks\',\''+rk.id+'\')">✏️ ثبت ریسک باقی‌مانده</button>';
+  return h+'<div style="margin-top:8px"><button class="btn ghost sm" onclick="closeModal();openDetail(\'risks\',\''+rk.id+'\')">مشاهده ارزیابی ریسک</button></div></div>';
+ }
+ if(k==='risks'){
+  const _mine=x=>String(x.riskRef||'').split(' — ')[0].trim()===r.id;
+  const _li=(db.incidents||[]).filter(_mine).length, _lu=(db.unsafe||[]).filter(_mine).length;
+  const _c=r.capaRef?db.actions.find(a=>a.code===r.capaRef):null;
+  let _h='';
+  if(r.capaRef) _h+='<div class="lvprev" style="margin-top:12px"><b>🛠️ CAPA مرتبط:</b> '+esc(r.capaRef)+(_c?' — '+esc(_c.status)+' — '+nd(_c.progress||0)+'٪':' (یافت نشد)')+'</div>';
+  if(_li||_lu) _h+='<div class="lvprev" style="margin-top:8px"><b>🔗 موارد ثبت‌شده روی این خطر:</b> '+nd(_li)+' حادثه · '+nd(_lu)+' آنومالی</div>';
+  return _h;
+ }
+ if(k==='risks'&&r.capaRef){
+  const c=db.actions.find(a=>a.code===r.capaRef);
+  return '<div class="lvprev" style="margin-top:12px"><b>🛠️ CAPA مرتبط:</b> '+esc(r.capaRef)+(c?' — '+esc(c.status)+' — '+nd(c.progress||0)+'٪':' (یافت نشد)')+'</div>';
+ }
+ return '';
+}
+/* ===== حلقه‌ی بسته: CAPA ↔ منبع، ارجاع از سایر ماژول‌ها، دروازه‌ی MOC ===== */
+function capaSyncSource(c){
+ const m=[], closed=c.status==='تایید و بسته شد', lg=(o,t)=>{ (o.log=o.log||[]).push({u:me.name,d:todayJ(),t:t}); };
+ const u=(db.unsafe||[]).find(x=>x.id===c.ref||(c.code&&x.capaRef===c.code));
+ if(u){
+  if(closed&&u.status!=='اصلاح شد'){ u.status='اصلاح شد'; if(!u.fixedJ)u.fixedJ=todayJ(); if(!u.fixedBy)u.fixedBy=c.owner||me.name; if(!u.verifyJ){u.verifyJ=todayJ();u.verifyBy=me.name} lg(u,'بسته شدن CAPA '+c.code); queueRec('unsafe',u.id); m.push('آنومالی '+u.id+' بسته شد'); }
+  else if(!closed&&u.status==='اصلاح شد'){ u.status='در حال رسیدگی'; lg(u,'بازگشایی: CAPA '+c.code+' هنوز بسته نیست'); queueRec('unsafe',u.id); m.push('آنومالی '+u.id+' دوباره باز شد'); }
+ }
+ const a=(db.audits||[]).find(x=>x.id===c.ref||(c.code&&x.actRef===c.code));
+ if(a){
+  if(closed&&a.status!=='بسته شده'){ a.status='بسته شده'; lg(a,'بسته شدن CAPA '+c.code); queueRec('audits',a.id); m.push('یافتهٔ ممیزی بسته شد'); }
+  else if(!closed&&a.status==='بسته شده'){ a.status='باز'; lg(a,'بازگشایی'); queueRec('audits',a.id); m.push('یافتهٔ ممیزی دوباره باز شد'); }
+ }
+ const inc=(db.incidents||[]).find(x=>x.id===c.ref||(c.code&&x.capaRef===c.code));
+ if(inc){
+  const stillOpen=(db.actions||[]).some(a=>a.id!==c.id&&a.ref===inc.id&&a.status!=='تایید و بسته شد');
+  if(closed&&!stillOpen&&inc.status!=='بسته شده'){ inc.status='بسته شده'; lg(inc,'بسته شدن CAPA '+c.code); queueRec('incidents',inc.id); m.push('حادثه '+inc.id+' بسته شد'); }
+  else if(!closed&&inc.status==='بسته شده'){ inc.status='در حال اقدام'; lg(inc,'بازگشایی: CAPA '+c.code+' هنوز بسته نیست'); queueRec('incidents',inc.id); m.push('حادثه '+inc.id+' دوباره باز شد'); }
+ }
+ const rk=riskOf(c.riskRef)||(db.risks||[]).find(x=>x.id===c.ref||(c.code&&x.capaRef===c.code));
+ if(rk&&closed&&!(+rk.rs&&+rk.rp)) m.push('ریسک باقی‌مانده '+rk.id+' را ثبت کنید');
+ if(rk&&c.effectiveness==='بی‌اثر') m.push('ارزیابی ریسک '+rk.id+' بازنگری شود');
+ return m.join(' · ');
+}
+const CAPA_FROM={
+ audits:r=>/عدم مطابقت/.test(r.finding||'')?{src:'ممیزی',prio:/عمده/.test(r.finding)?'بالا':'متوسط',days:30,desc:'رفع «'+r.finding+'»'+(r.req?' (بند '+r.req+')':'')+':\n'+(r.desc||'')}:null,
+ drills:r=>r.score==='نیازمند بهبود'?{src:'مانور',prio:'متوسط',days:60,desc:'رفع نقاط ضعف مانور «'+(r.kind||'')+'»:\n'+(r.findings||'')}:null,
+ legalReg:r=>(r.compl==='نامنطبق'||r.compl==='منطبق جزئی')?{src:'سایر',prio:r.compl==='نامنطبق'?'بالا':'متوسط',days:30,desc:'رفع عدم انطباق با الزام «'+(r.title||'')+'»'+(r.ref?' ('+r.ref+')':'')}:null,
+ envMon:r=>r.result==='نامنطبق'?{src:'سایر',prio:'بالا',days:30,desc:'اقدام برای عدم انطباق پایش «'+(r.param||'')+'» در «'+(r.point||'')+'» (مقدار '+(r.val||'')+' '+(r.unit||'')+' / حد '+(r.limit||'')+')'}:null,
+ equipCert:r=>(r.result&&r.result!==L('EQUIP_RESULTS')[0])?{src:'بازرسی',prio:/عدم/.test(r.result)?'فوری':'بالا',days:/عدم/.test(r.result)?7:30,desc:'رفع نواقص تجهیز «'+(r.item||'')+'» — نتیجه: '+r.result+(r.note?'\n'+r.note:'')}:null
+};
+function capaFromRec(k,id){
+ const r=(db[k]||[]).find(x=>x.id===id), x=r&&CAPA_FROM[k]&&CAPA_FROM[k](r);
+ if(!x){toast('این مورد نیازی به CAPA ندارد');return}
+ const ex=r.actRef&&db.actions.find(a=>a.code===r.actRef);
+ if(ex){toast('قبلاً ارجاع شده — کد: '+r.actRef);openDetail('actions',ex.id);return}
+ openForm('actions',null,{src:x.src,ref:r.id,type:'اصلاحی (Corrective)',prio:x.prio,desc:x.desc,startD:todayJ(),due:jAddDays(todayJ(),x.days),verify:me.name});
+}
+function capaFootBtns(k,r,id){
+ if(!CAPA_FROM[k]) return '';
+ if(r.actRef) return '<button class="btn ghost" onclick="const a=db.actions.find(x=>x.code===\''+r.actRef+'\');if(a){closeModal();openDetail(\'actions\',a.id)}else toast(\'اقدام یافت نشد\')">🔗 مشاهده CAPA</button>';
+ if(can('actions','create')&&CAPA_FROM[k](r)) return '<button class="btn pri" onclick="closeModal();capaFromRec(\''+k+'\',\''+id+'\')">🛠️ ارجاع به CAPA</button>';
+ return '';
+}
+function mocGate(r,st){
+ const need=[], add=(c,l)=>{ if(!r[c]) need.push(l) };
+ if(['تایید شد','اجرا شد','بسته شد'].includes(st)){ add('raOk','ارزیابی ریسک تغییر'); add('expertOk','تأیید کارشناس HSE'); }
+ if(['اجرا شد','بسته شد'].includes(st)){ add('trainOk','آموزش پرسنل'); add('docOk','به‌روزرسانی اسناد'); add('prestartOk','بازبینی PSSR'); add('mgrOk','تأیید نهایی مدیریت'); }
+ return need;
+}
 function capaFromUnsafe(id){
  const r=db.unsafe.find(x=>x.id===id);
  if(!r){toast('آنومالی یافت نشد');return}
+ const lv=maxLvl(r.risk, riskOf(r.riskRef)?riskLvl(riskOf(r.riskRef)):'');
  if(r.capaRef){
    const existing=db.actions.find(a=>a.code===r.capaRef);
    if(existing){toast('قبلاً ارجاع شده — کد: '+r.capaRef);openDetail('actions',existing.id);return}
@@ -4684,11 +4982,12 @@ function capaFromUnsafe(id){
    src:'آنومالی',
    ref:r.id,
    type: r.cat==='رفتار ناایمن' ? 'پیشگیرانه (Preventive)' : 'اصلاحی (Corrective)',
-   prio: r.risk==='بحرانی'?'فوری':r.risk==='بالا'?'بالا':r.risk==='متوسط'?'متوسط':'کم',
+   prio: prioByLvl(lv),
+    riskRef: r.riskRef||'',
    desc: 'رفع آنومالی «'+r.cat+'» در واحد «'+r.area+'»:\n'+r.desc,
    rootCause: r.rootCause||'',
    owner: r.responsible||'',
-   due: r.due||'',
+   due: r.due||dueByLvl(lv),
    verify: r.observer||me.name,
    startD: todayJ()
  });
@@ -4702,9 +5001,10 @@ function capaFromIncident(id){
  }
  openForm('actions',null,{
    src:'حادثه / شبه‌حادثه',
+   riskRef:r.riskRef||'',
    ref:r.id,
    type:'اصلاحی (Corrective)',
-   prio: ['جراحت دردسرساز (LTI)','حادثه با خسارت مالی'].includes(r.type)?'فوری':['درمان پزشکی (MTC)','جراحت خفیف (First Aid)'].includes(r.type)?'بالا':'متوسط',
+   prio: (isLTI(r)||r.type==='حادثه با خسارت مالی')?'فوری':['درمان پزشکی (MTC)','جراحت خفیف (First Aid)'].includes(r.type)?'بالا':'متوسط',
    desc:'اقدام اصلاحی برای حادثه «'+r.title+'» در '+r.area,
    rootCause: r.rootCause||'',
    startD: todayJ(),
@@ -5070,10 +5370,11 @@ function saveVerifyCapa(id){
  r.progress = eff==='اثربخش' ? 100 : r.progress;
  if(!r.log) r.log=[];
  r.log.push({u:me.name,d:todayJ(),t:'تأیید اثربخشی: '+eff});
+ const syncMsg=capaSyncSource(r);
  queueRec('actions', r.id);
  save();
  closeModal();
- toast('✔ تأیید ثبت شد');
+ toast('✔ تأیید ثبت شد'+(syncMsg?' — '+syncMsg:''));
  if(curPage==='actions'||(curPage==='unsafe'))renderRows();
  renderSidebar();
  openDetail('actions',id);
@@ -5205,7 +5506,8 @@ function openDetail(k,id){
   let out;switch(f.t){case 'chk':out=v?'✔ بله':'—';break;case 'people':out=peopleOut(r,v);break;case 'chkl':out=esc((v||[]).join('، '));break;case 'num':out=nfmt(v);break;case 'tplsel':out=TPLS[v]?TPLS[v].t:esc(v);break;case 'eqsel':out=esc(eqLabelById(v));break;default:out=esc(v)}
   h+='<div class="dl">'+f.l+'</div><div class="dv">'+out+'</div>'});
  h+='</div>';
- h+=apprBoxHTML(k,r);
+ h+=riskLinkBox(k,r)+linkedCapaBox(k,r)+capaSourceBox(k,r);
+  h+=apprBoxHTML(k,r);
   if(r.signs && hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
  if(k==='incidents' && r.analyses && me.role!=='worker'){
    const a=normalizeAnalyses(r.analyses);
@@ -5307,7 +5609,17 @@ function openDetail(k,id){
    foot+='<button class="btn pri" onclick="closeModal();capaFromUnsafe(\''+id+'\')">🔗 ارجاع به CAPA</button>';
  if(k==='unsafe'&&r.capaRef)
    foot+='<button class="btn ghost" onclick="const a=db.actions.find(x=>x.code===\''+r.capaRef+'\');if(a){closeModal();openDetail(\'actions\',a.id)}else toast(\'اقدام یافت نشد\')">🔗 مشاهده CAPA</button>';
- if(k==='incidents'&&can('actions','create')&&!r.capaRef&&r.status!=='بسته شده')
+ foot+=capaFootBtns(k,r,id);
+ if(k==='incidents'&&(isLTI(r)||r.type===FATAL_TYPE)){
+   const lr=(db.legalReport||[]).find(x=>String(x.incRef||'').split(' — ')[0].trim()===r.id);
+   if(lr) foot+='<button class="btn ghost" onclick="closeModal();openDetail(\'legalReport\',\''+lr.id+'\')">⚖️ گزارش قانونی مرتبط</button>';
+   else if(can('legalReport','create')) foot+='<button class="btn pri" onclick="closeModal();legalFromIncident(\''+id+'\')">⚖️ ثبت گزارش قانونی</button>';
+ }
+  if(k==='risks'&&can('actions','create')&&!r.capaRef)
+    foot+='<button class="btn pri" onclick="closeModal();capaFromRisk(\''+id+'\')">🔗 ارجاع به CAPA</button>';
+  if(k==='risks'&&r.capaRef)
+    foot+='<button class="btn ghost" onclick="const a=db.actions.find(x=>x.code===\''+r.capaRef+'\');if(a){closeModal();openDetail(\'actions\',a.id)}else toast(\'اقدام یافت نشد\')">🔗 مشاهده CAPA</button>';
+  if(k==='incidents'&&can('actions','create')&&!r.capaRef&&r.status!=='بسته شده')
    foot+='<button class="btn pri" onclick="closeModal();capaFromIncident(\''+id+'\')">🛠️ صدور CAPA برای حادثه</button>';
  if(k==='actions'&&r.verify&&['انجام شد','در انتظار تأیید'].includes(r.status)&&can('actions','edit')&&me.role!=='worker')
    foot+='<button class="btn pri" onclick="closeModal();verifyCapa(\''+id+'\')">✅ تأیید اثربخشی</button>';
@@ -5324,8 +5636,10 @@ function setStat(k,id,val){
    setTimeout(()=>capaFromUnsafe(id),300);
    return;
  }
+ if(k==='moc'){ const g=mocGate(r,val); if(g.length){ toast('⚠️ برای وضعیت «'+val+'» ابتدا لازم است: '+g.join('، ')); openDetail(k,id); return } }
  r.status=val;
  if(!r.log) r.log=[];
+ if(k==='actions') try{ capaSyncSource(r) }catch(e){ console.warn(e) }
  if(k==='unsafe'){
    if(val==='اصلاح شد'){
      if(!r.fixedJ)r.fixedJ=todayJ();
@@ -5351,7 +5665,8 @@ function delRec(k,id){
   const _gone=(db[k]||[]).find(x=>x.id===id);
   db[k]=db[k].filter(x=>x.id!==id);
   queueRec(k, id);
-  if(k==='inspections'&&_gone) syncEmgEquip(emgEqIdOfInsp(_gone));
+  if(k==='actions'&&_gone) unlinkCapaFromSource(_gone);
+   if(k==='inspections'&&_gone) syncEmgEquip(emgEqIdOfInsp(_gone));
   save();
   closeCal();
   closeModal();
@@ -5469,7 +5784,7 @@ function trendsPage(){
  const idx={};months.forEach((k,i)=>idx[k]=i);
  const z=()=>months.map(()=>0);
  const nm=z(),inj=z(),uns=z(),rec=z(),hrs=z();
- const REC=['درمان پزشکی (MTC)','جراحت دردسرساز (LTI)','حادثه با خسارت مالی','بیماری شغلی'];
+ const REC=RECORDABLE_TYPES;
  (db.incidents||[]).forEach(r=>{const i=idx[mKey(r.date)];if(i===undefined)return;
   if(String(r.type).indexOf('شبه')>=0)nm[i]++;else inj[i]++;
   if(REC.includes(r.type))rec[i]++});
@@ -6019,7 +6334,7 @@ async function doLogin(){
 
    const tk = await user.getIdTokenResult();
    const pp = db.personnel.find(x=>x.id===user.uid);
-   if(!pp || tk.claims.role!==loginRole){
+   if(!pp || (pp.role||tk.claims.role)!==loginRole){
      await auth.signOut();
      setLerr(!pp ? 'این حساب در فهرست پرسنل یافت نشد' : 'این حساب با نقش «'+ROLEINFO[loginRole][1]+'» هم‌خوانی ندارد');
      return;
@@ -6035,7 +6350,7 @@ async function doLogin(){
      queueRec('personnel', pp.id);
      save({immediate:true});
    }
-   login({...pp, role: tk.claims.role});
+   login({...pp, role: pp.role||tk.claims.role});
  }finally{
    _loginBusy = false;
  }
@@ -6043,7 +6358,7 @@ async function doLogin(){
 
 function login(p){
  if(me && me.id===p.id) return;
- me={name:p.name,role:p.role,id:p.id,area:p.area||''};
+ me={name:p.name,role:p.role,id:p.id,area:p.area||'',perm:p.perm||{}};
  startApp();
 }
 
@@ -6064,7 +6379,7 @@ async function changeMyPw(){
   if(!u){toast('ابتدا وارد شوید');return}
   if(!oldP||!np){toast('همهٔ فیلدها را پر کنید');return}
   if(np!==np2){toast('رمز جدید با تکرار آن یکسان نیست');return}
-  if(np.length<6||np==='1234'||np.toLowerCase()===String(me.u||'').toLowerCase()){toast('رمز جدید معتبر نیست (حداقل ۶ نویسه، غیر از 1234 و نام کاربری)');return}
+  if(np.length<6||np==='1234'||np.toLowerCase()===curUsername().toLowerCase()){toast('رمز جدید معتبر نیست (حداقل ۶ نویسه، غیر از 1234 و نام کاربری)');return}
   if(np===oldP){toast('رمز جدید باید با رمز فعلی متفاوت باشد');return}
   try{
     const cred=firebase.auth.EmailAuthProvider.credential(u.email, oldP);
@@ -6077,7 +6392,7 @@ async function changeMyPw(){
   }
   const pp=db.personnel.find(x=>x.id===me.id);
   if(pp){
-    pp.p = await hashPw(pp.u||me.u, np);
+    pp.p = await hashPw(pp.u||curUsername(), np);
     delete pp.mustChange;
     queueRec('personnel', pp.id);
     save({immediate:true});
@@ -6114,6 +6429,7 @@ function applyCloud(cloud){
     _lastCloudNorm = norm;
     _isApplyingRemote = true;
     db = sc;
+    if(me){ const _pp=(db.personnel||[]).find(x=>x.id===me.id); if(_pp) me.perm=_pp.perm||{}; }
     _base = _baseFrom(sc);
     _baselineOk = true;
     TPLS = db.tpls || defaultTPLS();
@@ -6218,6 +6534,28 @@ dbRef.on('value', (snapshot) => {
      try{ queueRec('ppeCat',rec.id); }catch(e){ console.warn(e) }
    });
  }
+ /* مهاجرت فهرست‌های HSE روی داده‌های موجود (بدون حذف داده‌ها) */
+ if(db.lists && Array.isArray(db.lists.INC_TYPES) && db.lists.INC_TYPES.indexOf(FATAL_TYPE)<0){
+   const ix=db.lists.INC_TYPES.indexOf(LTI_TYPE);
+   db.lists.INC_TYPES.splice(ix>=0?ix+1:db.lists.INC_TYPES.length,0,FATAL_TYPE);
+   queueModule('lists');
+ }
+ if(db.lists && Array.isArray(db.lists.LEC_C) && db.lists.LEC_C.indexOf('5')>=0){
+   db.lists.LEC_C=db.lists.LEC_C.map(v=>v==='5'?'3':v).filter((v,i,a)=>a.indexOf(v)===i);
+   queueModule('lists');
+ }
+ /* مهاجرت یک‌باره‌ی پیوند CAPA: مرجع‌های متنی قدیمی به شناسه‌ی واقعی و پیوند برگشتی روی رکورد منبع */
+ if(!db.capaLinkV2){
+   db.capaLinkV2=true;
+   (db.actions||[]).forEach(a=>{ const id=resolveSourceId(a.ref); if(id && id!==a.ref){ a.ref=id; queueRec('actions',a.id); } });
+   (db.actions||[]).forEach(a=>{
+     const hit=a.ref?findSourceRec(a.ref):null, f=hit&&CAPA_LINK_FIELD[hit.m];
+     if(!f) return;
+     const cur=hit.o[f];
+     const curLive=!!cur && cur!==a.code && (db.actions||[]).some(x=>x.code===cur && x.id!==a.id);
+     if(!curLive && cur!==a.code){ hit.o[f]=a.code; queueRec(hit.m,hit.o.id); }
+   });
+ }
  if(!db.scoreArch) db.scoreArch = [];
  (db.personnel||[]).forEach(p=>{if(!p.id)p.id=uid('USR');if(!p.role)p.role='worker'});
  if(!db.tpls) db.tpls=defaultTPLS();
@@ -6255,8 +6593,8 @@ dbRef.on('value', (snapshot) => {
     if(!user || _loginBusy || (me && me.id===user.uid)) return;
     const pp = db.personnel.find(x=>x.id===user.uid);
     const tk = await user.getIdTokenResult();
-    if(!pp || !tk.claims.role){ return; }
-    login({...pp, role: tk.claims.role});
+    if(!pp || !(pp.role||tk.claims.role)){ return; }
+    login({...pp, role: pp.role||tk.claims.role});
   });
 
  setTimeout(()=>{ try{ checkConnection(); }catch(e){console.warn(e)} }, 500);
