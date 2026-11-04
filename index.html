@@ -2020,7 +2020,7 @@ incidents:{t:'حوادث و شبه‌حادثه‌ها',i:'🚨',
  fields:[
   {k:'date',l:'تاریخ وقوع',t:'date',req:1,def:todayJ},{k:'time',l:'ساعت',t:'time'},
   {k:'area',l:'محل وقوع',t:'sel',o:()=>AR(),req:1,list:'AREAS0'},
-  {k:'type',l:'نوع رویداد',t:'sel',req:1,o:()=>L('INC_TYPES'),list:'INC_TYPES'},
+  {k:'type',l:'نوع رویداد',t:'sel',req:1,o:()=>L('INC_TYPES'),list:'INC_TYPES',wo:()=>nmOnlyTypes()},
   {k:'title',l:'شرح کوتاه رویداد',t:'text',req:1},{k:'desc',l:'شرح کامل و نحوه وقوع',t:'txt'},
   {k:'injured',l:'شخص آسیب‌دیده',t:'sel',o:()=>['خیر'].concat(P())},
 {k:'injuredExt',l:'آسیب‌دیده پیمانکار / خارج از فهرست (نام و شرکت)',t:'text'},
@@ -3173,7 +3173,14 @@ function ctrl(f,v){
   case 'time':return '<input class="in"'+id+' data-k="'+f.k+'" type="time" value="'+esc(v)+'">';
   default:return '<input class="in"'+id+' data-k="'+f.k+'" type="text" value="'+esc(v)+'" placeholder="'+esc(f.ph||'')+'"'+(f.ro?' disabled':'')+'>'}
 }
-function opts(f){return typeof f.o==='function'?f.o():(f.o||[])}
+function nmOnlyTypes(){
+ const a=(L('INC_TYPES')||[]).filter(x=>String(x).indexOf('شبه')>-1);
+ return a.length?a:['شبه‌حادثه (Near Miss)'];
+}
+function opts(f){
+ if(f.wo && me && me.role==='worker') return f.wo();
+ return typeof f.o==='function'?f.o():(f.o||[])
+}
 
 function quickAddOption(fieldKey, listKey){
  if(!canManageLists()){toast('دسترسی ندارید');return}
@@ -3389,7 +3396,10 @@ function saveForm(k,id){
    else if(cv.dataset.cleared==='1') delete rec.psigs[sk];
  }); }
  if(M.fields.some(f=>f.t==='chkl')) M.fields.filter(f=>f.t==='chkl').forEach(f=>{ rec[f.k]=$$('#mbody input[cki="'+f.k+'"]:checked').map(c=>c.value); });
- if(k==='incidents' && me.role!=='worker'){ rec.analyses=collectAnalyses(); }
+ if(k==='incidents' && me.role==='worker'){
+    if(String(rec.type||'').indexOf('شبه')<0){ toast('پرسنل اجرایی فقط مجاز به ثبت «شبه‌حادثه» هستند'); return; }
+  }
+  if(k==='incidents' && me.role!=='worker'){ rec.analyses=collectAnalyses(); }
  if(k==='unsafe'||k==='bbs'){
    if(window._phData!==undefined)rec.photo=window._phData;
    window._phData=undefined;
