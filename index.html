@@ -902,7 +902,7 @@ async function verifyPw(stored, username, pw){
   return _b64(h) === parts[3];
 }
 function isPbkdf2(v){ return String(v||'').startsWith('pbkdf2$'); }
-/* قالب قدیمی SHA-256 (فقط برای تأیید و مهاجرت حساب‌های قدیمی) */
+/* قالب قدیمی SHA-256 (فقط برای تایید و مهاجرت حساب‌های قدیمی) */
 function isHashedPw(v){ return /^[0-9a-f]{64}$/.test(String(v||'')); }
 function legacyHashPw(username, pw){ return _sha256Hex(_pwText(username,pw)); }
 
@@ -968,7 +968,7 @@ const isLTI=r=>LTI_TYPES.indexOf(r&&r.type)>=0;
 function fmeaBand(rpn,S){
  const v=+rpn||0; let b=v<=50?0:v<=100?1:v<=200?2:3;
  if((+S||0)>=9) b=Math.max(b,2);
- return [['b-ok','کم'],['b-warn','متوسط'],['b-org','بالا'],['b-bad','بحرانی']][b];
+ return [['b-ok','کم (RPN)'],['b-warn','متوسط (RPN)'],['b-org','بالا (RPN)'],['b-bad','بحرانی (RPN)']][b];
 }
 /* نام کاربری حساب جاری (me فقط نام و نقش را نگه می‌دارد) */
 function curUsername(){ const p=(db&&db.personnel||[]).find(x=>x.id===(me&&me.id)); return p?String(p.u||''):''; }
@@ -1250,6 +1250,8 @@ function sanitizePermissions(data){
 ============================================================ */
 function sanitizeData(data) {
   if (!data) return data;
+const WM={'بسته شد':'بسته شده','تایید شد':'تایید شده','در انتظار تأیید':'در انتظار تایید'};
+Object.keys(data).forEach(k=>{const v=data[k]; if(v&&typeof v==='object') Object.keys(v).forEach(i=>{const r=v[i]; if(r&&typeof r==='object'&&WM[r.status]) r.status=WM[r.status];});});
   const arrayKeys = ['personnel','incidents','unsafe','actions','risks','fmea','jsa','lec',
     'inspections','ptw','ppeCat','ppeTx','trainings','hours','healthExp','medical',
     'envWaste','envMon','chem','contacts','drills','emgEquip','toolbox','tbm','bbs',
@@ -1595,7 +1597,7 @@ window.addEventListener('error',function(e){try{toast('⚠️ خطای فنی: '
 const ROLE_CHIP={worker:['پرسنل اجرایی','b-info'],expert:['کارشناس ایمنی','b-org'],manager:['مدیر ارشد','b-bad']};
 function roleChip(r){const x=ROLE_CHIP[r]||['—','b-mut'];return '<span class="chip '+x[1]+'">'+x[0]+'</span>'}
 function askConfirm(msg,cb){
- openModal('تأیید عملیات','<div style="font-size:13.5px;line-height:2.2">'+esc(msg)+'</div>',
+ openModal('تایید عملیات','<div style="font-size:13.5px;line-height:2.2">'+esc(msg)+'</div>',
   '<button class="btn danger" id="cfm_yes">بله، انجام بده</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
  const y=$('#cfm_yes');if(y)y.onclick=function(){closeModal();cb()};
 }
@@ -1615,6 +1617,12 @@ function jParse(s){const a=String(s||'').split('/').map(Number);if(a.length!==3|
 function jParts(s){const a=String(s||'').split('/').map(Number);if(a.length!==3||!a[0]||a[1]<1||a[1]>12||a[2]<1||a[2]>31)return null;return{jy:a[0],jm:a[1],jd:a[2]}}
 function jDaysAgo(s){const g=jParse(s);if(!g)return Infinity;return Math.floor((Date.now()-new Date(g.gy,g.gm-1,g.gd).getTime())/864e5)}
 function isOverdue(s){const n=jDaysAgo(s);return isFinite(n)&&n>0}
+function actOpen(r){return !['تایید و بسته شد','رد شده'].includes(r.status)}
+function rateTxt(v,m){return v==null?'—':Math.round(v*m)/m}
+function ptwOtherMgr(){return (db.personnel||[]).some(p=>p.role==='manager'&&p.name!==me.name)}
+function ptwTimeBad(r){const a=jDaysAgo(r.startD),b=jDaysAgo(r.endD);if(!isFinite(a)||!isFinite(b))return '';if(b>a||(b===a&&r.startT&&r.endT&&r.endT<=r.startT))return 'زمان پایان مجوز باید بعد از زمان شروع باشد';return ''}
+function ptwExpired(r){const n=jDaysAgo(r.endD);if(!isFinite(n))return false;return n>0||(n===0&&!!r.endT&&r.endT<new Date().toTimeString().slice(0,5))}
+function incRootOK(i){if(!/LTI|Fatality|MTC/.test(i.type||''))return true;return !!(i.rootCause||(i.analyses&&i.analyses.why&&i.analyses.why.root))}
 function jAddM(s,mo){const p=jParts(s);if(!p)return '';const m0=p.jm-1+Number(mo||0);const jy=p.jy+Math.floor(m0/12);const jm=((m0%12)+12)%12+1;const jd=Math.min(p.jd,jMonthLen(jy,jm));return jy+'/'+p2(jm)+'/'+p2(jd)}
 const mKey=s=>{const p=jParts(s);return p?p.jy+'-'+p2(p.jm):String(s||'').slice(0,4)+'-'+String(s||'').slice(5,7)};
 function mBack(k,n){let y=+k.split('-')[0],m=+k.split('-')[1];m-=n;while(m<1){m+=12;y--}return y+'-'+p2(m)}
@@ -1741,7 +1749,7 @@ function s5ScoreOf(rec){
     total+=s; max+=mx;
   });
   const pct= max? Math.round(total/max*100):0;
-  const band = pct>=85?'A': pct>=70?'B': pct>=50?'C':'D';
+  const band = pct>=90?'A': pct>=70?'B': pct>=50?'C':'D';
   return {total, max, pct, per, band};
 }
 function s5BandChip(band){
@@ -1787,7 +1795,7 @@ function uid(p){db.seq[p]=(db.seq[p]||0)+1;return p+'-'+String(db.seq[p]).padSta
 function lvlName(sc){return sc<=4?'کم':sc<=9?'متوسط':sc<=15?'بالا':'بحرانی'}
 function lvlClass(sc){return sc<=4?'b-ok':sc<=9?'b-warn':sc<=15?'b-org':'b-bad'}
 const lvlChip=sc=>sc?'<span class="chip '+lvlClass(sc)+'">'+lvlName(sc)+' ('+nd(sc)+')</span>':'—';
-const SC={'فعال (قفل شده)':'b-bad','رفع قفل شد':'b-ok','لغو شد':'b-mut','درخواست':'b-warn','در حال ارزیابی ایمنی':'b-info','تایید شد':'b-ok','اجرا شد':'b-info','رد شد':'b-bad','بسته شد':'b-ok','تهیه نشده':'b-bad','تهیه شد':'b-warn','ارسال شد':'b-info','تایید دریافت':'b-ok','گزارش اولیه':'b-warn','در حال بررسی':'b-info','در حال اقدام':'b-info','بسته شده':'b-ok','ثبت شده':'b-warn','در حال رسیدگی':'b-info','ارجاع به اقدام':'b-org','اصلاح شد':'b-ok','رد شده':'b-bad','باز':'b-warn','در حال انجام':'b-info','انجام شد':'b-ok','در انتظار تأیید':'b-warn','تایید و بسته شد':'b-ok','پیش‌نویس':'b-mut','تایید شده':'b-ok','در انتظار بررسی':'b-warn','تایید کارشناس':'b-info','تایید نهایی':'b-ok','خاتمه یافته':'b-mut','تحویل شد':'b-ok','مرجوع شد':'b-mut','عادی':'b-mut','مهم':'b-warn','فوری':'b-bad','معتبر':'b-ok','لغو شده':'b-mut','سالم':'b-ok','نیازمند سرویس':'b-warn','خارج از سرویس':'b-bad','کم':'b-ok','متوسط':'b-warn','بالا':'b-org','بحرانی':'b-bad','در محدوده مجاز':'b-ok','خارج از محدوده مجاز':'b-bad','منطبق':'b-ok','نامنطبق':'b-bad','عالی':'b-ok','قابل قبول':'b-warn','نیازمند بهبود':'b-bad','مطابقت':'b-ok','عدم مطابقت جزئی':'b-warn','عدم مطابقت عمده':'b-bad','مشاهده / فرصت بهبود':'b-info','کافی':'b-ok','کمبود موجودی':'b-bad','ارسال شده':'b-info','بازنگری نیاز است':'b-warn','اثربخش':'b-ok','بی‌اثر':'b-bad'};
+const SC={'فعال (قفل شده)':'b-bad','رفع قفل شد':'b-ok','لغو شد':'b-mut','درخواست':'b-warn','در حال ارزیابی ایمنی':'b-info','تایید شده':'b-ok','اجرا شد':'b-info','رد شد':'b-bad','بسته شده':'b-ok','تهیه نشده':'b-bad','تهیه شد':'b-warn','ارسال شد':'b-info','تایید دریافت':'b-ok','گزارش اولیه':'b-warn','در حال بررسی':'b-info','در حال اقدام':'b-info','بسته شده':'b-ok','ثبت شده':'b-warn','در حال رسیدگی':'b-info','ارجاع به اقدام':'b-org','اصلاح شد':'b-ok','رد شده':'b-bad','باز':'b-warn','در حال انجام':'b-info','انجام شد':'b-ok','در انتظار تایید':'b-warn','تایید و بسته شد':'b-ok','پیش‌نویس':'b-mut','تایید شده':'b-ok','در انتظار بررسی':'b-warn','تایید کارشناس':'b-info','تایید نهایی':'b-ok','خاتمه یافته':'b-mut','تحویل شد':'b-ok','مرجوع شد':'b-mut','عادی':'b-mut','مهم':'b-warn','فوری':'b-bad','معتبر':'b-ok','لغو شده':'b-mut','سالم':'b-ok','نیازمند سرویس':'b-warn','خارج از سرویس':'b-bad','کم':'b-ok','متوسط':'b-warn','بالا':'b-org','بحرانی':'b-bad','در محدوده مجاز':'b-ok','خارج از محدوده مجاز':'b-bad','منطبق':'b-ok','نامنطبق':'b-bad','عالی':'b-ok','قابل قبول':'b-warn','نیازمند بهبود':'b-bad','مطابقت':'b-ok','عدم مطابقت جزئی':'b-warn','عدم مطابقت عمده':'b-bad','مشاهده / فرصت بهبود':'b-info','کافی':'b-ok','کمبود موجودی':'b-bad','ارسال شده':'b-info','بازنگری نیاز است':'b-warn','اثربخش':'b-ok','بی‌اثر':'b-bad'};
 const chip=(t,c)=>'<span class="chip '+(c||SC[t]||'b-mut')+'">'+esc(t)+'</span>';
 
 function lecLevel(sc){
@@ -2015,6 +2023,7 @@ incidents:{t:'حوادث و شبه‌حادثه‌ها',i:'🚨',
   {k:'type',l:'نوع رویداد',t:'sel',req:1,o:()=>L('INC_TYPES'),list:'INC_TYPES'},
   {k:'title',l:'شرح کوتاه رویداد',t:'text',req:1},{k:'desc',l:'شرح کامل و نحوه وقوع',t:'txt'},
   {k:'injured',l:'شخص آسیب‌دیده',t:'sel',o:()=>['خیر'].concat(P())},
+{k:'injuredExt',l:'آسیب‌دیده پیمانکار / خارج از فهرست (نام و شرکت)',t:'text'},
   {k:'bodyPart',l:'عضو آسیب‌دیده',t:'sel',o:()=>L('BODY_PARTS'),list:'BODY_PARTS'},
   {k:'lostDays',l:'روزهای کاری از دست‌رفته',t:'num'},{k:'immediate',l:'اقدام فوری انجام‌شده',t:'txt'},
   {k:'rootCause',l:'علت ریشه‌ای (خلاصه)',t:'txt',gate:['expert','manager']},
@@ -2032,7 +2041,7 @@ unsafe:{t:'آنومالی (وضعیت‌ها و رفتارهای ناایمن)',
   {k:'area',l:'واحد / محل',t:'sel',o:()=>AR(),req:1,list:'AREAS0'},
   {k:'cat',l:'نوع',t:'sel',req:1,o:()=>L('UNSAFE_CATS'),list:'UNSAFE_CATS'},
   {k:'desc',l:'شرح مشاهدات',t:'txt',req:1},
-  {k:'risk',l:'سطح خطر',t:'risklvl',o:['کم','متوسط','بالا','بحرانی']},
+  {k:'risk',l:'سطح خطر (خودکار از شدت × احتمال)',t:'risklvl',o:['کم','متوسط','بالا','بحرانی']},
   {k:'severity',l:'پتانسیل شدت پیامد',t:'sel',o:['جزئی','متوسط','شدید','فاجعه‌بار']},
   {k:'probability',l:'احتمال تکرار',t:'sel',o:['کم','متوسط','زیاد','بسیار زیاد']},
   {k:'responsible',l:'مسئول رفع',t:'sel',o:P},
@@ -2042,15 +2051,15 @@ unsafe:{t:'آنومالی (وضعیت‌ها و رفتارهای ناایمن)',
   {k:'rootCause',l:'علت ریشه‌ای (اختیاری)',t:'txt',gate:['expert','manager']},
   {k:'fixedBy',l:'رفع توسط',t:'sel',o:P},
   {k:'fixedJ',l:'تاریخ رفع',t:'date'},
-  {k:'verifyBy',l:'تأییدکننده رفع',t:'sel',o:P,gate:['expert','manager']},
-  {k:'verifyJ',l:'تاریخ تأیید',t:'date',gate:['expert','manager']},
+  {k:'verifyBy',l:'تاییدکننده رفع',t:'sel',o:P,gate:['expert','manager']},
+  {k:'verifyJ',l:'تاریخ تایید',t:'date',gate:['expert','manager']},
   {k:'capaRef',l:'کد اقدام اصلاحی مرتبط (خودکار)',t:'text',ro:1,gate:['expert','manager']},
    {k:'riskRef',l:'ارزیابی ریسک مرتبط',t:'sel',o:()=>riskRefOpts(),gate:['expert','manager']}
  ],
  cols:['date','cat','area','desc','photo','risk','responsible','due','aging']},
 
 actions:{t:'اقدامات اصلاحی و پیشگیرانه (CAPA)',i:'🛠️',
- status:['باز','در حال انجام','انجام شد','در انتظار تأیید','تایید و بسته شد','رد شده'],
+ status:['باز','در حال انجام','انجام شد','در انتظار تایید','تایید و بسته شد','رد شده'],
  fields:[
   {k:'code',l:'کد اقدام',t:'text',gate:['expert','manager'],ph:'خودکار تولید می‌شود'},
   {k:'src',l:'منبع',t:'sel',o:()=>L('ACTION_SRC'),list:'ACTION_SRC',req:1},
@@ -2067,9 +2076,9 @@ actions:{t:'اقدامات اصلاحی و پیشگیرانه (CAPA)',i:'🛠️
   {k:'resources',l:'منابع مورد نیاز',t:'txt'},
   {k:'progress',l:'درصد پیشرفت',t:'num',gate:['expert','manager']},
   {k:'evidence',l:'شواهد اجرا / توضیحات',t:'txt'},
-  {k:'verify',l:'تأییدکننده',t:'sel',o:P},
-  {k:'verifyJ',l:'تاریخ تأیید',t:'date',gate:['expert','manager']},
-  {k:'verifyNote',l:'نظر تأییدکننده',t:'txt',gate:['expert','manager']},
+  {k:'verify',l:'تاییدکننده',t:'sel',o:P},
+  {k:'verifyJ',l:'تاریخ تایید',t:'date',gate:['expert','manager']},
+  {k:'verifyNote',l:'نظر تاییدکننده',t:'txt',gate:['expert','manager']},
   {k:'effectiveness',l:'اثربخشی اقدام',t:'sel',o:['اثربخش','نیازمند بهبود','بی‌اثر'],gate:['expert','manager']},
    {k:'riskRef',l:'ارزیابی ریسک مرتبط',t:'sel',o:()=>riskRefOpts()}
  ],
@@ -2080,7 +2089,8 @@ risks:{t:'شناسایی خطر و ارزیابی ریسک (ماتریس ۵×۵)
  fields:[{k:'act',l:'فعالیت / فرآیند',t:'text',req:1},{k:'area',l:'واحد',t:'sel',o:()=>AR(),list:'AREAS0'},
   {k:'hazard',l:'خطر / عامل زیان‌آور',t:'text',req:1},{k:'event',l:'رخداد ناخواسته محتمل',t:'txt'},
   {k:'ctrl',l:'کنترل‌های موجود',t:'txt'},
-  {k:'s',l:'شدت (قبل از کنترل)',t:'sel',o:()=>L('RISK_LEVELS'),req:1,list:'RISK_LEVELS'},{k:'p',l:'احتمال (قبل از کنترل)',t:'sel',o:()=>L('RISK_LEVELS'),req:1,list:'RISK_LEVELS'},
+  {k:'_hs',l:'راهنمای مقیاس — شدت: ۱ بدون آسیب · ۲ کمک‌های اولیه · ۳ درمان پزشکی یا از دست رفتن چند روز کار · ۴ ازکارافتادگی دائم · ۵ فوت یا چند مصدوم جدی. احتمال: ۱ تقریباً غیرممکن · ۲ نادر (حدود سالی یک‌بار) · ۳ ممکن (ماهی یک‌بار) · ۴ محتمل (هفته‌ای یک‌بار) · ۵ تقریباً قطعی (روزانه). سطح = شدت × احتمال: تا ۴ کم، تا ۹ متوسط، تا ۱۵ بالا، بیشتر بحرانی.',t:'hdr'},
+{k:'s',l:'شدت (قبل از کنترل)',t:'sel',o:()=>L('RISK_LEVELS'),req:1,list:'RISK_LEVELS'},{k:'p',l:'احتمال (قبل از کنترل)',t:'sel',o:()=>L('RISK_LEVELS'),req:1,list:'RISK_LEVELS'},
   {k:'addCtrl',l:'کنترل‌های تکمیلی مورد نیاز',t:'txt'},
   {k:'rs',l:'شدت پس از کنترل',t:'sel',o:()=>L('RISK_LEVELS'),list:'RISK_LEVELS'},{k:'rp',l:'احتمال پس از کنترل',t:'sel',o:()=>L('RISK_LEVELS'),list:'RISK_LEVELS'},
   {k:'owner',l:'مسئول پیگیری',t:'sel',o:P},{k:'review',l:'تاریخ بازنگری بعدی',t:'date'},
@@ -2116,7 +2126,7 @@ jsa:{t:'JSA — تحلیل ایمنی شغل',i:'🔧',
   {k:'person',l:'مجری / پرسنل',t:'sel',o:P},
   {k:'ppe',l:'PPE الزامی',t:'txt'},
   {k:'tools',l:'ابزار و تجهیزات',t:'txt'},
-  {k:'approver',l:'تأییدکننده',t:'sel',o:P},
+  {k:'approver',l:'تاییدکننده',t:'sel',o:P},
   {k:'note',l:'توضیحات',t:'txt'}
  ],
  cols:['date','area','job','person','stepCount','maxRisk']},
@@ -2301,7 +2311,7 @@ loto:{t:'قفل‌گذاری و برچسب‌گذاری (LOTO)',i:'🔒',
  cols:['date','area','equip','energy','lotoChk']},
 
 moc:{t:'مدیریت تغییر (MOC)',i:'🔄',
- status:['درخواست','در حال ارزیابی ایمنی','تایید شد','اجرا شد','رد شد','بسته شد'],
+ status:['درخواست','در حال ارزیابی ایمنی','تایید شده','اجرا شد','رد شد','بسته شده'],
  fields:[
   {k:'date',l:'تاریخ درخواست',t:'date',req:1,def:todayJ},
   {k:'type',l:'نوع تغییر',t:'sel',o:()=>L('MOC_TYPES'),req:1,list:'MOC_TYPES'},
@@ -2317,8 +2327,8 @@ moc:{t:'مدیریت تغییر (MOC)',i:'🔄',
   {k:'docOk',l:'اسناد، رویه‌ها و نقشه‌ها به‌روز شد',t:'chk'},
   {k:'raOk',l:'ارزیابی ریسک تغییر انجام شد',t:'chk'},
   {k:'prestartOk',l:'بازبینی ایمنی پیش از راه‌اندازی (PSSR) انجام شد',t:'chk'},
-  {k:'expertOk',l:'تأیید کارشناس HSE',t:'chk',gate:['expert','manager']},
-  {k:'mgrOk',l:'تأیید نهایی مدیریت',t:'chk',gate:['manager']}],
+  {k:'expertOk',l:'تایید کارشناس HSE',t:'chk',gate:['expert','manager']},
+  {k:'mgrOk',l:'تایید نهایی مدیریت',t:'chk',gate:['manager']}],
  cols:['date','type','area','title','riskLevel']},
 
 equipCert:{t:'بازرسی و گواهی تجهیزات حساس',i:'🏗️',
@@ -2345,11 +2355,11 @@ confined:{t:'فضای محصور',i:'🕳️',
   {k:'people',l:'واردشوندگان',t:'people',req:1},
   {k:'attendant',l:'ناظر بیرون (Attendant)',t:'sel',o:P,req:1},
   {k:'supervisor',l:'سرپرست ورود',t:'sel',o:P},
-  {k:'o2',l:'اکسیژن O₂ (٪) — حد معمول ورود ۱۹٫۵ تا ۲۳٫۵',t:'num'},
-  {k:'lel',l:'گاز قابل اشتعال (٪ LEL) — حد معمول ≤ ۱۰',t:'num'},
+  {k:'o2',l:'اکسیژن O₂ (٪) — حد معمول ورود ۱۹٫۵ تا ۲۳٫۵',t:'num',req:1},
+  {k:'lel',l:'گاز قابل اشتعال (٪ LEL) — حد معمول ≤ ۱۰',t:'num',req:1},
   {k:'co',l:'منوکسید کربن CO (ppm) — حد معمول ≤ ۳۵',t:'num'},
   {k:'h2s',l:'سولفید هیدروژن H₂S (ppm) — حد معمول ≤ ۱۰',t:'num'},
-  {k:'ptwRef',l:'شماره مجوز کار (PTW)',t:'text'},
+  {k:'ptwRef',l:'شماره مجوز کار (PTW)',t:'text',req:1},
   {k:'isolated',l:'خطوط و انرژی‌ها ایزوله شد (LOTO)',t:'chk'},
   {k:'vent',l:'تهویه برقرار است',t:'chk'},
   {k:'rescue',l:'تجهیزات نجات آماده است (هارنس، سه‌پایه، SCBA)',t:'chk'},
@@ -2372,9 +2382,9 @@ heightWork:{t:'کار در ارتفاع',i:'🧗',
   {k:'supervisor',l:'سرپرست کار',t:'sel',o:P},
   {k:'ptwRef',l:'شماره مجوز کار (PTW)',t:'text'},
   {k:'harness',l:'هارنس تمام‌بدن و لنیارد مناسب استفاده می‌شود',t:'chk'},
-  {k:'anchor',l:'نقطه اتصال مطمئن و تأییدشده وجود دارد',t:'chk'},
+  {k:'anchor',l:'نقطه اتصال مطمئن و تاییدشده وجود دارد',t:'chk'},
   {k:'guard',l:'حفاظ لبه / نرده ایمن است',t:'chk'},
-  {k:'scaffold',l:'داربست / سکو بازرسی و دارای تگ تأیید است',t:'chk'},
+  {k:'scaffold',l:'داربست / سکو بازرسی و دارای تگ تایید است',t:'chk'},
   {k:'fall',l:'ناحیهٔ زیر کار محصور و از سقوط اشیاء محافظت شده است',t:'chk'},
   {k:'weather',l:'شرایط جوی مناسب است (باد، باران، یخ‌زدگی)',t:'chk'},
   {k:'rescue',l:'طرح نجات و ارتباطات تعیین شد',t:'chk'},
@@ -2383,7 +2393,7 @@ heightWork:{t:'کار در ارتفاع',i:'🧗',
  cols:['date','area','loc','height','cnt','hwChk']},
 
 siteVisit:{t:'بازدید محل کار (SITE VISIT)',i:'🔍',
- status:['ثبت شده','اقدام لازم','بسته شد'],
+ status:['ثبت شده','اقدام لازم','بسته شده'],
  fields:[
   {k:'_h1',l:'مشخصات بازدید',t:'hdr'},
   {k:'date',l:'تاریخ بازدید',t:'date',req:1,def:todayJ},
@@ -2469,7 +2479,7 @@ const FN={
    if(hasFish||hasWhy||hasM4) return '<span class="chip b-ok">✔ تحلیل شده</span>';
    return '<span class="chip b-warn">بدون تحلیل</span>';
  },
- s5_pct:r=>{const sc=s5ScoreOf(r);return '<b style="color:'+(sc.pct>=85?'var(--ok)':sc.pct>=70?'#2563eb':sc.pct>=50?'var(--warn)':'var(--bad)')+'">'+nd(sc.pct)+'٪</b>'},
+ s5_pct:r=>{const sc=s5ScoreOf(r);return '<b style="color:'+(sc.pct>=90?'var(--ok)':sc.pct>=70?'#2563eb':sc.pct>=50?'var(--warn)':'var(--bad)')+'">'+nd(sc.pct)+'٪</b>'},
  s5_band:r=>s5BandChip(s5ScoreOf(r).band),
  s5_min:r=>{const m=s5MinKey(r);return m?'<span class="chip b-warn">'+esc(m.name)+' ('+nd(m.pct)+'٪)</span>':'—'},
  rpn:r=>{const v=+r.rpn||0;if(!v)return '—';const fb=fmeaBand(v,r.s);return '<span class="chip '+fb[0]+'">'+nd(v)+' — '+fb[1]+'</span>'},
@@ -3035,7 +3045,7 @@ function fmtCell(k,r,c){
  }
  if(k==='actions'&&c==='due'){
   const dv=r.due;if(!dv)return '—';
-  const open=['باز','در حال انجام'].includes(r.status);
+  const open=actOpen(r);
   return (open&&typeof isOverdue==='function'&&isOverdue(dv))?'<span class="chip b-bad">'+esc(dv)+' — معوق</span>':esc(dv);
  }
  if(k==='siteVisit'&&c==='items'){const a=Array.isArray(r.items)?r.items:[];if(!a.length)return '—';return '<span class="chip b-info">'+nd(a.length)+' از '+nd(SV_ITEMS.length)+'</span><div style="font-size:11.5px;color:var(--mut);margin-top:4px;white-space:normal;min-width:240px;line-height:1.8">'+a.map(x=>esc(x)).join('، ')+'</div>'}
@@ -3121,7 +3131,7 @@ function renderRows(){
  if(st){let s='<span class="big">'+nd(rows.length)+'</span> مورد';
   const cmk=mKey(todayJ());const scope=me.role==='worker'?myRows(k):db[k];const mon=scope.filter(r=>mKey(r.date||r.createdJ)===cmk).length;
   s+=' | ثبت این ماه: <b>'+nd(mon)+'</b>';
-  if(k==='actions'){const od=db.actions.filter(r=>['باز','در حال انجام'].includes(r.status)&&isOverdue(r.due)).length;s+=' | معوق: <b style="color:var(--bad)">'+nd(od)+'</b>'}
+  if(k==='actions'){const od=db.actions.filter(r=>actOpen(r)&&isOverdue(r.due)).length;s+=' | معوق: <b style="color:var(--bad)">'+nd(od)+'</b>'}
   if(k==='incidents'){const lti=(me.role==='worker'?myRows('incidents'):db.incidents).filter(isLTI).length;s+=' | LTI: <b>'+nd(lti)+'</b>'}
   st.innerHTML=s}
  requestAnimationFrame(()=>{const s=$('.tscroll');if(s)s.scrollLeft=prevScroll});
@@ -3244,8 +3254,6 @@ function openForm(k,id,pre){
  b+='</div>';
  if(k==='incidents'){
    if(me.role==='worker'){
-     b=b.replace(/<select class="in" id="f_type"[\s\S]*?<\/select>/, '<select class="in" id="f_type" data-k="type"><option selected>شبه‌حادثه (Near Miss)</option></select>');
-     setTimeout(()=>{ const el=$('#f_type'); if(el) el.value='شبه‌حادثه (Near Miss)'; },30);
    }
    if(me.role==='worker'){ _anaTab='fishbone'; }
    else b+='<div class="ff wide" style="margin-top:12px;grid-column:1/-1"><label>🔬 تحلیل حادثه</label>'+drawAnalysisArea(rec?rec.analyses:null)+'</div>';
@@ -3356,7 +3364,6 @@ function saveForm(k,id){
     }
   }
 
- if(k==='incidents' && me.role==='worker' && isNew) { rec.type='شبه‌حادثه (Near Miss)'; }
 
  let bad=null;
  $$('#mbody [data-k]').forEach(el=>{
@@ -3431,9 +3438,16 @@ function saveForm(k,id){
      else incMsg='با وجود روز کاری از دست‌رفته، نوع رویداد باید «جراحت دردسرساز (LTI)» یا «فوت» باشد';
    }
    if(!incMsg && rec.type===LTI_TYPE && ld<=0) incMsg='برای جراحت دردسرساز (LTI)، تعداد روزهای کاری از دست‌رفته باید بیشتر از صفر باشد';
-   if(incMsg){toast('⚠️ '+incMsg);return}
+   if(!incMsg&&rec.status==='بسته شده'&&!incRootOK(rec)) incMsg='برای بستن حادثهٔ MTC / LTI / فوت، علت ریشه‌ای یا تحلیل ریشه‌ای (۵ چرا) الزامی است';
+if(incMsg){toast('⚠️ '+incMsg);return}
  }
  if(bad){toast('⚠️ تکمیل الزامی است: '+bad);return}
+if(k==='ptw'){const pm=ptwTimeBad(rec);if(pm){toast('⚠️ '+pm);return}}
+if(k==='risks'&&rec.rs&&rec.rp&&(+rec.rs)*(+rec.rp)>(+rec.s)*(+rec.p)){toast('⚠️ ریسک پس از کنترل نمی‌تواند از ریسک اولیه بیشتر باشد');return}
+if(k==='unsafe'&&rec.severity&&rec.probability){const si=['جزئی','متوسط','شدید','فاجعه‌بار'].indexOf(rec.severity)+1,pi=['کم','متوسط','زیاد','بسیار زیاد'].indexOf(rec.probability)+1;if(si&&pi)rec.risk=lvlName(si*pi)}
+if(k==='confined'){const g=gasBad(rec);if(g.length){toast('⚠️ گاز ناایمن ('+g.join('، ')+'): ورود مجاز نیست؛ پس از تهویه دوباره اندازه‌گیری کنید');return}
+const ref=String(rec.ptwRef||'').trim().toUpperCase(),pt=(db.ptw||[]).find(x=>String(x.id).toUpperCase()===ref);
+if(!pt||pt.status!=='تایید نهایی'||ptwExpired(pt)){toast('⚠️ شماره‌ی مجوز کار معتبر (تایید نهایی و منقضی‌نشده) الزامی است');return}}
 
  if(k==='actions'){
    if(!rec.code) rec.code = genActionCode();
@@ -3456,7 +3470,13 @@ function saveForm(k,id){
  }
 
  queueRec(k, rec.id);
- if(k==='inspections'){ syncEmgEquip(emgEqIdOfInsp(rec)); if(orig&&emgEqIdOfInsp(orig)&&emgEqIdOfInsp(orig)!==emgEqIdOfInsp(rec)) syncEmgEquip(emgEqIdOfInsp(orig)); }
+ if(k==='inspections'){ const cf=(rec.fails||[]).filter(inspIsCritical);
+if(cf.length&&!rec.actRef){
+const a={id:uid(PF.actions),code:genActionCode(),createdBy:me.name,createdById:me.id,createdRole:me.role,createdJ:todayJ(),log:[{u:me.name,d:todayJ(),t:'ایجاد خودکار از مغایرت بحرانی بازرسی'}],appr:{stage:'approved',hist:[]},src:'بازرسی',ref:rec.id,type:'اصلاحی (Corrective)',prio:'فوری',status:'باز',startD:todayJ(),due:jAddDays(todayJ(),3),desc:'مغایرت بحرانی در چک‌لیست «'+rec.tplTitle+'» مورخ '+rec.date+' — توقف یا ایمن‌سازی فوری لازم است:\n• '+cf.map(inspItemText).join('\n• ')};
+db.actions.push(a); queueRec('actions',a.id); rec.actRef=a.code; queueRec(k,rec.id);
+setTimeout(()=>toast('🚨 مغایرت بحرانی: اقدام اصلاحی فوری '+a.code+' ایجاد شد؛ کار را متوقف یا ایمن کنید'),900);
+} }
+if(k==='inspections'){ syncEmgEquip(emgEqIdOfInsp(rec)); if(orig&&emgEqIdOfInsp(orig)&&emgEqIdOfInsp(orig)!==emgEqIdOfInsp(rec)) syncEmgEquip(emgEqIdOfInsp(orig)); }
 
  save();
  closeModal();
@@ -3531,21 +3551,21 @@ function drawS5Wizard(){
    body+='</div>';
    let mx=0, s=0; t.items.forEach((_,i)=>{ if(vals[i]==='na') return; mx+=MAX; s+=(+vals[i]||0) });
    const pct=mx?Math.round(s/mx*100):0;
-   const col=pct>=85?'var(--ok)':pct>=70?'#2563eb':pct>=50?'var(--warn)':'var(--bad)';
-   body+='<div style="margin-top:12px;padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><b>امتیاز این رکن: '+nd(s)+' از '+nd(mx)+' ('+nd(pct)+'٪)</b>'+s5BandChip(pct>=85?'A':pct>=70?'B':pct>=50?'C':'D')+'<div class="s5-bar" style="width:100%;margin-top:6px"><i style="width:'+pct+'%;background:'+col+'"></i></div></div>';
+   const col=pct>=90?'var(--ok)':pct>=70?'#2563eb':pct>=50?'var(--warn)':'var(--bad)';
+   body+='<div style="margin-top:12px;padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><b>امتیاز این رکن: '+nd(s)+' از '+nd(mx)+' ('+nd(pct)+'٪)</b>'+s5BandChip(pct>=90?'A':pct>=70?'B':pct>=50?'C':'D')+'<div class="s5-bar" style="width:100%;margin-top:6px"><i style="width:'+pct+'%;background:'+col+'"></i></div></div>';
    footer='<div class="s5-wizard-nav"><button class="btn ghost" onclick="s5Prev()">→ مرحله قبل</button><button class="btn pri" onclick="s5Next()">مرحله بعد ←</button></div>';
  }
  else {
    const sc=s5ScoreOf(rec);
    body='<div class="s5-hero"><b>✅ مرور نهایی — '+esc(rec.area||'')+'</b><br><small>'+esc(rec.date||'')+' | ارزیاب: '+esc(rec.assessor||'')+'</small></div>';
    body+='<div class="grid2" style="margin-bottom:12px">'+
-     '<div class="kpi '+(sc.pct>=85?'green':sc.pct>=70?'blue':sc.pct>=50?'orange':'red')+'"><div class="kl">امتیاز کل 5S</div><div class="kv">'+nd(sc.pct)+'٪</div><div class="ks">'+s5BandChip(sc.band)+'</div></div>'+
+     '<div class="kpi '+(sc.pct>=90?'green':sc.pct>=70?'blue':sc.pct>=50?'orange':'red')+'"><div class="kl">امتیاز کل 5S</div><div class="kv">'+nd(sc.pct)+'٪</div><div class="ks">'+s5BandChip(sc.band)+'</div></div>'+
      '<div class="kpi blue"><div class="kl">مجموع امتیاز</div><div class="kv">'+nd(sc.total)+' / '+nd(sc.max)+'</div><div class="ks">از حداکثر ممکن</div></div>'+
    '</div>';
    body+='<div class="s5-grid" style="margin-bottom:12px">';
    keys.forEach(k=>{
      const t=s5Tpl()[k], p=sc.per[k]||{score:0,max:0,pct:0};
-     const col=p.pct>=85?'var(--ok)':p.pct>=70?'#2563eb':p.pct>=50?'var(--warn)':'var(--bad)';
+     const col=p.pct>=90?'var(--ok)':p.pct>=70?'#2563eb':p.pct>=50?'var(--warn)':'var(--bad)';
      body+='<div class="s5-col"><h4>S'+esc(t.num)+' — '+esc(t.name)+'</h4><div style="text-align:center;font-size:20px;font-weight:800;color:'+col+'">'+nd(p.pct)+'٪</div><div style="text-align:center;font-size:11px;color:var(--mut);margin-bottom:6px">'+nd(p.score)+' از '+nd(p.max)+'</div><div class="s5-bar"><i style="width:'+p.pct+'%;background:'+col+'"></i></div></div>';
    });
    body+='</div>';
@@ -3626,8 +3646,8 @@ function kpis(){
  const nm=INC.filter(r=>String(r.type).indexOf('شبه')>=0).length;
  const ltis=db.incidents.filter(isLTI);
  const dNo=ltis.length?Math.min.apply(null,ltis.map(r=>jDaysAgo(r.date))):null;
- const od=db.actions.filter(r=>['باز','در حال انجام'].includes(r.status)&&isOverdue(r.due)).length;
- return {hrs:hrs,rec:rec,lti:lti,nm:nm,dNo:dNo,od:od,trir:hrs?rec*200000/hrs:0,ltifr:hrs?lti*1e6/hrs:0,jy:jy}
+ const od=db.actions.filter(r=>actOpen(r)&&isOverdue(r.due)).length;
+ return {hrs:hrs,rec:rec,lti:lti,nm:nm,dNo:dNo,od:od,trir:hrs?rec*200000/hrs:null,ltifr:hrs?lti*1e6/hrs:null,jy:jy}
 }
 function hbars(data){const mx=Math.max(1,Math.max.apply(null,data.map(d=>d.v)));
  return '<div class="hbars">'+data.map(d=>'<div class="hb"><span class="hl" title="'+esc(d.l)+'">'+esc(d.l)+'</span><div class="htrack"><div class="hfill" style="width:'+(d.v/mx*100)+'%;background:'+(d.c||'var(--pri)')+'"></div></div><b>'+nd(d.v)+'</b></div>').join('')+'</div>'}
@@ -3655,10 +3675,10 @@ function s5StatsBlock(){
      let bars='';
      keys.forEach(k=>{
        const p=sc.per[k]||{pct:0,max:0};
-       const col=p.pct>=85?'var(--ok)':p.pct>=70?'#2563eb':p.pct>=50?'var(--warn)':'var(--bad)';
+       const col=p.pct>=90?'var(--ok)':p.pct>=70?'#2563eb':p.pct>=50?'var(--warn)':'var(--bad)';
        bars+='<div class="s5u-bar-row"><b>'+esc(s5Tpl()[k].num)+'</b><span style="width:44px;font-size:10px;color:var(--mut)">'+esc(s5Tpl()[k].name)+'</span><div class="track"><i style="width:'+p.pct+'%;background:'+col+'"></i></div><span style="width:34px;text-align:left;font-size:10.5px;font-weight:700">'+nd(p.pct)+'٪</span></div>';
      });
-     return '<div class="s5-unit" style="cursor:pointer" onclick="openDetail(\'s5\',\''+r.id+'\')"><div class="s5u-h"><div><div class="s5u-name">'+medal+' '+esc(r.area)+'</div><small style="color:var(--mut);font-size:10.5px">'+esc(r.date)+' — ارزیاب: '+esc(r.assessor||'—')+'</small></div><div style="text-align:center"><div class="s5u-sc" style="color:'+(sc.pct>=85?'var(--ok)':sc.pct>=70?'#2563eb':sc.pct>=50?'var(--warn)':'var(--bad)')+'">'+nd(sc.pct)+'٪</div>'+s5BandChip(sc.band)+'</div></div><div class="s5u-bars">'+bars+'</div></div>';
+     return '<div class="s5-unit" style="cursor:pointer" onclick="openDetail(\'s5\',\''+r.id+'\')"><div class="s5u-h"><div><div class="s5u-name">'+medal+' '+esc(r.area)+'</div><small style="color:var(--mut);font-size:10.5px">'+esc(r.date)+' — ارزیاب: '+esc(r.assessor||'—')+'</small></div><div style="text-align:center"><div class="s5u-sc" style="color:'+(sc.pct>=90?'var(--ok)':sc.pct>=70?'#2563eb':sc.pct>=50?'var(--warn)':'var(--bad)')+'">'+nd(sc.pct)+'٪</div>'+s5BandChip(sc.band)+'</div></div><div class="s5u-bars">'+bars+'</div></div>';
    }).join('')+'</div>';
  }
  h+='</div>';
@@ -3687,21 +3707,21 @@ function dashMgmt(){
  const typeBars=Object.keys(typ).map(t=>({l:t,v:typ[t]}));
  const lv={کم:0,متوسط:0,بالا:0,بحرانی:0};db.risks.forEach(r=>{const n=lvlName((+r.s||0)*(+r.p||0));lv[n]++});
  const riskBars=['کم','متوسط','بالا','بحرانی'].map(l=>({l:l,v:lv[l],c:l==='کم'?'var(--ok)':l==='متوسط'?'var(--warn)':l==='بالا'?'#ea580c':'var(--bad)'}));
- const od=db.actions.filter(r=>['باز','در حال انجام'].includes(r.status)&&isOverdue(r.due)).slice(0,6);
+ const od=db.actions.filter(r=>actOpen(r)&&isOverdue(r.due)).slice(0,6);
  const pw=db.ptw.filter(r=>me.role==='manager'?r.status==='تایید کارشناس':r.status==='در انتظار بررسی').slice(0,5);
  const low=db.ppeCat.filter(r=>(+r.stock||0)<=(+r.min||0)).slice(0,5);
  const odInsp=Object.keys(TPLS).map(tk=>{const rs=(window._fullDb||db).inspections.filter(r=>r.tpl===tk&&inspCounts(r)).sort((a,b)=>String(b.date).localeCompare(String(a.date)));const last=rs[0];const days=last?jDaysAgo(last.date):999;return {tk:tk,days:days}}).filter(x=>x.days>TPLS[x.tk].period);
  const openUnsafe=db.unsafe.filter(r=>!['اصلاح شد','رد شده'].includes(r.status));
- const openActions=db.actions.filter(r=>['باز','در حال انجام'].includes(r.status));
+ const openActions=db.actions.filter(r=>actOpen(r));
  let h='<div class="grid4">'+kcard('روز بدون حادثه LTI',K.dNo===null?'∞':nd(K.dNo),'از آخرین جراحت دردسرساز','green')
- +kcard('TRIR',(Math.round(K.trir*100)/100),'پایه ۲۰۰,۰۰۰ ساعت','orange')
- +kcard('LTIFR',(Math.round(K.ltifr*10)/10),'پایه ۱,۰۰۰,۰۰۰ ساعت','red')
+ +kcard('TRIR',rateTxt(K.trir,100),'پایه ۲۰۰,۰۰۰ ساعت','orange')
+ +kcard('LTIFR',rateTxt(K.ltifr,10),'پایه ۱,۰۰۰,۰۰۰ ساعت','red')
  +kcard('نفر-ساعت '+K.jy,nd(K.hrs),'شبه‌حادثه: '+nd(K.nm)+' مورد','blue')+'</div>';
  h+='<div class="grid4" style="margin-top:14px">'+
    kcard('آنومالی باز',nd(openUnsafe.length),'نیازمند رسیدگی',openUnsafe.length?'orange':'green')+
    kcard('CAPA باز',nd(openActions.length),'اقدامات در جریان',openActions.length?'orange':'green')+
    kcard('آنومالی بحرانی',nd(openUnsafe.filter(r=>r.risk==='بحرانی').length),'وضعیت فوری',openUnsafe.filter(r=>r.risk==='بحرانی').length?'red':'green')+
-   kcard('CAPA اثربخش',nd(db.actions.filter(r=>r.effectiveness==='اثربخش').length),'تأییدشده','green')+
+   kcard('CAPA اثربخش',nd(db.actions.filter(r=>r.effectiveness==='اثربخش').length),'تاییدشده','green')+
  '</div>';
  const scTop=calcScores(cmk).filter(r=>r.score!==0).slice(0,3);
  h+='<div class="grid3" style="margin-top:14px"><div class="card"><div class="sechead">🏆 امتیاز ایمنی پرسنل اجراییان — '+monthLabel(cmk)+'</div>'+miniList(scTop.map((r,i)=>'<div class="list-row" onclick="setPage(\'scores\')"><span class="lt">'+(i===0?'🥇':i===1?'🥈':'🥉')+' '+esc(r.name)+'</span><span class="chip '+(r.score>0?'b-ok':'b-warn')+'">'+nd(r.score)+' امتیاز</span></div>'),'هنوز امتیازی این ماه ثبت نشده')+'</div>';
@@ -3716,7 +3736,7 @@ function dashMgmt(){
  h+='<div class="card"><div class="sechead">🧯 سطوح ریسک</div>'+hbars(riskBars)+'</div>';
  h+='<div class="card"><div class="sechead">📌 انواع رویداد</div>'+hbars(typeBars)+'</div></div>';
  h+='<div class="grid3"><div class="card"><div class="sechead">⏰ اقدامات اصلاحی معوق</div>'+miniList(od.map(r=>'<div class="list-row" onclick="openDetail(\'actions\',\''+r.id+'\')"><span class="lt">'+(r.code?'['+esc(r.code)+'] ':'')+esc(r.desc)+'</span><span class="chip b-bad">'+nd(jDaysAgo(r.due))+' روز تأخیر</span></div>'),'مورد معوقی وجود ندارد')+'</div>';
- h+='<div class="card"><div class="sechead">'+(me.role==='manager'?'🏅 مجوزهای در انتظار تأیید':'🔥 مجوزهای در انتظار بررسی')+'</div>'+miniList(pw.map(r=>'<div class="list-row" onclick="openDetail(\'ptw\',\''+r.id+'\')"><span class="lt">'+esc(ptwTitle(r))+'</span><span class="chip b-warn">'+esc(r.id)+'</span></div>'),'در انتظار تأییدی نیست')+'</div>';
+ h+='<div class="card"><div class="sechead">'+(me.role==='manager'?'🏅 مجوزهای در انتظار تایید':'🔥 مجوزهای در انتظار بررسی')+'</div>'+miniList(pw.map(r=>'<div class="list-row" onclick="openDetail(\'ptw\',\''+r.id+'\')"><span class="lt">'+esc(ptwTitle(r))+'</span><span class="chip b-warn">'+esc(r.id)+'</span></div>'),'در انتظار تاییدی نیست')+'</div>';
  h+='<div class="card"><div class="sechead">🦺 هشدار موجودی PPE</div>'+miniList(low.map(r=>'<div class="list-row" onclick="openDetail(\'ppeCat\',\''+r.id+'\')"><span class="lt">'+esc(r.item)+'</span><span class="chip b-bad">موجودی '+nd(r.stock)+' / حد '+nd(r.min)+'</span></div>'),'موجودی همه اقلام کافی است')+'</div></div>';
  h+='<div class="card"><div class="sechead">📋 بازرسی‌های سرسید نشده</div>'+miniList(odInsp.map(x=>'<div class="list-row" onclick="setPage(\'inspections\')"><span class="lt">'+TPLS[x.tk].t+'</span><span class="chip '+(x.days===999?'b-bad':'b-warn')+'">'+(x.days===999?'هرگز انجام نشده':nd(x.days)+' روز')+'</span></div>'),'همه بازرسی‌ها به‌روز هستند')+'</div>';
  h+='<div style="margin-top:14px"></div>';
@@ -3762,7 +3782,7 @@ function dashWorker(){
  if(myArea5){
    const sc=s5ScoreOf(myArea5);
    h+='<div class="card"><div class="sechead">🏭 وضعیت 5S واحد من — «'+esc(me.area)+'»</div><div class="grid2">'+
-     '<div class="kpi '+(sc.pct>=85?'green':sc.pct>=70?'blue':sc.pct>=50?'orange':'red')+'"><div class="kl">امتیاز آخرین ارزیابی</div><div class="kv">'+nd(sc.pct)+'٪</div><div class="ks">'+s5BandChip(sc.band)+' — '+esc(myArea5.date)+'</div></div>'+
+     '<div class="kpi '+(sc.pct>=90?'green':sc.pct>=70?'blue':sc.pct>=50?'orange':'red')+'"><div class="kl">امتیاز آخرین ارزیابی</div><div class="kv">'+nd(sc.pct)+'٪</div><div class="ks">'+s5BandChip(sc.band)+' — '+esc(myArea5.date)+'</div></div>'+
      '<div class="kpi blue"><div class="kl">ضعیف‌ترین رکن</div><div class="kv" style="font-size:16px">'+(s5MinKey(myArea5)?esc(s5MinKey(myArea5).name):'—')+'</div><div class="ks">'+(s5MinKey(myArea5)?nd(s5MinKey(myArea5).pct)+'٪':'—')+'</div></div>'+
    '</div></div>';
  } else {
@@ -3921,8 +3941,8 @@ window.rpRun=function(fmt){
 function exportKPIReport(format){
   const K=kpis();
   const cards='<div class="kpi-row">'
-    +'<div class="kpi-box">TRIR<b>'+(Math.round(K.trir*100)/100)+'</b>نرخ حوادث قابل ثبت</div>'
-    +'<div class="kpi-box">LTIFR<b>'+(Math.round(K.ltifr*10)/10)+'</b>نرخ حوادث دردسرساز</div>'
+    +'<div class="kpi-box">TRIR<b>'+rateTxt(K.trir,100)+'</b>نرخ حوادث قابل ثبت</div>'
+    +'<div class="kpi-box">LTIFR<b>'+rateTxt(K.ltifr,10)+'</b>نرخ حوادث دردسرساز</div>'
     +'<div class="kpi-box">روز بدون LTI<b>'+(K.dNo===null?'∞':nd(K.dNo))+'</b>از آخرین حادثه</div>'
     +'<div class="kpi-box">نفر-ساعت<b>'+nd(K.hrs)+'</b>سال '+K.jy+'</div>'
     +'</div>';
@@ -4535,7 +4555,7 @@ function unsafeStats(){
 function navBadge(k){
  if(k==='incidents'&&canView('incidents'))return db.incidents.filter(r=>r.status==='گزارش اولیه').length;
  if(k==='unsafe'&&canView('unsafe'))return db.unsafe.filter(r=>!['اصلاح شد','رد شده'].includes(r.status)).length;
- if(k==='actions'&&canView('actions'))return db.actions.filter(r=>['باز','در حال انجام'].includes(r.status)&&isOverdue(r.due)).length;
+ if(k==='actions'&&canView('actions'))return db.actions.filter(r=>actOpen(r)&&isOverdue(r.due)).length;
  if(k==='ptw')return me.role==='manager'?db.ptw.filter(r=>r.status==='تایید کارشناس').length:(me.role==='expert'?db.ptw.filter(r=>r.status==='در انتظار بررسی').length:0);
  if(k==='s5'&&canView('s5'))return db.s5.filter(r=>r.status==='بازنگری نیاز است').length;
  if(k==='equipCert'&&canView('equipCert'))return (db.equipCert||[]).filter(r=>{const l=dLeft(r.nextD);return l!==null&&l<0}).length;
@@ -4757,14 +4777,14 @@ function notifications(){
   });
  }
  if(canView('actions')){
-  db.actions.filter(r=>['باز','در حال انجام'].includes(r.status)&&isOverdue(r.due)).forEach(r=>{
+  db.actions.filter(r=>actOpen(r)&&isOverdue(r.due)).forEach(r=>{
    out.push({icon:'⏰',kind:'actions',chip:'b-warn',label:'اقدام معوق ('+nd(jDaysAgo(r.due))+' روز)',text:(r.code?'['+r.code+'] ':'')+r.desc,sub:'مسئول: '+r.owner+' — مهلت: '+r.due,id:r.id});
   });
  }
  if(canView('ptw')){
   const ptwWait=me.role==='manager'?db.ptw.filter(r=>r.status==='تایید کارشناس'):me.role==='expert'?db.ptw.filter(r=>r.status==='در انتظار بررسی'):[];
   ptwWait.forEach(r=>{
-   out.push({icon:'🔥',kind:'ptw',chip:'b-org',label:'مجوز در انتظار تأیید',text:ptwTitle(r),sub:(r.desc||'').slice(0,50)+' — '+r.startD,id:r.id});
+   out.push({icon:'🔥',kind:'ptw',chip:'b-org',label:'مجوز در انتظار تایید',text:ptwTitle(r),sub:(r.desc||'').slice(0,50)+' — '+r.startD,id:r.id});
   });
  }
  if(canView('equipCert')){
@@ -4939,7 +4959,7 @@ function capaSyncSource(c){
  const inc=(db.incidents||[]).find(x=>x.id===c.ref||(c.code&&x.capaRef===c.code));
  if(inc){
   const stillOpen=(db.actions||[]).some(a=>a.id!==c.id&&a.ref===inc.id&&a.status!=='تایید و بسته شد');
-  if(closed&&!stillOpen&&inc.status!=='بسته شده'){ inc.status='بسته شده'; lg(inc,'بسته شدن CAPA '+c.code); queueRec('incidents',inc.id); m.push('حادثه '+inc.id+' بسته شد'); }
+  if(closed&&!stillOpen&&inc.status!=='بسته شده'&&incRootOK(inc)){ inc.status='بسته شده'; lg(inc,'بسته شدن CAPA '+c.code); queueRec('incidents',inc.id); m.push('حادثه '+inc.id+' بسته شد'); }
   else if(!closed&&inc.status==='بسته شده'){ inc.status='در حال اقدام'; lg(inc,'بازگشایی: CAPA '+c.code+' هنوز بسته نیست'); queueRec('incidents',inc.id); m.push('حادثه '+inc.id+' دوباره باز شد'); }
  }
  const rk=riskOf(c.riskRef)||(db.risks||[]).find(x=>x.id===c.ref||(c.code&&x.capaRef===c.code));
@@ -4969,8 +4989,8 @@ function capaFootBtns(k,r,id){
 }
 function mocGate(r,st){
  const need=[], add=(c,l)=>{ if(!r[c]) need.push(l) };
- if(['تایید شد','اجرا شد','بسته شد'].includes(st)){ add('raOk','ارزیابی ریسک تغییر'); add('expertOk','تأیید کارشناس HSE'); }
- if(['اجرا شد','بسته شد'].includes(st)){ add('trainOk','آموزش پرسنل'); add('docOk','به‌روزرسانی اسناد'); add('prestartOk','بازبینی PSSR'); add('mgrOk','تأیید نهایی مدیریت'); }
+ if(['تایید شده','اجرا شد','بسته شده'].includes(st)){ add('raOk','ارزیابی ریسک تغییر'); add('expertOk','تایید کارشناس HSE'); }
+ if(['اجرا شد','بسته شده'].includes(st)){ add('trainOk','آموزش پرسنل'); add('docOk','به‌روزرسانی اسناد'); add('prestartOk','بازبینی PSSR'); add('mgrOk','تایید نهایی مدیریت'); }
  return need;
 }
 function capaFromUnsafe(id){
@@ -5268,7 +5288,8 @@ function emgDerivedFields(r){
   const ST_OK=S[0]||'سالم', ST_SVC=S[1]||'نیازمند سرویس', ST_OUT=S[2]||'خارج از سرویس';
   if(r.status!==ST_OUT){
     if((last.fails||[]).length) out.status=ST_SVC;
-    else if(!r.status || r.status===ST_SVC) out.status=ST_OK;
+    else if(isOverdue(out.nextChk)) out.status=ST_SVC;
+ else if(!r.status || r.status===ST_SVC) out.status=ST_OK;
   }
   return out;
 }
@@ -5440,15 +5461,15 @@ function verifyCapa(id){
  const r=db.actions.find(x=>x.id===id);
  if(!r){toast('اقدام یافت نشد');return}
  if(!can('actions','edit')){toast('دسترسی ندارید');return}
- openModal('✅ تأیید اثربخشی اقدام',
+ openModal('✅ تایید اثربخشی اقدام',
   '<div class="fgrid">'+
   '<div class="ff wide"><label>خلاصه اقدام</label><div style="background:#f8fafc;padding:10px;border-radius:9px;font-size:12.5px;border:1px solid var(--line)">'+esc(r.desc||'')+'</div></div>'+
   '<div class="ff"><label>نتیجه اثربخشی <i>*</i></label><select id="vc_eff" class="in">'+
    ['اثربخش','نیازمند بهبود','بی‌اثر'].map(o=>'<option>'+o+'</option>').join('')+'</select></div>'+
-  '<div class="ff"><label>تاریخ تأیید</label><input id="vc_date" class="in jdate" value="'+todayJ()+'" onclick="openCal(this)" readonly style="cursor:pointer"></div>'+
-  '<div class="ff wide"><label>نظر تأییدکننده</label><textarea id="vc_note" class="in" placeholder="توضیحات، شواهد، پیشنهادات..."></textarea></div>'+
+  '<div class="ff"><label>تاریخ تایید</label><input id="vc_date" class="in jdate" value="'+todayJ()+'" onclick="openCal(this)" readonly style="cursor:pointer"></div>'+
+  '<div class="ff wide"><label>نظر تاییدکننده</label><textarea id="vc_note" class="in" placeholder="توضیحات، شواهد، پیشنهادات..."></textarea></div>'+
   '</div>',
-  '<button class="btn pri" onclick="saveVerifyCapa(\''+id+'\')">💾 ثبت تأیید</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
+  '<button class="btn pri" onclick="saveVerifyCapa(\''+id+'\')">💾 ثبت تایید</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
 }
 function saveVerifyCapa(id){
  const r=db.actions.find(x=>x.id===id);
@@ -5463,12 +5484,12 @@ function saveVerifyCapa(id){
  r.status = eff==='اثربخش' ? 'تایید و بسته شد' : (eff==='نیازمند بهبود' ? 'در حال انجام' : 'باز');
  r.progress = eff==='اثربخش' ? 100 : r.progress;
  if(!r.log) r.log=[];
- r.log.push({u:me.name,d:todayJ(),t:'تأیید اثربخشی: '+eff});
+ r.log.push({u:me.name,d:todayJ(),t:'تایید اثربخشی: '+eff});
  const syncMsg=capaSyncSource(r);
  queueRec('actions', r.id);
  save();
  closeModal();
- toast('✔ تأیید ثبت شد'+(syncMsg?' — '+syncMsg:''));
+ toast('✔ تایید ثبت شد'+(syncMsg?' — '+syncMsg:''));
  if(curPage==='actions'||(curPage==='unsafe'))renderRows();
  renderSidebar();
  openDetail('actions',id);
@@ -5637,13 +5658,13 @@ function openDetail(k,id){
    const sc=s5ScoreOf(r);
    h+='<h4 class="msh">📊 نتایج تفصیلی 5S</h4>';
    h+='<div class="grid2" style="margin-bottom:12px">'+
-     '<div class="kpi '+(sc.pct>=85?'green':sc.pct>=70?'blue':sc.pct>=50?'orange':'red')+'"><div class="kl">امتیاز کل</div><div class="kv">'+nd(sc.pct)+'٪</div><div class="ks">'+nd(sc.total)+' / '+nd(sc.max)+'</div></div>'+
+     '<div class="kpi '+(sc.pct>=90?'green':sc.pct>=70?'blue':sc.pct>=50?'orange':'red')+'"><div class="kl">امتیاز کل</div><div class="kv">'+nd(sc.pct)+'٪</div><div class="ks">'+nd(sc.total)+' / '+nd(sc.max)+'</div></div>'+
      '<div class="kpi blue"><div class="kl">سطح</div><div class="kv" style="font-size:18px">'+s5BandChip(sc.band)+'</div><div class="ks">A≥۸۵ | B≥۷۰ | C≥۵۰ | D&lt;۵۰</div></div>'+
    '</div>';
    h+='<div class="s5-grid">';
    s5Keys().forEach(k=>{
      const t=s5Tpl()[k], p=sc.per[k]||{score:0,max:0,pct:0};
-     const col=p.pct>=85?'var(--ok)':p.pct>=70?'#2563eb':p.pct>=50?'var(--warn)':'var(--bad)';
+     const col=p.pct>=90?'var(--ok)':p.pct>=70?'#2563eb':p.pct>=50?'var(--warn)':'var(--bad)';
      h+='<div class="s5-col"><h4>S'+esc(t.num)+' — '+esc(t.name)+'</h4><div style="text-align:center;font-size:20px;font-weight:800;color:'+col+'">'+nd(p.pct)+'٪</div><div style="text-align:center;font-size:11px;color:var(--mut);margin-bottom:6px">'+nd(p.score)+' / '+nd(p.max)+'</div><div class="s5-bar"><i style="width:'+p.pct+'%;background:'+col+'"></i></div></div>';
    });
    h+='</div>';
@@ -5675,14 +5696,14 @@ function openDetail(k,id){
    h+='<div class="kpi '+(p>=100?'green':p>=50?'blue':p>=25?'orange':'red')+'"><div class="kl">پیشرفت</div><div class="kv">'+nd(p)+'٪</div><div class="ks">وضعیت: '+esc(r.status||'—')+'</div></div>';
    if(r.due){
      const left=-jDaysAgo(r.due);
-     h+='<div class="kpi '+(r.status==='تایید و بسته شد'?'green':left<0?'red':left<3?'orange':'green')+'"><div class="kl">مهلت</div><div class="kv" style="font-size:15px">'+(r.status==='تایید و بسته شد'?'بسته شد':left<0?nd(Math.abs(left))+' روز تأخیر':nd(left)+' روز مانده')+'</div><div class="ks">'+esc(r.due)+'</div></div>';
+     h+='<div class="kpi '+(r.status==='تایید و بسته شد'?'green':left<0?'red':left<3?'orange':'green')+'"><div class="kl">مهلت</div><div class="kv" style="font-size:15px">'+(r.status==='تایید و بسته شد'?'بسته شده':left<0?nd(Math.abs(left))+' روز تأخیر':nd(left)+' روز مانده')+'</div><div class="ks">'+esc(r.due)+'</div></div>';
    }
    h+='<div class="kpi orange"><div class="kl">اولویت</div><div class="kv" style="font-size:18px">'+esc(r.prio||'—')+'</div><div class="ks">نوع: '+esc(r.type||'—')+'</div></div>';
    if(r.effectiveness){
      const cls={'اثربخش':'green','نیازمند بهبود':'orange','بی‌اثر':'red'}[r.effectiveness]||'blue';
      h+='<div class="kpi '+cls+'"><div class="kl">اثربخشی</div><div class="kv" style="font-size:15px">'+esc(r.effectiveness)+'</div><div class="ks">'+(r.verifyNote?esc(r.verifyNote.substring(0,30)):'—')+'</div></div>';
    } else {
-     h+='<div class="kpi blue"><div class="kl">تأییدکننده</div><div class="kv" style="font-size:15px">'+esc(r.verify||'—')+'</div><div class="ks">'+(r.verifyJ?'تأیید: '+esc(r.verifyJ):'در انتظار تأیید')+'</div></div>';
+     h+='<div class="kpi blue"><div class="kl">تاییدکننده</div><div class="kv" style="font-size:15px">'+esc(r.verify||'—')+'</div><div class="ks">'+(r.verifyJ?'تایید: '+esc(r.verifyJ):'در انتظار تایید')+'</div></div>';
    }
    h+='</div>';
    h+='<div style="margin-top:10px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span>پیشرفت اجرا</span><b>'+nd(p)+'٪</b></div><div style="height:12px;background:#f1f5f9;border-radius:99px;overflow:hidden"><div style="height:100%;width:'+p+'%;background:'+(p>=100?'var(--ok)':p>=50?'var(--pri)':'var(--warn)')+';border-radius:99px;transition:width 0.3s"></div></div></div>';
@@ -5715,8 +5736,8 @@ function openDetail(k,id){
     foot+='<button class="btn ghost" onclick="const a=db.actions.find(x=>x.code===\''+r.capaRef+'\');if(a){closeModal();openDetail(\'actions\',a.id)}else toast(\'اقدام یافت نشد\')">🔗 مشاهده CAPA</button>';
   if(k==='incidents'&&can('actions','create')&&!r.capaRef&&r.status!=='بسته شده')
    foot+='<button class="btn pri" onclick="closeModal();capaFromIncident(\''+id+'\')">🛠️ صدور CAPA برای حادثه</button>';
- if(k==='actions'&&r.verify&&['انجام شد','در انتظار تأیید'].includes(r.status)&&can('actions','edit')&&me.role!=='worker')
-   foot+='<button class="btn pri" onclick="closeModal();verifyCapa(\''+id+'\')">✅ تأیید اثربخشی</button>';
+ if(k==='actions'&&r.verify&&['انجام شد','در انتظار تایید'].includes(r.status)&&can('actions','edit')&&me.role!=='worker')
+   foot+='<button class="btn pri" onclick="closeModal();verifyCapa(\''+id+'\')">✅ تایید اثربخشی</button>';
  openModal(M.t,h,foot);
  if(k==='ptw') setTimeout(initSignPads,60);
 }
@@ -5774,7 +5795,7 @@ function ptwBtns(r){let b='<div class="ptwbtns">';
  if(r.status==='تایید کارشناس'&&me.role==='manager')b+='<button class="btn pri" onclick="ptwAct(\''+r.id+'\',\'تایید نهایی\')">🏅 تایید نهایی</button>';
  if(['در انتظار بررسی','تایید کارشناس'].includes(r.status)&&can('ptw','edit'))b+='<button class="btn danger" onclick="ptwAct(\''+r.id+'\',\'رد شده\')">⛔ رد</button>';
  if(r.status==='تایید نهایی')b+='<button class="btn ghost" onclick="ptwAct(\''+r.id+'\',\'خاتمه یافته\')">🏁 خاتمه</button>';
- if(r.status==='تایید نهایی')b+='<span class="chip b-ok">مجوز فعال است</span>';
+ if(r.status==='تایید نهایی')b+=ptwExpired(r)?'<span class="chip b-bad">مجوز منقضی شده — خاتمه دهید</span>':'<span class="chip b-ok">مجوز فعال است</span>';
  return b+'</div>'}
 function ptwAct(id,to){
  const r=db.ptw.find(x=>x.id===id);
@@ -5783,12 +5804,13 @@ function ptwAct(id,to){
  const selfPtw=(isMine(r)||r.reqName===me.name);
  if((to==='تایید کارشناس'||to==='تایید نهایی')&&selfPtw){toast('نمی‌توانید مجوز خودتان را تایید کنید');return}
  if(to==='تایید نهایی'&&r.expertBy===me.name){toast('تاییدکننده‌ی کارشناس نمی‌تواند تایید نهایی را هم انجام دهد');return}
- const ok=(to==='تایید کارشناس'&&['expert','manager'].includes(me.role)&&r.status==='در انتظار بررسی')
+ if((to==='تایید کارشناس'||to==='تایید نهایی')&&(ptwTimeBad(r)||ptwExpired(r))){toast('⚠️ بازهٔ زمانی این مجوز نامعتبر یا گذشته است؛ ابتدا آن را ویرایش کنید');return}
+ const ok=(to==='تایید کارشناس'&&(me.role==='expert'||(me.role==='manager'&&ptwOtherMgr()))&&r.status==='در انتظار بررسی')
   ||(to==='تایید نهایی'&&me.role==='manager'&&r.status==='تایید کارشناس')
   /* کارشناس فقط در مرحله‌ی خودش رد کند؛ پس از تایید کارشناس، فقط مدیر می‌تواند رد کند */
   ||(to==='رد شده'&&((me.role==='expert'&&r.status==='در انتظار بررسی')||(me.role==='manager'&&['در انتظار بررسی','تایید کارشناس'].includes(r.status))))
   ||(to==='خاتمه یافته'&&r.status==='تایید نهایی');
- if(!ok){toast('این اقدام در وضعیت فعلی مجاز نیست');return}
+ if(!ok){toast(to==='تایید کارشناس'&&me.role==='manager'&&!ptwOtherMgr()?'⚠️ مدیر دیگری برای تایید نهایی نیست؛ مرحلهٔ کارشناس باید با کارشناس ایمنی باشد':'این اقدام در وضعیت فعلی مجاز نیست');return}
  if(to==='تایید کارشناس') r.expertBy=me.name;
  r.status=to;
  if(!r.log) r.log=[];
@@ -5922,8 +5944,8 @@ function kpiPage(){const K=kpis();const jy=K.jy;
  h+='<button class="btn ghost" onclick="exportKPIReport(\'word\')">📄 Word</button>';
  h+='<button class="btn ghost" onclick="exportKPIReport(\'pdf\')">📄 PDF</button>';
  h+='<button class="btn pri" onclick="doPrint()">🖨️ چاپ</button></div></div>';
- h+='<div class="grid4">'+kcard('TRIR','<span style="color:var(--pri)">'+(Math.round(K.trir*100)/100)+'</span>','نرخ حوادث قابل ثبت','')
- +kcard('LTIFR','<span style="color:var(--bad)">'+(Math.round(K.ltifr*10)/10)+'</span>','نرخ حوادث دردسرساز','')
+ h+='<div class="grid4">'+kcard('TRIR','<span style="color:var(--pri)">'+rateTxt(K.trir,100)+'</span>','نرخ حوادث قابل ثبت','')
+ +kcard('LTIFR','<span style="color:var(--bad)">'+rateTxt(K.ltifr,10)+'</span>','نرخ حوادث دردسرساز','')
  +kcard('روز بدون LTI',K.dNo===null?'∞':nd(K.dNo),'از آخرین حادثه','green')
  +kcard('نسبت شبه‌حادثه به حادثه',K.rec?nd(Math.round(K.nm/K.rec*10)/10):'—','هدف: بالای ۱۰','blue')+'</div>';
  h+='<div class="grid2" style="margin-top:14px"><div class="card"><div class="sechead">⏱️ نفر-ساعت ماهانه</div><div class="tscroll"><table class="tbl"><thead><tr><th>ماه</th><th>نفر-ساعت</th><th>میانگین نیرو</th><th>اضافه‌کاری</th></tr></thead><tbody>'+db.hours.slice().sort((a,b)=>String(b.month).localeCompare(String(a.month))).map(r=>'<tr><td>'+esc(r.month)+'</td><td>'+nfmt(r.hours)+'</td><td>'+nd(r.hc||0)+'</td><td>'+nfmt(r.ot||0)+'</td></tr>').join('')+'</tbody></table></div></div>';
@@ -6297,7 +6319,7 @@ const NAV=[
  {g:'مدیریت',items:['scores','kpi','trends','audits','docs','announce','perms','settings']}
 ];
 function pageOf(k){return SPECIAL[k]||MODS[k]}
-function renderSidebar(){let h='';
+function renderSidebar(){ if(me&&db&&me.role!=='worker'&&!window._eqSynced){window._eqSynced=1;try{syncEmgEquip()}catch(e){}}let h='';
  NAV.forEach(g=>{const items=g.items.filter(k=>canView(k));if(!items.length)return;
   h+='<div class="sgrp">'+g.g+'</div>'+items.map(k=>{const Pg=pageOf(k);const n=navBadge(k)+apprPending(k);return '<div class="sitem'+(curPage===k?' on':'')+'" onclick="setPage(\''+k+'\')"><span>'+Pg.i+'</span><span>'+Pg.t+'</span>'+(n?'<span class="nb">'+nd(n)+'</span>':'')+(newItemCount(k)?'<span class="nb nbnew" title="موارد جدید از آخرین بازدید">+'+nd(newItemCount(k))+'</span>':'')+'</div>'}).join('')});
  $('#snav').innerHTML=h;
@@ -6370,7 +6392,7 @@ function setPage(k){const Pg=pageOf(k);
 function openModal(t,b,f){closeCal();closeBell();$('#mtitle').textContent=t;$('#mbody').innerHTML=b;$('#mfoot').innerHTML=f||'';$('#modal').classList.add('open');document.body.classList.add('modal-open')}
 function closeModal(){closeCal();$('#modal').classList.remove('open');document.body.classList.remove('modal-open');if(_renderAfterModal&&me){_renderAfterModal=false;setTimeout(()=>{if(!document.body.classList.contains('modal-open'))refreshCurrent()},0)}}
 (function(){const m=$('#modal');if(m)m.addEventListener('click',e=>{if(e.target.id==='modal')closeModal()})})();
-function showHelp(){openModal('ℹ️ راهنمای سامانه','<div style="font-size:13px;line-height:2.1"><b>سامانه جامع HSE فولاد تنبور</b><br>• <b>پرسنل اجرایی:</b> ثبت شبه‌حادثه، امتیاز، 5S واحد، PPE و آموزش.<br>• <b>کارشناس:</b> بررسی حوادث، آنومالی و CAPA، تحلیل، ارزیابی ریسک، مجوز کار، بازرسی، 5S، BBS.<br>• <b>مدیر:</b> تعریف کاربران، تأیید مجوزها، کنترل دسترسی، گزارش‌ها.<br><br>🔍 <b>جستجوی سراسری:</b> با دکمه 🔍 در نوار بالا یا میانبر <b>Ctrl+K</b> می‌توانید در تمام ماژول‌ها جستجو کنید.<br>🔗 <b>ارجاع به CAPA:</b> در جزئیات آنومالی یا حادثه، دکمه «ارجاع به CAPA» را بزنید.<br>✅ <b>تأیید اثربخشی:</b> پس از اجرا، مسئول تأییدکننده در جزئیات CAPA دکمه «تأیید اثربخشی» را می‌بیند.</div>','<button class="btn pri" onclick="closeModal()">متوجه شدم</button>')}
+function showHelp(){openModal('ℹ️ راهنمای سامانه','<div style="font-size:13px;line-height:2.1"><b>سامانه جامع HSE فولاد تنبور</b><br>• <b>پرسنل اجرایی:</b> ثبت شبه‌حادثه، امتیاز، 5S واحد، PPE و آموزش.<br>• <b>کارشناس:</b> بررسی حوادث، آنومالی و CAPA، تحلیل، ارزیابی ریسک، مجوز کار، بازرسی، 5S، BBS.<br>• <b>مدیر:</b> تعریف کاربران، تایید مجوزها، کنترل دسترسی، گزارش‌ها.<br><br>🔍 <b>جستجوی سراسری:</b> با دکمه 🔍 در نوار بالا یا میانبر <b>Ctrl+K</b> می‌توانید در تمام ماژول‌ها جستجو کنید.<br>🔗 <b>ارجاع به CAPA:</b> در جزئیات آنومالی یا حادثه، دکمه «ارجاع به CAPA» را بزنید.<br>✅ <b>تایید اثربخشی:</b> پس از اجرا، مسئول تاییدکننده در جزئیات CAPA دکمه «تایید اثربخشی» را می‌بیند.</div>','<button class="btn pri" onclick="closeModal()">متوجه شدم</button>')}
 
 /* ---------- Login ---------- */
 const ROLEINFO={worker:['👷','پرسنل اجرایی'],expert:['🦺','کارشناس ایمنی'],manager:['👔','مدیریت ارشد']};
