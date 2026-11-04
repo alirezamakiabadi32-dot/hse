@@ -1590,7 +1590,7 @@ async function checkConnection(){
   }
 }
 
-function toast(m){const t=$('#toast');if(!t)return;t.textContent=m;t.classList.remove('ok','warn','bad');const x=String(m);if(/^\s*(✔|✅)/.test(x))t.classList.add('ok');else if(/^\s*⚠/.test(x))t.classList.add('warn');else if(/^\s*(❌|✖|⛔)/.test(x))t.classList.add('bad');t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3200)}
+function toast(m){const t=$('#toast');if(!t)return;t.textContent=m;t.classList.remove('ok','warn','bad');const x=String(m);if(/^\s*(✔|✅)/.test(x))t.classList.add('ok');else if(/^\s*⚠/.test(x))t.classList.add('warn');else if(/^\s*(❌|✖|⛔)/.test(x))t.classList.add('bad');t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),x.length>60?9000:3200)}
 window.addEventListener('online', checkConnection);
 window.addEventListener('offline', function(){ const ind=$('#syncIndicator'), txt=$('#syncTxt'); if(ind&&txt){ind.className='sync-indicator error'; txt.textContent='قطع اینترنت';} });
 window.addEventListener('error',function(e){try{toast('⚠️ خطای فنی: '+e.message)}catch(x){}});
@@ -4378,9 +4378,31 @@ function _fnMissing(e){ return !!e && (e.name==='TypeError' || e.code==='functio
 let _secApp=null;
 function secAuth(){ if(!_secApp) _secApp=firebase.initializeApp(firebaseConfig,'hse-admin'); return _secApp.auth(); }
 function genPwFill(){
- const c='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
- const v=[...crypto.getRandomValues(new Uint8Array(10))].map(x=>c[x%c.length]).join('');
- const e=$('#pf_pw'); if(e){e.value=v; e.type='text'}
+ const U='ABCDEFGHJKLMNPQRSTUVWXYZ',L='abcdefghjkmnpqrstuvwxyz',D='23456789',S='!@#$%&*?';
+ const all=U+L+D+S, r=n=>crypto.getRandomValues(new Uint32Array(1))[0]%n;
+ const a=[U[r(U.length)],L[r(L.length)],D[r(D.length)],S[r(S.length)]];
+ for(let k=0;k<8;k++) a.push(all[r(all.length)]);
+ for(let k=a.length-1;k>0;k--){const m=r(k+1);[a[k],a[m]]=[a[m],a[k]]}
+ const e=$('#pf_pw'); if(e){e.value=a.join(''); e.type='text'}
+}
+/* پیام خطای دقیق و فارسی برای خطاهای Firebase Auth */
+function authErrMsg(e){
+ const c=(e&&e.code)||'', M={
+  'auth/email-already-in-use':'این نام کاربری قبلاً در سامانه ورود ساخته شده است',
+  'functions/already-exists':'این نام کاربری قبلاً در سامانه ورود ساخته شده است',
+  'auth/weak-password':'رمز ضعیف است؛ حداقل ۶ نویسه',
+  'auth/password-does-not-meet-requirements':'رمز با سیاست امنیتی Firebase همخوانی ندارد (معمولاً حرف بزرگ + کوچک + عدد + نماد لازم است). دکمهٔ 🎲 را بزنید',
+  'auth/admin-restricted-operation':'ساخت کاربر جدید در Firebase غیرفعال است: Authentication ← Settings ← User actions ← Enable create (sign-up)',
+  'auth/operation-not-allowed':'ورود با ایمیل/رمز در Firebase فعال نیست: Authentication ← Sign-in method ← Email/Password',
+  'auth/invalid-email':'نام کاربری برای ساخت ایمیل نامعتبر است (نباید با نقطه یا خط تیره تمام شود)',
+  'auth/network-request-failed':'ارتباط با Firebase برقرار نشد؛ اینترنت/فیلترشکن را بررسی کنید',
+  'auth/too-many-requests':'تلاش زیاد؛ چند دقیقه صبر کنید',
+  'auth/user-disabled':'این حساب در Firebase غیرفعال (Disabled) شده است',
+  'auth/requires-recent-login':'برای این کار باید دوباره وارد شوید',
+  'auth/api-key-not-valid.-please-pass-a-valid-api-key.':'کلید API نامعتبر یا محدود شده است',
+  'auth/requests-from-referer-blocked':'دامنهٔ این صفحه در محدودیت‌های API Key مجاز نیست'
+ };
+ return '⛔ '+(M[c]||(e&&e.message)||'خطای نامشخص')+(c?'  ['+c+']':'');
 }
 function personForm(i){
  if(!me||me.role!=='manager'){toast('فقط مدیر');return}
@@ -4409,7 +4431,8 @@ async function savePerson(i){
  }
  const pw=($('#pf_pw')||{}).value||'';
  if(!old&&!pw){toast('رمز اولیه الزامی است');return}
- if(pw&&(pw.length<6||pw==='1234'||pw.toLowerCase()===un)){toast('رمز معتبر نیست (حداقل ۶ نویسه، غیر از 1234 و نام کاربری)');return}
+ if(pw&&pw.length<6){toast('⛔ رمز کوتاه است؛ حداقل ۶ نویسه (الان '+pw.length+' نویسه)');return}
+ if(pw&&(pw==='1234'||pw.toLowerCase()===un)){toast('⛔ رمز نباید 1234 یا مثل نام کاربری باشد');return}
  const perm={};
  $$('#mbody select[data-pm]').forEach(s=>{ if(s.value){ const m=s.dataset.pm; (perm[m]=perm[m]||{})[s.dataset.pa]=(s.value==='y'); } });
  const rec={name:n,job:$('#pf_j').value,area:$('#pf_a').value,role:role,u:un};
@@ -4427,7 +4450,7 @@ async function savePerson(i){
   }
  }catch(e){
   if(b) b.disabled=false;
-  toast(e.code==='auth/email-already-in-use'||e.code==='functions/already-exists'?'این نام کاربری قبلاً در سامانه ورود ساخته شده است':_fnMissing(e)?'تابع سرور (Cloud Function) نصب نشده؛ تغییر رمز ممکن نیست':'⛔ '+(e.message||e.code));
+  console.error('savePerson:',e); toast(e&&e.code==='functions/not-found'?'تابع سرور (Cloud Function) نصب نشده؛ تغییر رمز ممکن نیست':authErrMsg(e));
   return;
  }
  if(old) Object.assign(old,rec); else db.personnel.push(Object.assign({id:id,p:''},rec));
@@ -6412,7 +6435,7 @@ let _failCount = 0, _lockUntil = 0;
 /* پرسش رمز جدید برای حساب‌هایی که هنوز رمز پیش‌فرض دارند */
 async function askNewPassword(f){
   for(let i=0;i<3;i++){
-    const np=prompt('برای امنیت حساب، یک رمز جدید وارد کنید (حداقل ۶ نویسه؛ غیر از 1234 و نام کاربری):');
+    const np=prompt('برای امنیت حساب، یک رمز جدید وارد کنید (حداقل ۶ نویسه؛ ترجیحاً شامل حرف بزرگ، کوچک، عدد و نماد؛ غیر از 1234 و نام کاربری):');
     if(np===null) return null;
     if(np.length>=6 && np!=='1234' && np.toLowerCase()!==String(f.u||'').toLowerCase()) return np;
     alert('رمز انتخابی معتبر نیست. دوباره تلاش کنید.');
@@ -6442,10 +6465,14 @@ async function doLogin(){
    try{
      user=(await auth.signInWithEmailAndPassword(u+'@hse.local', p)).user;
    }catch(e){
-     _failCount++;
-     if(_failCount>=5){ _lockUntil=Date.now()+5*60000; _failCount=0; }
-     lockSave();
-     setLerr(e.code==='auth/too-many-requests' ? 'تلاش زیاد؛ کمی صبر کنید' : 'نام کاربری یا رمز اشتباه است');
+     console.error('login:',e);
+     const cred=['auth/invalid-credential','auth/wrong-password','auth/user-not-found','auth/invalid-login-credentials'].includes(e&&e.code);
+     if(cred){
+       _failCount++;
+       if(_failCount>=5){ _lockUntil=Date.now()+5*60000; _failCount=0; }
+       lockSave();
+     }
+     setLerr(cred ? 'نام کاربری یا رمز اشتباه است' : authErrMsg(e));
      return;
    }
 
@@ -6462,12 +6489,15 @@ async function doLogin(){
    if(pp.mustChange){
      const np = await askNewPassword(pp);
      if(!np){ await auth.signOut(); setLerr('برای ورود باید رمز جدید تعیین کنید'); return; }
-     await user.updatePassword(np);
+     try{ await user.updatePassword(np); }
+     catch(e){ console.error('updatePassword:',e); await auth.signOut(); setLerr(authErrMsg(e)); return; }
      delete pp.mustChange;
      queueRec('personnel', pp.id);
      save({immediate:true});
    }
    login({...pp, role: pp.role||tk.claims.role});
+ }catch(e){
+   console.error('doLogin:',e); setLerr(authErrMsg(e));
  }finally{
    _loginBusy = false;
  }
