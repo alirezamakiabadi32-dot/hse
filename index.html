@@ -40,6 +40,7 @@ input,select,textarea{font-family:inherit;font-size:13.5px}
 .lrolehead{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px dashed var(--line);padding-top:14px;margin-bottom:12px}
 .lrolehead b{font-size:15px;color:var(--pri2)}
 .lerr{background:var(--t-bad);color:var(--c-bad);border:1px solid #fecaca;border-radius:10px;padding:8px 12px;font-size:12.5px;margin-top:12px;text-align:center}
+.bioBtn{width:100%;min-height:46px;margin-bottom:12px;background:#fff7ed;border:1.5px solid var(--pri);color:var(--pri2);font-weight:700;border-radius:10px;padding:10px;font-size:14px}
 .lnote{text-align:center;color:var(--mut);font-size:12px;margin-top:10px;line-height:2}
 #app{display:flex;min-height:100vh}
 #side{width:252px;background:var(--side);color:#cbd5e1;position:fixed;top:0;bottom:0;right:0;overflow-y:auto;z-index:50}
@@ -767,6 +768,7 @@ input,select,textarea{font-size:17px!important}
     <button class="btn ghost sm" onclick="roleBack()">↩ تغییر نقش</button>
     <b id="lformTtl">ورود</b>
    </div>
+   <button type="button" id="bioBtn" class="bioBtn hidden" onclick="bioLogin()"></button>
    <form class="lform" id="loginForm" autocomplete="off" novalidate>
     <input id="lu" class="in" name="hse_login_id" placeholder="نام کاربری" autocomplete="off" data-lpignore="true" data-1p-ignore="true" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="next" style="direction:ltr;text-align:center">
     <input id="lp" class="in" name="hse_login_key" type="password" placeholder="رمز عبور" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" autocapitalize="none" autocorrect="off" enterkeyhint="go" style="direction:ltr;text-align:center">
@@ -6482,6 +6484,7 @@ async function doLogin(){
        if(_failCount>=5){ _lockUntil=Date.now()+5*60000; _failCount=0; }
        lockSave();
      }
+     if(cred) window._credFail=true;
      setLerr(cred ? 'نام کاربری یا رمز اشتباه است' : authErrMsg(e));
      return;
    }
@@ -6495,17 +6498,20 @@ async function doLogin(){
    }
 
    _failCount=0; _lockUntil=0; lockSave();
+   let pwNow=p;
 
    if(pp.mustChange){
      const np = await askNewPassword(pp);
      if(!np){ await auth.signOut(); setLerr('برای ورود باید رمز جدید تعیین کنید'); return; }
      try{ await user.updatePassword(np); }
      catch(e){ console.error('updatePassword:',e); await auth.signOut(); setLerr(authErrMsg(e)); return; }
+     pwNow=np;
      delete pp.mustChange;
      queueRec('personnel', pp.id);
      save({immediate:true});
    }
    login({...pp, role: pp.role||tk.claims.role});
+   try{ bioAfterLogin(u, pwNow, {name:pp.name, role: pp.role||tk.claims.role}); }catch(e){ console.warn(e); }
  }catch(e){
    console.error('doLogin:',e); setLerr(authErrMsg(e));
  }finally{
@@ -6527,8 +6533,9 @@ function openChangeMyPw(){
    '<div class="ff wide"><label>رمز فعلی <i>*</i></label><input id="cp_old" type="password" class="in" style="direction:ltr" autocomplete="current-password"></div>'+
    '<div class="ff"><label>رمز جدید <i>*</i></label><input id="cp_new" type="password" class="in" style="direction:ltr" autocomplete="new-password"></div>'+
    '<div class="ff"><label>تکرار رمز جدید <i>*</i></label><input id="cp_new2" type="password" class="in" style="direction:ltr" autocomplete="new-password"></div>'+
-   '</div><div class="lnote">حداقل ۶ نویسه؛ غیر از 1234 و نام کاربری.</div>',
+   '</div><div class="lnote">حداقل ۶ نویسه؛ غیر از 1234 و نام کاربری.</div><div id="bio_sec"></div>',
    '<button class="btn pri" onclick="changeMyPw()">💾 تغییر رمز</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
+  try{ bioRenderSection(); }catch(e){}
 }
 async function changeMyPw(){
   const oldP=$('#cp_old').value, np=$('#cp_new').value, np2=$('#cp_new2').value;
@@ -6554,8 +6561,9 @@ async function changeMyPw(){
     queueRec('personnel', pp.id);
     save({immediate:true});
   }
+  try{ bioRemove(curUsername()); }catch(e){}
   closeModal();
-  toast('✔ رمز شما تغییر کرد');
+  toast('✔ رمز شما تغییر کرد (ورود زیستی را دوباره فعال کنید)');
 }
 function logout(){ askConfirm('از حساب کاربری خارج می‌شوید؟', async function(){
   if(hasPendingChanges()){
@@ -8005,5 +8013,134 @@ document.addEventListener('keydown', function(e){
   }, 4000);
 })();
 </script>
+<script>
+/* ===== ورود با اثر انگشت / چهره (WebAuthn) =====
+   پس از یک‌بار ورود با رمز، کاربر می‌تواند ورود زیستی را فعال کند.
+   رمز روی همین دستگاه رمزنگاری (AES-GCM) و با کلید حاصل از WebAuthn PRF قفل می‌شود؛
+   اگر دستگاه PRF نداشته باشد، تایید اثر انگشت/چهره به‌عنوان قفل ورود استفاده می‌شود. */
+(function(){
+ const KEY='hse_bio_v1', DECL='hse_bio_decl_v1';
+ const enc=function(buf){let s='';new Uint8Array(buf).forEach(function(c){s+=String.fromCharCode(c)});return btoa(s)};
+ const dec=function(s){const b=atob(s),a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a};
+ const rnd=function(n){return crypto.getRandomValues(new Uint8Array(n))};
+ function load(){try{return JSON.parse(localStorage.getItem(KEY)||'{}')||{}}catch(e){return {}}}
+ function store(o){try{localStorage.setItem(KEY,JSON.stringify(o))}catch(e){}}
+ function supported(){return !!(window.isSecureContext && window.PublicKeyCredential && navigator.credentials && window.crypto && crypto.subtle)}
+ function recOf(u){const o=load();return u&&o[u]&&o[u].cid?o[u]:null}
+ function recFor(role){
+  const o=load(), last=o._last&&o._last[role];
+  if(last&&o[last]&&o[last].role===role) return o[last];
+  const k=Object.keys(o).find(function(x){return x!=='_last'&&o[x]&&o[x].role===role});
+  return k?o[k]:null;
+ }
+ function remove(u){const o=load();delete o[u];if(o._last)Object.keys(o._last).forEach(function(r){if(o._last[r]===u)delete o._last[r]});store(o)}
+ function declined(u){try{return !!(JSON.parse(localStorage.getItem(DECL)||'{}')[u])}catch(e){return false}}
+ function setDeclined(u){try{const o=JSON.parse(localStorage.getItem(DECL)||'{}');o[u]=1;localStorage.setItem(DECL,JSON.stringify(o))}catch(e){}}
+ function updateBtn(){
+  const b=document.getElementById('bioBtn'); if(!b) return;
+  const r=supported()&&typeof loginRole!=='undefined'&&loginRole?recFor(loginRole):null;
+  if(r){b.textContent='🔐 ورود با اثر انگشت / چهره — '+(r.name||r.u);b.classList.remove('hidden')}
+  else b.classList.add('hidden');
+ }
+ async function prfGet(cid,salt){
+  const a=await navigator.credentials.get({publicKey:{challenge:rnd(32),rpId:location.hostname,allowCredentials:[{type:'public-key',id:cid}],userVerification:'required',timeout:60000,extensions:{prf:{eval:{first:salt}}}}});
+  const r=a.getClientExtensionResults().prf;
+  if(!r||!r.results||!r.results.first) throw new Error('noprf');
+  return new Uint8Array(r.results.first);
+ }
+ async function gateGet(cid){
+  await navigator.credentials.get({publicKey:{challenge:rnd(32),rpId:location.hostname,allowCredentials:[{type:'public-key',id:cid}],userVerification:'required',timeout:60000}});
+ }
+ async function aes(keyBytes,usage){return crypto.subtle.importKey('raw',keyBytes.slice(0,32),'AES-GCM',false,[usage])}
+ async function enroll(u,pw,name,role){
+  const salt=rnd(32);
+  const cred=await navigator.credentials.create({publicKey:{
+   rp:{name:'HSE Tanbour',id:location.hostname},
+   user:{id:rnd(16),name:u,displayName:name||u},
+   challenge:rnd(32),
+   pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+   authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required',residentKey:'preferred'},
+   attestation:'none',timeout:60000,
+   extensions:{prf:{eval:{first:salt}}}
+  }});
+  const ext=(cred.getClientExtensionResults&&cred.getClientExtensionResults())||{};
+  let mode='gate', keyBytes=null, k=null;
+  if(ext.prf&&ext.prf.results&&ext.prf.results.first){keyBytes=new Uint8Array(ext.prf.results.first);mode='prf'}
+  else if(ext.prf&&ext.prf.enabled){try{keyBytes=await prfGet(cred.rawId,salt);mode='prf'}catch(e){keyBytes=null}}
+  if(!keyBytes){keyBytes=rnd(32);k=enc(keyBytes);mode='gate'}
+  const iv=rnd(12);
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv:iv},await aes(keyBytes,'encrypt'),new TextEncoder().encode(pw));
+  const o=load();
+  o[u]={u:u,name:name||u,role:role,cid:enc(cred.rawId),salt:enc(salt),mode:mode,iv:enc(iv),ct:enc(ct)};
+  if(k) o[u].k=k;
+  o._last=o._last||{};o._last[role]=u;
+  store(o);
+  return mode;
+ }
+ function errToast(e){
+  if(e&&(e.name==='NotAllowedError'||e.name==='AbortError')) toast('تایید هویت لغو شد');
+  else toast('⛔ فعال‌سازی ناموفق: '+((e&&e.message)||'خطای نامشخص'));
+ }
+ window.bioLogin=async function(){
+  const r=recFor(loginRole); if(!r) return;
+  setLerr('در حال تایید هویت...');
+  let pw;
+  try{
+   const cid=dec(r.cid); let keyBytes;
+   if(r.mode==='prf') keyBytes=await prfGet(cid,dec(r.salt));
+   else {await gateGet(cid);keyBytes=dec(r.k)}
+   const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:dec(r.iv)},await aes(keyBytes,'decrypt'),dec(r.ct));
+   pw=new TextDecoder().decode(pt);
+  }catch(e){
+   setLerr(e&&(e.name==='NotAllowedError'||e.name==='AbortError')?'تایید هویت لغو شد':'ورود زیستی ممکن نشد؛ با رمز عبور وارد شوید');
+   return;
+  }
+  $('#lu').value=r.u;$('#lp').value=pw;window._credFail=false;
+  try{await doLogin()}finally{$('#lp').value=''}
+  if(window._credFail&&!me){
+   remove(r.u);updateBtn();
+   setLerr('رمز شما تغییر کرده است؛ یک‌بار با رمز وارد شوید و ورود زیستی را دوباره فعال کنید');
+  }
+ };
+ window.bioAfterLogin=async function(u,pw,pp){
+  if(!supported()||!u||recOf(u)||declined(u)) return;
+  let ok=false;try{ok=await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()}catch(e){}
+  if(!ok) return;
+  setTimeout(function(){
+   openModal('🔐 ورود سریع','<div style="font-size:13.5px;line-height:2.2">دفعه بعد می‌خواهید با <b>اثر انگشت یا چهره</b> وارد شوید؟ (فقط روی همین دستگاه فعال می‌شود)</div>',
+    '<button class="btn pri" id="bio_yes">فعال‌سازی</button><button class="btn ghost" id="bio_no">الان نه</button>');
+   $('#bio_yes').onclick=async function(){
+    try{await enroll(u,pw,pp.name,pp.role);closeModal();toast('✔ ورود با اثر انگشت / چهره فعال شد')}
+    catch(e){closeModal();errToast(e)}
+   };
+   $('#bio_no').onclick=function(){setDeclined(u);closeModal()};
+  },900);
+ };
+ window.bioRemove=function(u){if(u)remove(u)};
+ window.bioRenderSection=function(){
+  const box=document.getElementById('bio_sec'); if(!box) return;
+  if(!supported()){box.innerHTML='';return}
+  const u=curUsername(), on=!!recOf(u);
+  box.innerHTML='<div style="border-top:1px dashed var(--line);margin-top:16px;padding-top:14px;font-size:13px;line-height:2">'+
+   '<b>🔐 ورود با اثر انگشت / چهره</b> '+(on?'<span class="chip b-ok">فعال</span>':'<span class="chip b-mut">غیرفعال</span>')+
+   '<div style="color:var(--mut);font-size:12px">'+(on?'در این دستگاه می‌توانید بدون رمز وارد شوید.':'برای فعال‌سازی، «رمز فعلی» را بالا وارد کنید و دکمه را بزنید.')+'</div>'+
+   '<div style="margin-top:8px"><button type="button" class="btn '+(on?'danger':'ghost')+'" id="bio_tg">'+(on?'غیرفعال‌سازی':'فعال‌سازی')+'</button></div></div>';
+  document.getElementById('bio_tg').onclick=async function(){
+   if(on){remove(u);toast('ورود زیستی غیرفعال شد');bioRenderSection();return}
+   const pw=($('#cp_old')||{}).value, cu=auth&&auth.currentUser;
+   if(!pw||!cu){toast('ابتدا رمز فعلی را وارد کنید');return}
+   try{await cu.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(cu.email,pw))}
+   catch(e){toast('⛔ رمز فعلی اشتباه است');return}
+   try{await enroll(u,pw,me.name,me.role);toast('✔ ورود با اثر انگشت / چهره فعال شد');bioRenderSection()}
+   catch(e){errToast(e)}
+  };
+ };
+ const _rl=window.roleLogin;
+ window.roleLogin=function(){_rl.apply(this,arguments);updateBtn()};
+ const _rb=window.roleBack;
+ window.roleBack=function(){_rb.apply(this,arguments);updateBtn()};
+})();
+</script>
+
 </body>
 </html>
