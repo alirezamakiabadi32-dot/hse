@@ -8043,43 +8043,57 @@ document.addEventListener('keydown', function(e){
   else b.classList.add('hidden');
  }
  async function prfGet(cid,salt){
-  const a=await navigator.credentials.get({publicKey:{challenge:rnd(32),rpId:location.hostname,allowCredentials:[{type:'public-key',id:cid}],userVerification:'required',timeout:60000,extensions:{prf:{eval:{first:salt}}}}});
+  const a=await navigator.credentials.get({publicKey:{challenge:rnd(32),allowCredentials:[{type:'public-key',id:cid}],userVerification:'required',timeout:60000,extensions:{prf:{eval:{first:salt}}}}});
   const r=a.getClientExtensionResults().prf;
   if(!r||!r.results||!r.results.first) throw new Error('noprf');
   return new Uint8Array(r.results.first);
  }
  async function gateGet(cid){
-  await navigator.credentials.get({publicKey:{challenge:rnd(32),rpId:location.hostname,allowCredentials:[{type:'public-key',id:cid}],userVerification:'required',timeout:60000}});
+  await navigator.credentials.get({publicKey:{challenge:rnd(32),allowCredentials:[{type:'public-key',id:cid}],userVerification:'required',timeout:60000}});
  }
  async function aes(keyBytes,usage){return crypto.subtle.importKey('raw',keyBytes.slice(0,32),'AES-GCM',false,[usage])}
- async function enroll(u,pw,name,role){
+ function uname(){return curUsername()||((auth&&auth.currentUser&&auth.currentUser.email)||'').split('@')[0]}
+ async function mkCred(u,name){
   const salt=rnd(32);
-  const cred=await navigator.credentials.create({publicKey:{
-   rp:{name:'HSE Tanbour',id:location.hostname},
+  const opts=function(extra){return {publicKey:Object.assign({
+   rp:{name:'HSE Tanbour'},
    user:{id:rnd(16),name:u,displayName:name||u},
    challenge:rnd(32),
    pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
-   authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required',residentKey:'preferred'},
-   attestation:'none',timeout:60000,
-   extensions:{prf:{eval:{first:salt}}}
-  }});
+   attestation:'none',timeout:60000},extra)}};
+  let cred;
+  try{
+   cred=await navigator.credentials.create(opts({authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required',residentKey:'preferred'},extensions:{prf:{eval:{first:salt}}}}));
+  }catch(e){
+   if(e&&(e.name==='NotAllowedError'||e.name==='AbortError')) throw e;
+   console.warn('bio create (try 1):',e);
+   cred=await navigator.credentials.create(opts({authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required'}}));
+  }
   const ext=(cred.getClientExtensionResults&&cred.getClientExtensionResults())||{};
-  let mode='gate', keyBytes=null, k=null;
-  if(ext.prf&&ext.prf.results&&ext.prf.results.first){keyBytes=new Uint8Array(ext.prf.results.first);mode='prf'}
-  else if(ext.prf&&ext.prf.enabled){try{keyBytes=await prfGet(cred.rawId,salt);mode='prf'}catch(e){keyBytes=null}}
+  let keyBytes=null;
+  if(ext.prf&&ext.prf.results&&ext.prf.results.first) keyBytes=new Uint8Array(ext.prf.results.first);
+  else if(ext.prf&&ext.prf.enabled){try{keyBytes=await prfGet(cred.rawId,salt)}catch(e){keyBytes=null}}
+  return {cred:cred,salt:salt,keyBytes:keyBytes};
+ }
+ async function seal(c,u,pw,name,role){
+  let mode='prf', keyBytes=c.keyBytes, k=null;
   if(!keyBytes){keyBytes=rnd(32);k=enc(keyBytes);mode='gate'}
   const iv=rnd(12);
   const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv:iv},await aes(keyBytes,'encrypt'),new TextEncoder().encode(pw));
   const o=load();
-  o[u]={u:u,name:name||u,role:role,cid:enc(cred.rawId),salt:enc(salt),mode:mode,iv:enc(iv),ct:enc(ct)};
+  o[u]={u:u,name:name||u,role:role,cid:enc(c.cred.rawId),salt:enc(c.salt),mode:mode,iv:enc(iv),ct:enc(ct)};
   if(k) o[u].k=k;
   o._last=o._last||{};o._last[role]=u;
   store(o);
   return mode;
  }
+ async function enroll(u,pw,name,role){return seal(await mkCred(u,name),u,pw,name,role)}
  function errToast(e){
-  if(e&&(e.name==='NotAllowedError'||e.name==='AbortError')) toast('تایید هویت لغو شد');
-  else toast('⛔ فعال‌سازی ناموفق: '+((e&&e.message)||'خطای نامشخص'));
+  const n=(e&&e.name)||'Error';
+  console.error('bio:',e);
+  if(n==='NotAllowedError'||n==='AbortError'){toast('تایید هویت لغو شد یا دستگاه اجازه نداد؛ دوباره تلاش کنید');return}
+  const hint={NotSupportedError:'دستگاه یا مرورگر از اثر انگشت/چهره پشتیبانی نمی‌کند یا قفل صفحه تنظیم نشده',SecurityError:'نشانی سایت برای این قابلیت مناسب نیست (باید HTTPS و دامنه معتبر باشد)',InvalidStateError:'این دستگاه قبلاً ثبت شده است'}[n]||'';
+  toast('⛔ فعال‌سازی ناموفق ['+n+']: '+(hint||(e&&e.message)||'خطای نامشخص'));
  }
  window.bioLogin=async function(){
   const r=recFor(loginRole); if(!r) return;
@@ -8120,7 +8134,7 @@ document.addEventListener('keydown', function(e){
  window.bioRenderSection=function(){
   const box=document.getElementById('bio_sec'); if(!box) return;
   if(!supported()){box.innerHTML='';return}
-  const u=curUsername(), on=!!recOf(u);
+  const u=uname(), on=!!recOf(u);
   box.innerHTML='<div style="border-top:1px dashed var(--line);margin-top:16px;padding-top:14px;font-size:13px;line-height:2">'+
    '<b>🔐 ورود با اثر انگشت / چهره</b> '+(on?'<span class="chip b-ok">فعال</span>':'<span class="chip b-mut">غیرفعال</span>')+
    '<div style="color:var(--mut);font-size:12px">'+(on?'در این دستگاه می‌توانید بدون رمز وارد شوید.':'برای فعال‌سازی، «رمز فعلی» را بالا وارد کنید و دکمه را بزنید.')+'</div>'+
@@ -8129,9 +8143,11 @@ document.addEventListener('keydown', function(e){
    if(on){remove(u);toast('ورود زیستی غیرفعال شد');bioRenderSection();return}
    const pw=($('#cp_old')||{}).value, cu=auth&&auth.currentUser;
    if(!pw||!cu){toast('ابتدا رمز فعلی را وارد کنید');return}
+   let c;
+   try{c=await mkCred(u,me.name)}catch(e){errToast(e);return}
    try{await cu.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(cu.email,pw))}
    catch(e){toast('⛔ رمز فعلی اشتباه است');return}
-   try{await enroll(u,pw,me.name,me.role);toast('✔ ورود با اثر انگشت / چهره فعال شد');bioRenderSection()}
+   try{await seal(c,u,pw,me.name,me.role);toast('✔ ورود با اثر انگشت / چهره فعال شد');bioRenderSection()}
    catch(e){errToast(e)}
   };
  };
