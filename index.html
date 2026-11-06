@@ -1174,7 +1174,8 @@ function defaultPerms(){
     kpi:{view:['expert','manager']},
     scores:{view:['expert','manager']},
     settings:{view:['expert','manager']},
-    trends:{view:['expert','manager']}
+    trends:{view:['expert','manager']},
+    aiimg:{view:['expert','manager']}
   };
   Object.keys(specialMods).forEach(k=>{
     p[k]={};
@@ -4149,6 +4150,7 @@ function allModulesForPerms(){
  mods.push({key:'kpi', label:'شاخص‌ها', icon:'📈', group:'صفحات ویژه'});
  mods.push({key:'scores', label:'امتیاز پرسنل اجراییان', icon:'🏅', group:'صفحات ویژه'});
  mods.push({key:'settings', label:'تنظیمات', icon:'⚙️', group:'صفحات ویژه'});
+ mods.push({key:'aiimg', label:'تحلیل عکس با هوش مصنوعی', icon:'🤖', group:'صفحات ویژه'});
  return mods;
 }
 function permsPage(){
@@ -6327,6 +6329,525 @@ document.addEventListener('keydown',function(e){
 });
 
 /* ---------- Navigation ---------- */
+/* ============================================================
+   تحلیل عکس با هوش مصنوعی
+   بدون API: پرامپت از سامانه گرفته می‌شود، عکس در هوش مصنوعی بیرونی تحلیل می‌شود،
+   خروجی (JSON) به سامانه برمی‌گردد و به‌صورت آنومالی / ارزیابی ریسک (ماتریس، FMEA، LEC، JSA) ثبت می‌شود.
+   پرامپت هر بار از فهرست‌های زنده‌ی سامانه (واحدها، انواع، مقیاس‌ها) ساخته می‌شود.
+============================================================ */
+const AI_SEV=['جزئی','متوسط','شدید','فاجعه‌بار'], AI_PRB=['کم','متوسط','زیاد','بسیار زیاد'], AI_JLV=['کم','متوسط','بالا','بحرانی'];
+const AI_METHODS=[['risks','📊','ماتریس ۵×۵'],['fmea','⚙️','FMEA'],['lec','📐','LEC'],['jsa','🔧','JSA'],['none','🚫','فقط آنومالی']];
+const AI_KIND={
+  unsafe:{i:'⚠️',l:'آنومالی',tx:'desc'},
+  risks:{i:'📊',l:'ریسک (ماتریس ۵×۵)',tx:'hazard'},
+  fmea:{i:'⚙️',l:'FMEA',tx:'mode'},
+  lec:{i:'📐',l:'LEC',tx:'hazard'},
+  jsa:{i:'🔧',l:'JSA',tx:'note'}
+};
+/* همه‌ی جنبه‌های HSE: [برچسب کوتاه، توضیح برای هوش مصنوعی] */
+const AI_DOMAINS=[
+  ['ماشین‌آلات','قطعات متحرک بدون حفاظ، قفل‌گذاری/ایزولاسیون، ابزار معیوب'],
+  ['برق','سیم لخت، تابلو باز، اتصال زمین، کابل آسیب‌دیده'],
+  ['آتش و انفجار','مواد قابل اشتعال، منبع جرقه، کپسول گاز، تجمع گرد و غبار'],
+  ['ارتفاع و سقوط','کار در ارتفاع، نرده، داربست، پرتگاه، دریچه باز'],
+  ['فضای بسته','ورود به مخزن/کانال/کوره، تهویه و تست گاز'],
+  ['مواد شیمیایی و گاز','برچسب و ظرف مواد، نشتی گاز، بخارات، MSDS'],
+  ['مذاب و حرارت','پاشش مذاب، سطوح داغ، تابش حرارتی، سوختگی'],
+  ['جرثقیل و حمل‌ونقل','بالابری، لیفتراک، زنجیر و اسلینگ، عبور پیاده/خودرو'],
+  ['آراستگی و 5S','انباشت مواد، کف لغزنده، مسیر مسدود، بی‌نظمی'],
+  ['PPE','نبود یا استفاده‌ی نادرست کلاه، عینک، دستکش، ماسک، کفش، لباس نسوز'],
+  ['بهداشت شغلی','صدا، گرد و غبار و دود، گرما، روشنایی، تهویه، پرتو'],
+  ['ارگونومی','حمل دستی، وضعیت بدن، حرکت تکراری'],
+  ['محیط‌زیست','پسماند، نشتی روغن و مواد، پساب، آلودگی هوا، ذخیره‌ی نامناسب'],
+  ['اضطراری','کپسول آتش‌نشانی، مسیر و علائم خروج، دوش و چشم‌شوی، جعبه کمک‌های اولیه'],
+  ['رفتار ایمنی','میان‌بر زدن، بی‌توجهی، نادیده‌گرفتن علائم و مقررات'],
+  ['سایر','']
+];
+var aiState={ctx:'',raw:'',photo:'',method:'risks',tag:true,items:null,summary:'',skipped:0,err:'',watch:null};
+
+function aiNorm(s){ return String(s==null?'':s).replace(/[\u200c\u200e\u200f]/g,' ').replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/\s+/g,' ').trim(); }
+function aiDigits(s){ return String(s==null?'':s).replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[٫،]/g,'.'); }
+/* نزدیک‌ترین مقدار مجاز از فهرست عددی (برای مقیاس‌های قابل‌تنظیم سامانه) */
+function aiSnap(v,list){
+  const n=parseFloat(aiDigits(v)); if(isNaN(n)) return '';
+  let best='',bd=1e9;
+  (list||[]).forEach(x=>{ const d=Math.abs(parseFloat(x)-n); if(d<bd){ bd=d; best=String(x); } });
+  return best;
+}
+function aiMatch(val,list){
+  const v=aiNorm(val); if(!v) return '';
+  const l=(list||[]).map(x=>[x,aiNorm(x)]);
+  let m=l.find(x=>x[1]===v); if(m) return m[0];
+  m=l.find(x=>x[1]&&(x[1].indexOf(v)>=0||v.indexOf(x[1])>=0));
+  return m?m[0]:'';
+}
+function aiDomainNames(){ return AI_DOMAINS.map(x=>x[0]); }
+function aiTxt(v){ return String(v==null?'':v).trim(); }
+
+/* ---- پرامپت (پویا: از فهرست‌های فعلی سامانه ساخته می‌شود) ---- */
+function aiRiskSpec(m){
+  const dom=aiDomainNames()[0], areas=AR(), a0=areas[0]||'';
+  const LV=L('RISK_LEVELS'), SOD=L('FMEA_SOD'), LL=L('LEC_L'), LE=L('LEC_E'), LC=L('LEC_C');
+  const num=x=>parseFloat(x);
+  if(m==='risks') return {
+    name:'ماتریس ریسک ۵×۵ (شدت × احتمال)',
+    sample:{domain:dom,act:'فعالیت یا فرآیند',area:a0,hazard:'خطر یا عامل زیان‌آور',event:'رخداد ناخواسته‌ی محتمل',ctrl:'کنترل‌های موجود که در عکس دیده می‌شود',s:num(aiSnap(4,LV))||4,p:num(aiSnap(3,LV))||3,addCtrl:'کنترل‌های تکمیلی پیشنهادی',rs:num(aiSnap(3,LV))||3,rp:num(aiSnap(2,LV))||2},
+    lines:[
+     '- s و rs (شدت پیامد؛ فقط از: '+LV.join('، ')+'): ۱ بدون آسیب · ۲ کمک‌های اولیه · ۳ درمان پزشکی یا از دست رفتن چند روز کار · ۴ ازکارافتادگی دائم · ۵ فوت یا چند مصدوم جدی',
+     '- p و rp (احتمال وقوع؛ فقط از: '+LV.join('، ')+'): ۱ تقریباً غیرممکن · ۲ نادر (سالی یک‌بار) · ۳ ممکن (ماهی یک‌بار) · ۴ محتمل (هفته‌ای یک‌بار) · ۵ تقریباً قطعی (روزانه)',
+     '- s و p قبل از کنترل تکمیلی‌اند؛ rs و rp پس از اجرای کنترل‌های تکمیلی (نباید از s و p بیشتر باشند)']
+  };
+  if(m==='fmea') return {
+    name:'FMEA (تحلیل حالت خرابی و اثرات)',
+    sample:{domain:dom,area:a0,equip:'تجهیز یا فرآیند',func:'وظیفه‌ی مورد انتظار',mode:'حالت خرابی',effect:'اثر خرابی',cause:'علت خرابی',s:num(aiSnap(7,SOD))||7,o:num(aiSnap(4,SOD))||4,d:num(aiSnap(5,SOD))||5,ctrl:'کنترل‌های موجود',action:'اقدام پیشنهادی'},
+    lines:[
+     '- s (شدت اثر)، o (احتمال بروز)، d (قابلیت کشف)؛ هرکدام فقط از: '+SOD.join('، '),
+     '- s: ۱ بی‌اثر ... ۱۰ فوت یا فاجعه · o: ۱ تقریباً هرگز ... ۱۰ تقریباً قطعی · d: ۱ حتماً کشف می‌شود ... ۱۰ غیرقابل کشف',
+     '- هر آیتم یک حالت خرابی مشخص از یک تجهیز/فرآیند است (equip، mode و effect الزامی‌اند)']
+  };
+  if(m==='lec') return {
+    name:'LEC (روش ویلیام فاین: احتمال × مواجهه × پیامد)',
+    sample:{domain:dom,area:a0,activity:'فعالیت یا فرآیند',hazard:'خطر یا عامل زیان‌آور',L:num(aiSnap(3,LL))||3,E:num(aiSnap(6,LE))||6,C:num(aiSnap(7,LC))||7,ctrl:'کنترل‌های موجود',action:'اقدام اصلاحی پیشنهادی'},
+    lines:[
+     '- L (احتمال وقوع؛ فقط از: '+LL.join('، ')+'): عدد بزرگ‌تر یعنی محتمل‌تر',
+     '- E (مواجهه؛ فقط از: '+LE.join('، ')+'): عدد بزرگ‌تر یعنی مواجهه‌ی پیوسته‌تر',
+     '- C (پیامد؛ فقط از: '+LC.join('، ')+'): کوچک‌ترین = کمک‌های اولیه، بزرگ‌ترین = فوت چند نفر']
+  };
+  if(m==='jsa') return {
+    name:'JSA (تحلیل ایمنی شغل: مراحل کار + خطر + کنترل)',
+    sample:{domain:dom,area:a0,job:'عنوان کار یا وظیفه‌ای که در عکس انجام می‌شود',ppe:'PPE الزامی',tools:'ابزار و تجهیزات',note:'توضیحات',steps:[{step:'مرحله‌ی شغلی',hazard:'خطر این مرحله',ctrl:'کنترل پیشنهادی',risk:'بالا'}]},
+    lines:[
+     '- risk در هر مرحله فقط یکی از: '+AI_JLV.join(' | '),
+     '- هر آیتم risks یک «کار/شغل» کامل است و steps باید مراحل واقعی و ترتیبی آن کار را (حداقل یک مرحله) داشته باشد']
+  };
+  return null;
+}
+function aiPromptText(){
+  const areas=AR(), cats=L('UNSAFE_CATS');
+  const ctx=aiTxt(aiState.ctx), spec=aiRiskSpec(aiState.method);
+  const doms=AI_DOMAINS.filter(x=>x[1]).map(x=>'  • '+x[0]+': '+x[1]);
+  const sample={summary:'خلاصه‌ی یک‌جمله‌ای از وضعیت HSE عکس',anomalies:[{domain:aiDomainNames()[0],desc:'شرح دقیق آنومالی و محل آن در عکس',cat:cats[0]||'وضعیت ناایمن',area:areas[0]||'',severity:'شدید',probability:'زیاد',immediate:'اقدام فوری پیشنهادی'}]};
+  if(spec) sample.risks=[spec.sample];
+  const L1=[
+   'تو یک کارشناس ارشد HSE (ایمنی، بهداشت شغلی و محیط‌زیست) با تجربه‌ی صنایع فولاد و ریخته‌گری هستی.',
+   'عکس پیوست را با دقت و از «همه‌ی جنبه‌های HSE» بررسی کن و آنومالی‌ها (وضعیت‌ها و رفتارهای ناایمن)'+(spec?' و ریسک‌های قابل مشاهده':'')+' را شناسایی کن.'
+  ];
+  if(ctx) L1.push('توضیح محل/کار: '+ctx);
+  const rules=[
+   '',
+   'حوزه‌هایی که باید همه را بررسی کنی:'
+  ].concat(doms,[
+   '',
+   'قوانین:',
+   '۱) فقط چیزی را گزارش کن که واقعاً در عکس دیده می‌شود. اگر مطمئن نیستی، در شرح بنویس «احتمالاً».',
+   '۲) اگر مورد HSE‌ای دیده نمی‌شود، آرایه‌ها را خالی ([]) بگذار.',
+   '۳) همه‌ی متن‌ها فارسی، کوتاه و کاربردی باشد. هر مورد جدا یک آیتم باشد.',
+   '۴) خروجی فقط و فقط یک JSON معتبر باشد؛ بدون هیچ توضیح قبل یا بعد از آن و بدون علامت ```.',
+   '۵) مقدار فیلدهای domain و cat و area و severity و probability'+(spec?' و فیلدهای عددی/انتخابی ریسک':'')+' دقیقاً یکی از مقادیر مجاز زیر باشد. اگر واحد مشخص نیست یا در فهرست نیست، area را "" بگذار.',
+   spec?('۶) روش ارزیابی ریسک: '+spec.name+'. هر خطر شغلی را در risks بیاور.'):'۶) ارزیابی ریسک لازم نیست؛ کلید risks را در خروجی نیاور.',
+   '',
+   'مقادیر مجاز:',
+   '- domain: '+aiDomainNames().join(' | '),
+   '- cat: '+cats.join(' | '),
+   '- area: '+(areas.join(' | ')||'(فهرست خالی است)'),
+   '- severity: '+AI_SEV.join(' | '),
+   '- probability: '+AI_PRB.join(' | ')
+  ]);
+  const tail=(spec?spec.lines:[]).concat(['','قالب خروجی (فقط ساختار است؛ مقادیر نمونه‌اند):',JSON.stringify(sample,null,2)]);
+  return L1.concat(rules,tail).join('\n');
+}
+function aiCopy(text,okMsg){
+  const done=()=>toast('✔ '+okMsg);
+  const fb=()=>{ try{
+    const t=document.createElement('textarea'); t.value=text; t.style.cssText='position:fixed;opacity:0;top:0;left:0';
+    document.body.appendChild(t); t.focus(); t.select();
+    const ok=document.execCommand('copy'); t.remove();
+    if(ok) done(); else toast('⚠️ کپی خودکار ممکن نشد؛ متن را دستی انتخاب و کپی کنید');
+  }catch(e){ toast('⚠️ کپی خودکار ممکن نشد؛ متن را دستی انتخاب و کپی کنید'); } };
+  if(navigator.clipboard&&window.isSecureContext){ navigator.clipboard.writeText(text).then(done,fb); } else fb();
+}
+function aiCopyPrompt(){ aiCopy(aiPromptText(),'پرامپت کپی شد؛ حالا با عکس در هوش مصنوعی بفرستید'); }
+function aiCtxSet(v){ aiState.ctx=v; const p=$('#aiPromptPre'); if(p) p.textContent=aiPromptText(); }
+function aiSetMethod(m){ aiState.method=m; const c=$('#content'); if(c) c.innerHTML=aiImgPage(); }
+function aiTagSet(on){ aiState.tag=!!on; }
+
+/* ---- خواندن خروجی ---- */
+function aiExtractJson(txt){
+  const t=String(txt||'').replace(/^\uFEFF/,'').replace(/```(?:json|JSON)?/g,'').trim();
+  const a=t.indexOf('{'), b=t.lastIndexOf('}'), a2=t.indexOf('['), b2=t.lastIndexOf(']');
+  let s='';
+  if(a2>=0&&b2>a2&&(a<0||a2<a)) s=t.slice(a2,b2+1);
+  else if(a>=0&&b>a) s=t.slice(a,b+1);
+  else return null;
+  const noComma=x=>x.replace(/,\s*([}\]])/g,'$1');
+  const tries=[s,noComma(s),noComma(s.replace(/[“”]/g,'"'))];
+  for(let i=0;i<tries.length;i++){ try{ return JSON.parse(tries[i]); }catch(e){} }
+  return null;
+}
+/* تشخیص روش ریسک از کلیدهای خروجی (اگر بعد از گرفتن پرامپت روش عوض شده باشد) */
+function aiDetectKind(r,sel){
+  if(r&&typeof r==='object'){
+    if(Array.isArray(r.steps)) return 'jsa';
+    if('mode' in r||'effect' in r||'equip' in r) return 'fmea';
+    if('L' in r||'E' in r||'C' in r) return 'lec';
+    if('s' in r||'p' in r) return 'risks';
+  }
+  return (sel&&sel!=='none')?sel:'risks';
+}
+function aiNormalize(obj){
+  if(Array.isArray(obj)) obj={anomalies:obj};
+  const arr=v=>Array.isArray(v)?v:[];
+  const areas=AR(), cats=L('UNSAFE_CATS'), doms=aiDomainNames();
+  const LV=L('RISK_LEVELS'), SOD=L('FMEA_SOD'), LL=L('LEC_L'), LE=L('LEC_E'), LC=L('LEC_C');
+  const items=[]; let skipped=0;
+  const common=(r,warn,needArea)=>{
+    const area=aiMatch(r.area,areas), raw=aiTxt(r.area);
+    if(!area&&raw) warn.push('واحد «'+raw+'» در فهرست واحدها نیست');
+    else if(!area&&needArea) warn.push('واحد مشخص نشد؛ پیش از ثبت انتخاب کنید');
+    let domain=aiMatch(r.domain,doms);
+    if(!domain) domain=r.domain?'سایر':'';
+    return {area,areaRaw:(!area&&raw)?raw:'',domain};
+  };
+  const snap=(v,list,def,label,warn)=>{ const x=aiSnap(v,list); if(x) return x; warn.push(label+' نامعتبر بود؛ '+def+' گذاشته شد'); return aiSnap(def,list); };
+
+  arr(obj.anomalies).forEach(a=>{
+    if(!a||typeof a!=='object'){skipped++;return}
+    const desc=aiTxt(a.desc||a.description||a.title);
+    if(!desc){skipped++;return}
+    const warn=[], c=common(a,warn,true);
+    let cat=aiMatch(a.cat,cats);
+    if(!cat){ cat=cats[0]||''; if(a.cat) warn.push('نوع شناخته نشد؛ «'+cat+'» گذاشته شد'); }
+    let severity=aiMatch(a.severity,AI_SEV); if(!severity){ severity='متوسط'; warn.push('شدت نامشخص بود؛ «متوسط» گذاشته شد'); }
+    let probability=aiMatch(a.probability,AI_PRB); if(!probability){ probability='متوسط'; warn.push('احتمال نامشخص بود؛ «متوسط» گذاشته شد'); }
+    items.push({k:'unsafe',sel:true,done:'',warn,d:{desc,cat,area:c.area,areaRaw:c.areaRaw,domain:c.domain,severity,probability,immediate:aiTxt(a.immediate||a.action)}});
+  });
+
+  arr(obj.risks).forEach(r=>{
+    if(!r||typeof r!=='object'){skipped++;return}
+    const k=aiDetectKind(r,aiState.method), warn=[];
+    if(k==='risks'){
+      const hazard=aiTxt(r.hazard), act=aiTxt(r.act||r.activity);
+      if(!hazard&&!act){skipped++;return}
+      const c=common(r,warn,false);
+      const s=+snap(r.s,LV,'3','شدت',warn), p=+snap(r.p,LV,'3','احتمال',warn);
+      let rs=+aiSnap(r.rs,LV)||0, rp=+aiSnap(r.rp,LV)||0;
+      if(rs&&rp){ if(rs*rp>s*p){ rs=Math.min(rs,s); rp=Math.min(rp,p); warn.push('ریسک پس از کنترل از ریسک اولیه بیشتر بود؛ اصلاح شد'); } } else { rs=0; rp=0; }
+      items.push({k,sel:true,done:'',warn,d:{domain:c.domain,area:c.area,areaRaw:c.areaRaw,act:act||hazard,hazard:hazard||act,event:aiTxt(r.event),ctrl:aiTxt(r.ctrl),s:String(s),p:String(p),addCtrl:aiTxt(r.addCtrl),rs:rs?String(rs):'',rp:rp?String(rp):''}});
+    }else if(k==='fmea'){
+      const mode=aiTxt(r.mode), equip=aiTxt(r.equip||r.process||r.activity);
+      if(!mode&&!equip){skipped++;return}
+      const c=common(r,warn,true);
+      items.push({k,sel:true,done:'',warn,d:{domain:c.domain,area:c.area,areaRaw:c.areaRaw,equip:equip||mode,func:aiTxt(r.func),mode:mode||equip,effect:aiTxt(r.effect),cause:aiTxt(r.cause),
+        s:snap(r.s,SOD,'5','شدت',warn),o:snap(r.o,SOD,'5','احتمال بروز',warn),d:snap(r.d,SOD,'5','قابلیت کشف',warn),ctrl:aiTxt(r.ctrl),action:aiTxt(r.action)}});
+      if(!aiTxt(r.effect)) warn.push('اثر خرابی خالی است؛ با «ویرایش کامل» تکمیل کنید');
+    }else if(k==='lec'){
+      const hazard=aiTxt(r.hazard), activity=aiTxt(r.activity||r.act);
+      if(!hazard&&!activity){skipped++;return}
+      const c=common(r,warn,true);
+      items.push({k,sel:true,done:'',warn,d:{domain:c.domain,area:c.area,areaRaw:c.areaRaw,activity:activity||hazard,hazard:hazard||activity,
+        L:snap(r.L,LL,'1','احتمال (L)',warn),E:snap(r.E,LE,'3','مواجهه (E)',warn),C:snap(r.C,LC,'3','پیامد (C)',warn),ctrl:aiTxt(r.ctrl),action:aiTxt(r.action)}});
+    }else{
+      const job=aiTxt(r.job||r.activity||r.act);
+      const steps=arr(r.steps).filter(x=>x&&typeof x==='object').map(x=>({step:aiTxt(x.step),hazard:aiTxt(x.hazard),ctrl:aiTxt(x.ctrl),risk:aiMatch(x.risk,AI_JLV)||'متوسط'})).filter(x=>x.step||x.hazard);
+      if(!job||!steps.length){skipped++;return}
+      const c=common(r,warn,true);
+      items.push({k:'jsa',sel:true,done:'',warn,d:{domain:c.domain,area:c.area,areaRaw:c.areaRaw,job,ppe:aiTxt(r.ppe),tools:aiTxt(r.tools),note:aiTxt(r.note),steps}});
+    }
+  });
+  return {items,skipped,summary:aiTxt(obj.summary)};
+}
+function aiRead(){
+  const ta=$('#aiRaw'); if(ta) aiState.raw=ta.value;
+  aiState.err=''; aiState.items=null; aiState.summary=''; aiState.skipped=0;
+  if(!aiTxt(aiState.raw)){ aiState.err='ابتدا خروجی هوش مصنوعی را در کادر بچسبانید.'; }
+  else{
+    const obj=aiExtractJson(aiState.raw);
+    if(!obj||typeof obj!=='object') aiState.err='خروجی قابل خواندن نبود. مطمئن شوید هوش مصنوعی فقط JSON داده است (از «{» اول تا «}» آخر کپی شود)؛ در صورت نیاز از او بخواهید «فقط JSON معتبر بده».';
+    else{ const r=aiNormalize(obj); aiState.items=r.items; aiState.summary=r.summary; aiState.skipped=r.skipped; }
+  }
+  const el=$('#aiPrev'); if(el){ el.innerHTML=aiPreviewHtml(); try{ el.scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){} }
+}
+function aiPaste(){
+  if(!navigator.clipboard||!navigator.clipboard.readText){ toast('⚠️ چسباندن خودکار پشتیبانی نمی‌شود؛ متن را داخل کادر بچسبانید'); return; }
+  navigator.clipboard.readText().then(t=>{ const ta=$('#aiRaw'); if(ta) ta.value=t; aiState.raw=t; aiRead(); })
+   .catch(()=>toast('⚠️ دسترسی به کلیپ‌بورد داده نشد؛ متن را داخل کادر بچسبانید'));
+}
+function aiClear(){
+  aiState.raw=''; aiState.items=null; aiState.err=''; aiState.summary=''; aiState.skipped=0;
+  const ta=$('#aiRaw'); if(ta) ta.value='';
+  const el=$('#aiPrev'); if(el) el.innerHTML='';
+}
+
+/* ---- عکس (اختیاری؛ به آنومالی‌های واردشده ضمیمه می‌شود) ---- */
+function aiPickPhoto(inp){
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  if(!/^image\//.test(f.type)){ toast('فقط تصویر'); return; }
+  const rd=new FileReader();
+  rd.onload=function(e){
+    const img=new Image();
+    img.onload=function(){
+      try{
+        const c=document.createElement('canvas'); let mx=1000,q=.55;
+        const sc=function(m){ const kk=m/Math.max(img.width,img.height); c.width=Math.round(img.width*kk); c.height=Math.round(img.height*kk); c.getContext('2d').drawImage(img,0,0,c.width,c.height); return c.toDataURL('image/jpeg',q); };
+        let d=sc(mx);
+        if(d.length>190000){ q=.42; mx=680; d=sc(mx); }
+        aiState.photo=d; aiPhotoDraw(); toast('✔ عکس برای ضمیمه‌شدن به آنومالی‌ها آماده شد');
+      }catch(err){ toast('پردازش ممکن نشد'); }
+    };
+    img.onerror=function(){ toast('فایل قابل خواندن نیست'); };
+    img.src=e.target.result;
+  };
+  rd.readAsDataURL(f);
+}
+function aiPhotoDel(){ aiState.photo=''; aiPhotoDraw(); }
+function aiPhotoHtml(){
+  const p=safeImg(aiState.photo);
+  if(p) return '<div class="phprev"><img src="'+p+'" alt="عکس" onclick="viewPhoto(this.src)"><button type="button" class="btn danger sm" onclick="aiPhotoDel()">🗑️ حذف</button></div>';
+  return '<label class="btn ghost sm" style="cursor:pointer">🖼️ انتخاب همان عکس (اختیاری)<input type="file" accept="image/*" style="display:none" onchange="aiPickPhoto(this)"></label>';
+}
+function aiPhotoDraw(){ const w=$('#aiPhWrap'); if(w) w.innerHTML=aiPhotoHtml(); }
+
+/* ---- پیش‌نمایش ---- */
+function aiSelHtml(opts,cur,onch,blank){
+  return '<select class="in sm" style="width:100%" onchange="'+onch+'">'+(blank?'<option value="">— انتخاب کنید —</option>':'')
+   +opts.map(o=>'<option value="'+esc(o)+'"'+(String(o)===String(cur)?' selected':'')+'>'+esc(o)+'</option>').join('')+'</select>';
+}
+function aiJChip(r){ return '<span class="chip '+({'کم':'b-ok','متوسط':'b-warn','بالا':'b-org','بحرانی':'b-bad'}[r]||'b-mut')+'">'+esc(r)+'</span>'; }
+function aiLecScore(d){ return Math.round((+d.L||0)*(+d.E||0)*(+d.C||0)*100)/100; }
+function aiLvHtml(it){
+  const d=it.d;
+  if(it.k==='unsafe'){
+    const sc=(AI_SEV.indexOf(d.severity)+1)*(AI_PRB.indexOf(d.probability)+1);
+    return 'سطح خطر: '+lvlChip(sc);
+  }
+  if(it.k==='risks'){
+    let h='سطح ریسک: '+lvlChip((+d.s||0)*(+d.p||0));
+    if(d.rs&&d.rp) h+=' ← پس از کنترل: '+lvlChip((+d.rs)*(+d.rp));
+    return h;
+  }
+  if(it.k==='fmea'){
+    const rpn=(+d.s||1)*(+d.o||1)*(+d.d||1), b=fmeaBand(rpn,d.s);
+    return 'RPN = <b>'+nd(rpn)+'</b> <span class="chip '+b[0]+'">'+b[1]+'</span>';
+  }
+  if(it.k==='lec'){
+    const sc=aiLecScore(d), cls=sc<20?'b-ok':sc<70?'b-info':sc<200?'b-warn':sc<400?'b-org':'b-bad';
+    return 'امتیاز = <b>'+nd(sc)+'</b> <span class="chip '+cls+'">'+lecLevel(sc)+'</span>';
+  }
+  const rank={'کم':1,'متوسط':2,'بالا':3,'بحرانی':4};
+  const worst=(d.steps||[]).reduce((m,s)=>(rank[s.risk]||0)>(rank[m]||0)?s.risk:m,'');
+  return 'بالاترین ریسک مراحل: '+(worst?aiJChip(worst):'—');
+}
+function aiUpd(i,k,v){
+  const it=aiState.items&&aiState.items[i]; if(!it) return;
+  it.d[k]=v;
+  const el=document.getElementById('aiLv'+i); if(el) el.innerHTML=aiLvHtml(it);
+}
+function aiUpdStep(i,j,v){
+  const it=aiState.items&&aiState.items[i]; if(!it||!it.d.steps[j]) return;
+  it.d.steps[j].risk=v;
+  const el=document.getElementById('aiLv'+i); if(el) el.innerHTML=aiLvHtml(it);
+}
+function aiToggle(i,on){ const it=aiState.items&&aiState.items[i]; if(it) it.sel=!!on; aiCountUpd(); }
+function aiAll(on){ (aiState.items||[]).forEach(it=>{ if(!it.done) it.sel=!!on; }); const el=$('#aiPrev'); if(el) el.innerHTML=aiPreviewHtml(); }
+function aiCountUpd(){
+  const n=(aiState.items||[]).filter(x=>x.sel&&!x.done).length;
+  const b=$('#aiImpBtn'); if(b){ b.textContent='📥 ثبت '+nd(n)+' مورد انتخاب‌شده در سامانه'; b.disabled=!n; b.style.opacity=n?'1':'.5'; }
+}
+function aiAddArea(i){
+  const it=aiState.items&&aiState.items[i]; if(!it||!it.d.areaRaw) return;
+  const raw=it.d.areaRaw;
+  if(!addListItem('AREAS0',raw)) return;
+  (aiState.items||[]).forEach(x=>{ if(x.d.areaRaw===raw){ x.d.area=raw; x.d.areaRaw=''; x.warn=(x.warn||[]).filter(w=>w.indexOf('«'+raw+'»')<0); } });
+  const el=$('#aiPrev'); if(el) el.innerHTML=aiPreviewHtml();
+  const p=$('#aiPromptPre'); if(p) p.textContent=aiPromptText();
+  toast('✔ واحد «'+raw+'» به فهرست افزوده شد؛ پرامپت‌های بعدی آن را شامل می‌شوند');
+}
+function aiItemHtml(it,i){
+  const d=it.d, K=AI_KIND[it.k], lab='font-size:11.5px;color:var(--mut);display:block;margin-bottom:2px';
+  const grid='display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;margin-top:8px';
+  const ln=(t,v,st)=>v?'<div style="font-size:12.5px;line-height:1.9;'+(st||'')+'">'+t+esc(v)+'</div>':'';
+  const fld=(t,html)=>'<div><span style="'+lab+'">'+t+'</span>'+html+'</div>';
+  const ed=!it.done;
+  let h='<div class="card" style="margin-bottom:10px;'+(it.done?'opacity:.75;':'')+'">';
+  h+='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+  if(ed) h+='<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" '+(it.sel?'checked':'')+' onchange="aiToggle('+i+',this.checked)"><b>'+K.i+' '+K.l+'</b></label>';
+  else h+='<span class="chip b-ok">✔ ثبت شد'+(String(it.done).indexOf('-')>0?' — '+esc(it.done):' ('+esc(it.done)+')')+'</span><b>'+K.i+' '+K.l+'</b>';
+  if(d.domain) h+='<span class="chip b-info">'+esc(d.domain)+'</span>';
+  h+='<span id="aiLv'+i+'" style="margin-right:auto;font-size:12px">'+aiLvHtml(it)+'</span></div>';
+  const body='<div style="margin-top:8px;line-height:2;font-size:13.5px">';
+  const areaSel=fld('واحد / محل',aiSelHtml(AR(),d.area,'aiUpd('+i+',\'area\',this.value)',true));
+  if(it.k==='unsafe'){
+    h+=body+esc(d.desc)+'</div>'+ln('💡 اقدام فوری پیشنهادی: ',d.immediate,'color:var(--mut)');
+    if(ed) h+='<div style="'+grid+'">'+areaSel
+      +fld('نوع',aiSelHtml(L('UNSAFE_CATS'),d.cat,'aiUpd('+i+',\'cat\',this.value)',false))
+      +fld('شدت پیامد',aiSelHtml(AI_SEV,d.severity,'aiUpd('+i+',\'severity\',this.value)',false))
+      +fld('احتمال تکرار',aiSelHtml(AI_PRB,d.probability,'aiUpd('+i+',\'probability\',this.value)',false))+'</div>';
+  }else if(it.k==='risks'){
+    h+=body+'<b>'+esc(d.hazard)+'</b>'+(d.act&&d.act!==d.hazard?' — <span style="color:var(--mut)">'+esc(d.act)+'</span>':'')+'</div>'
+      +ln('رخداد محتمل: ',d.event)+ln('کنترل‌های موجود: ',d.ctrl,'color:var(--mut)')+ln('کنترل تکمیلی: ',d.addCtrl,'color:var(--mut)');
+    const lv=L('RISK_LEVELS');
+    if(ed) h+='<div style="'+grid+'">'+areaSel
+      +fld('شدت (قبل از کنترل)',aiSelHtml(lv,d.s,'aiUpd('+i+',\'s\',this.value)',false))
+      +fld('احتمال (قبل از کنترل)',aiSelHtml(lv,d.p,'aiUpd('+i+',\'p\',this.value)',false))+'</div>';
+  }else if(it.k==='fmea'){
+    h+=body+'<b>'+esc(d.equip)+'</b> — '+esc(d.mode)+'</div>'+ln('اثر: ',d.effect)+ln('علت: ',d.cause,'color:var(--mut)')+ln('کنترل‌های موجود: ',d.ctrl,'color:var(--mut)')+ln('اقدام پیشنهادی: ',d.action,'color:var(--mut)');
+    const sod=L('FMEA_SOD');
+    if(ed) h+='<div style="'+grid+'">'+areaSel
+      +fld('شدت (S)',aiSelHtml(sod,d.s,'aiUpd('+i+',\'s\',this.value)',false))
+      +fld('احتمال بروز (O)',aiSelHtml(sod,d.o,'aiUpd('+i+',\'o\',this.value)',false))
+      +fld('قابلیت کشف (D)',aiSelHtml(sod,d.d,'aiUpd('+i+',\'d\',this.value)',false))+'</div>';
+  }else if(it.k==='lec'){
+    h+=body+'<b>'+esc(d.hazard)+'</b>'+(d.activity&&d.activity!==d.hazard?' — <span style="color:var(--mut)">'+esc(d.activity)+'</span>':'')+'</div>'+ln('کنترل‌های موجود: ',d.ctrl,'color:var(--mut)')+ln('اقدام اصلاحی: ',d.action,'color:var(--mut)');
+    if(ed) h+='<div style="'+grid+'">'+areaSel
+      +fld('احتمال (L)',aiSelHtml(L('LEC_L'),d.L,'aiUpd('+i+',\'L\',this.value)',false))
+      +fld('مواجهه (E)',aiSelHtml(L('LEC_E'),d.E,'aiUpd('+i+',\'E\',this.value)',false))
+      +fld('پیامد (C)',aiSelHtml(L('LEC_C'),d.C,'aiUpd('+i+',\'C\',this.value)',false))+'</div>';
+  }else{
+    h+=body+'<b>'+esc(d.job)+'</b></div>'+ln('PPE: ',d.ppe,'color:var(--mut)')+ln('ابزار: ',d.tools,'color:var(--mut)')+ln('توضیحات: ',d.note,'color:var(--mut)');
+    h+='<div style="margin-top:6px">'+d.steps.map((s,j)=>'<div style="border-top:1px dashed var(--line);padding:6px 0;font-size:12.5px;line-height:1.9"><b>'+nd(j+1)+'. '+esc(s.step||'—')+'</b>'
+      +(s.hazard?'<br>خطر: '+esc(s.hazard):'')+(s.ctrl?'<br><span style="color:var(--mut)">کنترل: '+esc(s.ctrl)+'</span>':'')
+      +'<div style="margin-top:4px;max-width:180px">'+(ed?aiSelHtml(AI_JLV,s.risk,'aiUpdStep('+i+','+j+',this.value)',false):aiJChip(s.risk))+'</div></div>').join('')+'</div>';
+    if(ed) h+='<div style="'+grid+'">'+areaSel+'</div>';
+  }
+  if(!ed) h+='<div style="margin-top:6px;font-size:12px;color:var(--mut)">'+esc(d.area||'—')+'</div>';
+  if(it.warn&&it.warn.length&&ed) h+='<div style="margin-top:8px;font-size:12px;color:var(--warn);line-height:1.9">⚠️ '+it.warn.map(esc).join(' · ')+'</div>';
+  if(ed){
+    h+='<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" onclick="aiOpenForm('+i+')">✏️ ویرایش کامل و ثبت با فرم</button>';
+    if(d.areaRaw&&canManageLists()) h+='<button class="btn ghost sm" onclick="aiAddArea('+i+')">➕ افزودن «'+esc(d.areaRaw)+'» به فهرست واحدها</button>';
+    h+='</div>';
+  }
+  return h+'</div>';
+}
+function aiPreviewHtml(){
+  if(aiState.err) return '<div class="card" style="border-color:#fecaca;background:#fef2f2;color:#991b1b;font-size:13px;line-height:2">❌ '+esc(aiState.err)+'</div>';
+  const its=aiState.items; if(!its) return '';
+  const nU=its.filter(x=>x.k==='unsafe').length, nR=its.length-nU;
+  if(!its.length) return '<div class="card" style="font-size:13px;line-height:2">✅ هوش مصنوعی آنومالی یا ریسکی گزارش نکرده است.'+(aiState.summary?'<br><span style="color:var(--mut)">'+esc(aiState.summary)+'</span>':'')+'</div>';
+  let h='<div class="card"><div class="sechead">🔍 نتیجه‌ی تحلیل — '+nd(nU)+' آنومالی · '+nd(nR)+' ارزیابی ریسک</div>';
+  if(aiState.summary) h+='<div style="font-size:13px;line-height:2;margin:6px 0">'+esc(aiState.summary)+'</div>';
+  if(aiState.skipped) h+='<div style="font-size:12px;color:var(--warn)">⚠️ '+nd(aiState.skipped)+' مورد ناقص نادیده گرفته شد.</div>';
+  h+='<div style="font-size:12px;color:var(--mut);line-height:2;margin:6px 0">موارد را بررسی کنید؛ واحد، نوع و مقیاس‌ها قابل اصلاح است. موارد ثبت‌شده مثل ثبت دستی وارد مسیر تایید می‌شوند.</div>';
+  h+='<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin:6px 0;cursor:pointer"><input type="checkbox" '+(aiState.tag?'checked':'')+' onchange="aiTagSet(this.checked)"> افزودن برچسب حوزه‌ی HSE (مثل [بهداشت شغلی]) به ابتدای شرح</label>';
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" id="aiImpBtn" onclick="aiImportSel()">📥 ثبت</button>'
+   +'<button class="btn ghost sm" onclick="aiAll(true)">✅ انتخاب همه</button><button class="btn ghost sm" onclick="aiAll(false)">⬜ لغو انتخاب</button></div></div>';
+  h+=its.map(aiItemHtml).join('');
+  setTimeout(aiCountUpd,0);
+  return h;
+}
+
+/* ---- ثبت در سامانه ---- */
+function aiBaseRec(k){
+  const M=MODS[k];
+  const rec={id:uid(PF[k]),createdBy:me.name,createdById:me.id,createdRole:me.role,createdJ:todayJ(),log:[{u:me.name,d:todayJ(),t:'ثبت اولیه (ایجاد از تحلیل عکس با هوش مصنوعی)'}]};
+  M.fields.forEach(f=>{
+    if(f.t==='hdr'||String(f.k).charAt(0)==='_') return;
+    rec[f.k]=f.t==='chk'?false:(f.def!==undefined?(typeof f.def==='function'?f.def():f.def):'');
+  });
+  if(M.status) rec.status=M.status[0];
+  if(APPR_MODS.includes(k)) rec.appr=apprInit(me.role);
+  rec._rev=Date.now()+'|'+me.name;
+  return rec;
+}
+/* برچسب حوزه‌ی HSE به ابتدای متن اصلی */
+function aiTagged(it,key,val){
+  const t=aiTxt(val);
+  return (aiState.tag&&it.d.domain&&t)?('['+it.d.domain+'] '+t):t;
+}
+function aiBuildRec(it){
+  const k=it.k, d=it.d;
+  if(!canCreate(k)) return {err:'دسترسی ثبت در «'+MODS[k].t+'» ندارید'};
+  const rec=aiBaseRec(k), short=(d[AI_KIND[k].tx]||d.job||'').slice(0,30);
+  const needArea=()=>!d.area?'برای «'+short+'…» واحد را انتخاب کنید':'';
+  if(k==='unsafe'){
+    if(needArea()) return {err:needArea()};
+    if(!d.cat) return {err:'نوع آنومالی مشخص نیست'};
+    const sc=(AI_SEV.indexOf(d.severity)+1)*(AI_PRB.indexOf(d.probability)+1);
+    Object.assign(rec,{date:todayJ(),area:d.area,cat:d.cat,desc:aiTagged(it,'desc',d.desc),severity:d.severity,probability:d.probability,risk:sc?lvlName(sc):'',immediate:d.immediate||'',observer:me.name});
+    const ph=safeImg(aiState.photo); if(ph) rec.photo=ph;
+  }else if(k==='risks'){
+    const s=+aiSnap(d.s,L('RISK_LEVELS'))||3, p=+aiSnap(d.p,L('RISK_LEVELS'))||3; let rs=+d.rs||0, rp=+d.rp||0;
+    if(rs&&rp){ if(rs*rp>s*p){ rs=Math.min(rs,s); rp=Math.min(rp,p); } } else { rs=0; rp=0; }
+    Object.assign(rec,{act:d.act||d.hazard,area:d.area||'',hazard:aiTagged(it,'hazard',d.hazard||d.act),event:d.event||'',ctrl:d.ctrl||'',s:String(s),p:String(p),addCtrl:d.addCtrl||'',rs:rs?String(rs):'',rp:rp?String(rp):''});
+  }else if(k==='fmea'){
+    if(needArea()) return {err:needArea()};
+    if(!d.effect) return {err:'اثر خرابی «'+short+'…» خالی است؛ با «ویرایش کامل» تکمیل کنید'};
+    const S=+d.s||1,O=+d.o||1,D=+d.d||1;
+    Object.assign(rec,{date:todayJ(),area:d.area,equip:d.equip,func:d.func||'',mode:aiTagged(it,'mode',d.mode),effect:d.effect,cause:d.cause||'',s:String(S),o:String(O),d:String(D),ctrl:d.ctrl||'',action:d.action||''});
+    rec.rpn=S*O*D;
+  }else if(k==='lec'){
+    if(needArea()) return {err:needArea()};
+    Object.assign(rec,{date:todayJ(),area:d.area,activity:d.activity,hazard:aiTagged(it,'hazard',d.hazard),L:String(d.L),E:String(d.E),C:String(d.C),ctrl:d.ctrl||'',action:d.action||''});
+    rec.score=aiLecScore(d); rec.level=lecLevel(rec.score);
+  }else{
+    if(needArea()) return {err:needArea()};
+    const nt=aiTxt(d.note);
+    Object.assign(rec,{date:todayJ(),area:d.area,job:d.job,ppe:d.ppe||'',tools:d.tools||'',note:(aiState.tag&&d.domain)?('['+d.domain+']'+(nt?' '+nt:'')):nt});
+    rec.steps=d.steps.map(s=>({step:s.step,hazard:s.hazard,ctrl:s.ctrl,risk:s.risk}));
+  }
+  return {k,rec};
+}
+function aiImportSel(){
+  if(window._viewOnly){ toast('⚠️ در حالت فقط‌مشاهده امکان ثبت نیست'); return; }
+  const its=aiState.items||[], sel=its.filter(x=>x.sel&&!x.done);
+  if(!sel.length){ toast('⚠️ موردی انتخاب نشده است'); return; }
+  const errs=[]; let ok=0;
+  sel.forEach(it=>{
+    const r=aiBuildRec(it);
+    if(r.err){ errs.push(r.err); return; }
+    if(!Array.isArray(db[r.k])) db[r.k]=[];
+    db[r.k].push(r.rec); queueRec(r.k,r.rec.id);
+    it.done=r.rec.id; it.sel=false; ok++;
+  });
+  if(ok){ save(); try{ renderSidebar(); }catch(e){ console.warn(e); } }
+  const el=$('#aiPrev'); if(el) el.innerHTML=aiPreviewHtml();
+  if(errs.length) toast('⚠️ '+(ok?nd(ok)+' مورد ثبت شد؛ ':'')+errs[0]+(errs.length>1?' (و '+nd(errs.length-1)+' مورد دیگر)':''));
+  else toast('✔ '+nd(ok)+' مورد با موفقیت ثبت شد');
+}
+function aiOpenForm(i){
+  const it=aiState.items&&aiState.items[i]; if(!it) return;
+  const k=it.k, pre=Object.assign({},it.d);
+  delete pre.areaRaw; delete pre.domain; delete pre.steps;
+  const tx=AI_KIND[k].tx; if(pre[tx]!==undefined) pre[tx]=aiTagged(it,tx,pre[tx]);
+  if(k==='unsafe'){ const sc=(AI_SEV.indexOf(pre.severity)+1)*(AI_PRB.indexOf(pre.probability)+1); pre.risk=sc?lvlName(sc):''; }
+  aiState.watch={i,k,n:(db[k]||[]).filter(isMine).length};
+  openForm(k,null,pre);
+  if(k==='unsafe'){ const ph=safeImg(aiState.photo); if(ph){ window._phData=ph; const w=$('#phWrap'); if(w) w.innerHTML=photoBlock(ph); } }
+  if(k==='jsa'){ const st=(it.d.steps||[]).map(s=>({step:s.step,hazard:s.hazard,ctrl:s.ctrl,risk:s.risk})); setTimeout(()=>{ try{ initJsaSteps(st); }catch(e){ console.warn(e); } },160); }
+}
+
+/* ---- صفحه ---- */
+function aiImgPage(){
+  if(aiState.watch && !document.body.classList.contains('modal-open')){
+    const w=aiState.watch; aiState.watch=null;
+    if((db[w.k]||[]).filter(isMine).length>w.n){ const it=aiState.items&&aiState.items[w.i]; if(it){ it.done='از طریق فرم'; it.sel=false; } }
+  }
+  const step=(n,t)=>'<div class="sechead">'+n+'  '+t+'</div>';
+  let h='<div class="ptitle"><h2>🤖 تحلیل عکس با هوش مصنوعی</h2></div>';
+  h+='<div class="card" style="background:#fff7ed;border-color:#fed7aa"><div style="font-size:12.5px;line-height:2.1">'
+   +'<b>روش کار:</b> روش ارزیابی ریسک را انتخاب و پرامپت را کپی کنید ← در یک هوش مصنوعی دلخواه (ChatGPT، Gemini، Claude و …) همراه با عکس بفرستید ← خروجی را همین‌جا بچسبانید ← آنومالی‌ها و ریسک‌ها را بررسی و ثبت کنید.<br>'
+   +'<span style="color:var(--mut)">این بخش به هیچ سرویسی متصل نیست و عکس را خودکار جایی نمی‌فرستد. عکس‌های حاوی چهره یا اطلاعات محرمانه را به سرویس بیرونی ندهید.</span></div></div>';
+  h+='<div class="card">'+step('۱','روش ارزیابی ریسک و کپی پرامپت')
+   +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">'
+   +AI_METHODS.map(m=>'<button class="btn sm '+(aiState.method===m[0]?'pri':'ghost')+'" onclick="aiSetMethod(\''+m[0]+'\')">'+m[1]+' '+m[2]+'</button>').join('')+'</div>'
+   +'<div style="font-size:11.5px;color:var(--mut);line-height:1.9;margin-bottom:6px">همه‌ی حوزه‌های HSE (ایمنی، بهداشت شغلی، محیط‌زیست، آتش، PPE، 5S، اضطراری و …) در پرامپت لحاظ شده است. واحدها و مقیاس‌ها هر بار از فهرست‌های فعلی سامانه خوانده می‌شوند ('+nd(AR().length)+' واحد).</div>'
+   +'<div class="ff" style="margin:8px 0"><label>توضیح اختیاری (واحد، نوع کار، شرایط…)</label><input class="in" id="aiCtx" value="'+esc(aiState.ctx)+'" placeholder="مثلاً: سالن ذوب، اطراف کوره‌ی القایی" oninput="aiCtxSet(this.value)"></div>'
+   +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" onclick="aiCopyPrompt()">📋 کپی پرامپت</button></div>'
+   +'<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12.5px;color:var(--mut)">مشاهده‌ی متن پرامپت</summary>'
+   +'<pre id="aiPromptPre" style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:12px;line-height:1.9;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;max-height:260px;overflow:auto">'+esc(aiPromptText())+'</pre></details></div>';
+  h+='<div class="card">'+step('۲','عکس را در هوش مصنوعی بفرستید')
+   +'<div style="font-size:12.5px;line-height:2;color:var(--mut);margin:6px 0">یکی از سرویس‌ها را باز کنید، عکس را پیوست و پرامپت را بچسبانید، سپس خروجی را کپی کنید.</div>'
+   +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+   +['ChatGPT|https://chatgpt.com','Gemini|https://gemini.google.com','Claude|https://claude.ai'].map(x=>{const p=x.split('|');return '<a class="btn ghost sm" style="text-decoration:none;display:inline-block" href="'+p[1]+'" target="_blank" rel="noopener noreferrer">↗ '+p[0]+'</a>'}).join('')
+   +'</div></div>';
+  h+='<div class="card">'+step('۳','خروجی را اینجا بچسبانید')
+   +'<div style="margin:8px 0"><div style="font-size:12px;color:var(--mut);margin-bottom:4px">عکس را هم می‌توانید انتخاب کنید تا به آنومالی‌های ثبت‌شده ضمیمه شود:</div><div id="aiPhWrap">'+aiPhotoHtml()+'</div></div>'
+   +'<textarea class="in" id="aiRaw" dir="ltr" style="min-height:150px;font-family:monospace;font-size:12.5px;text-align:left" placeholder="{ &quot;summary&quot;: ..., &quot;anomalies&quot;: [...], &quot;risks&quot;: [...] }" oninput="aiState.raw=this.value">'+esc(aiState.raw)+'</textarea>'
+   +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn pri" onclick="aiRead()">🔍 خواندن خروجی</button>'
+   +'<button class="btn ghost" onclick="aiPaste()">📥 چسباندن از کلیپ‌بورد</button><button class="btn ghost" onclick="aiClear()">🧹 پاک کردن</button></div></div>';
+  h+='<div id="aiPrev">'+aiPreviewHtml()+'</div>';
+  return h;
+}
+
 const SPECIAL={
  dash:{t:'داشبورد',i:'🏠',ren:()=>me.role==='worker'?dashWorker():dashMgmt()},
  kpi:{t:'شاخص‌ها',i:'📈',ren:kpiPage},
@@ -6335,11 +6856,12 @@ const SPECIAL={
  s5:{t:'ارزیابی 5S',i:'🏭',ren:s5Page},
  perms:{t:'کنترل دسترسی‌ها',i:'🔐',ren:permsPage},
  trends:{t:'روند و مقایسه',i:'📉',ren:trendsPage},
+ aiimg:{t:'تحلیل عکس با هوش مصنوعی',i:'🤖',ren:aiImgPage},
  settings:{t:'تنظیمات',i:'⚙️',ren:settingsPage}
 };
 const NAV=[
  {g:'خانه',items:['dash']},
- {g:'گزارشگری و پیگیری',items:['incidents','unsafe','actions']},
+ {g:'گزارشگری و پیگیری',items:['incidents','unsafe','aiimg','actions']},
  {g:'ارزیابی و کنترل خطر',items:['risks','inspections','ptw','loto','confined','heightWork','siteVisit']},
  {g:'مدیریت تغییر و تجهیزات',items:['moc','equipCert']},
  {g:'نظام آراستگی 5S',items:['s5']},
