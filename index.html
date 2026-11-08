@@ -418,6 +418,19 @@ html{-webkit-text-size-adjust:100%}
  #side,#topbar,.toolbar,.tbtn,.btn,.calpop,#fab,.bellpop,.sync-indicator,.addopt-btn,.risk-tabs{display:none!important}
  #main{margin:0}body{background:var(--card)}
  .card,.kpi{box-shadow:none;border:1px solid #ddd}
+ /* رفع قطع شدن صفحه هنگام پرینت: فلکس/اسکرول/ارتفاع ثابت باعث چاپ فقط صفحه اول می‌شد */
+ html,body{height:auto!important;min-height:0!important;overflow:visible!important;max-width:none!important;background:#fff!important}
+ body.modal-open{overflow:visible!important}
+ #app{display:block!important;min-height:0!important;height:auto!important}
+ #main{display:block!important;width:100%!important;margin:0!important;float:none!important;overflow:visible!important;height:auto!important}
+ #content,#view,#page{overflow:visible!important;height:auto!important}
+ .tscroll,.mxwrap,.pbox,.tplres,.mbody,.s5-trend{overflow:visible!important;max-height:none!important}
+ #modal{position:static!important;overflow:visible!important;padding:0!important;background:none!important}
+ .tbl{width:100%!important}
+ .tbl tr,.card,.kpi{break-inside:avoid;page-break-inside:avoid}
+ .tbl thead{display:table-header-group}
+ *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ @page{size:A4;margin:10mm}
 }
 
 /* ===================== بازطراحی ظاهری ===================== */
@@ -2861,11 +2874,26 @@ function exportPDF(html, filename){
    .then(blob=>{ wrap.remove(); if(blob) saveBlob(blob, filename+'.pdf', 'application/pdf'); else toast('✔ فایل PDF دانلود شد'); })
    .catch(e=>{ wrap.remove(); toast('خطا در PDF — از دکمه چاپ استفاده کنید'); });
 }
-function buildModuleReport(k){
+/* ردیف‌های فیلترشدهٔ صفحهٔ جاری (همان منطق renderRows) برای چاپ/خروجی */
+function exportFilteredRows(k){
+  const onPage=(curPage===k)||(curPage==='risks'&&riskMethod===k);
+  let rows=myRows(k);
+  const info=[];
+  if(onPage){
+    const q=($('#q')&&$('#q').value.toLowerCase().trim())||'';
+    const sf=($('#sf')&&$('#sf').value)||'';
+    if(sf){rows=rows.filter(r=>r.status===sf);info.push('وضعیت: '+sf)}
+    if(q){rows=rows.filter(r=>JSON.stringify(Object.assign({},r,{log:0,answers:0,photo:0})).toLowerCase().includes(q));info.push('جستجو: «'+($('#q').value.trim())+'»')}
+    if(curPage==='risks'&&riskMethod==='matrix'&&riskFilter)info.push('شدت '+riskFilter.s+' / احتمال '+riskFilter.p);
+  }
+  rows.sort((a,b)=>String(b.date||b.createdJ||'').localeCompare(String(a.date||a.createdJ||'')));
+  return {rows:rows,info:info};
+}
+function buildModuleReport(k,rowsOverride){
   const M=MODS[k];
   if(!M) return '<p>ماژول یافت نشد.</p>';
-  const rows=(db[k]||[]).slice().sort((a,b)=>String(b.date||b.createdJ||'').localeCompare(String(a.date||a.createdJ||'')));
-  if(!rows.length) return '<p style="color:#999">موردی ثبت نشده است.</p>';
+  const rows=rowsOverride||(db[k]||[]).slice().sort((a,b)=>String(b.date||b.createdJ||'').localeCompare(String(a.date||a.createdJ||'')));
+  if(!rows.length) return '<p style="color:#999">'+(rowsOverride?'موردی با این فیلتر یافت نشد.':'موردی ثبت نشده است.')+'</p>';
   let h='<table><thead><tr>'+colsOf(k).map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'</tr></thead><tbody>';
   rows.forEach(r=>{
     h+='<tr>'+M.cols.map(c=>'<td>'+(stripHtml(fmtCell(k,r,c))||'—')+'</td>').join('')+(M.status?'<td>'+(r.status||'—')+'</td>':'')+'</tr>';
@@ -2876,10 +2904,11 @@ function buildModuleReport(k){
 function exportModuleTable(k,format){
   const M=MODS[k];
   if(!M){toast('ماژول یافت نشد');return}
-  const rows=(db[k]||[]).slice().sort((a,b)=>String(b.date||b.createdJ||'').localeCompare(String(a.date||a.createdJ||'')));
+  const fr=exportFilteredRows(k), rows=fr.rows;
   let h='<h1>'+M.i+' '+esc(M.t)+'</h1>';
   h+='<p>تاریخ گزارش: <b>'+nd(todayJ())+'</b> — تعداد رکورد: <b>'+nd(rows.length)+'</b> — تهیه‌کننده: '+esc(me.name)+'</p>';
-  h+=buildModuleReport(k);
+  if(fr.info.length) h+='<p>فیلتر اعمال‌شده: <b>'+esc(fr.info.join(' | '))+'</b></p>';
+  h+=buildModuleReport(k,rows);
   const fn='HSE-'+k+'-'+todayJ().replace(/\//g,'-');
   if(format==='print') printHTML(h,fn); else if(format==='word') exportWord(h,fn); else exportPDF(h,fn);
 }
