@@ -6383,7 +6383,7 @@ document.addEventListener('keydown',function(e){
    پرامپت هر بار از فهرست‌های زنده‌ی سامانه (واحدها، انواع، مقیاس‌ها) ساخته می‌شود.
 ============================================================ */
 const AI_SEV=['جزئی','متوسط','شدید','فاجعه‌بار'], AI_PRB=['کم','متوسط','زیاد','بسیار زیاد'], AI_JLV=['کم','متوسط','بالا','بحرانی'];
-const AI_METHODS=[['risks','📊','ماتریس ۵×۵'],['fmea','⚙️','FMEA'],['lec','📐','LEC'],['jsa','🔧','JSA'],['none','🚫','فقط آنومالی']];
+const AI_METHODS=[['all','🧩','همه‌ی روش‌ها'],['risks','📊','ماتریس ۵×۵'],['fmea','⚙️','FMEA'],['lec','📐','LEC'],['jsa','🔧','JSA'],['none','🚫','فقط آنومالی']];
 const AI_KIND={
   unsafe:{i:'⚠️',l:'آنومالی',tx:'desc'},
   risks:{i:'📊',l:'ریسک (ماتریس ۵×۵)',tx:'hazard'},
@@ -6410,7 +6410,7 @@ const AI_DOMAINS=[
   ['رفتار ایمنی','میان‌بر زدن، بی‌توجهی، نادیده‌گرفتن علائم و مقررات'],
   ['سایر','']
 ];
-var aiState={ctx:'',raw:'',photo:'',method:'risks',tag:true,items:null,summary:'',skipped:0,err:'',watch:null};
+var aiState={ctx:'',raw:'',photo:'',method:'all',tag:true,items:null,summary:'',skipped:0,err:'',watch:null};
 
 function aiNorm(s){ return String(s==null?'':s).replace(/[\u200c\u200e\u200f]/g,' ').replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/\s+/g,' ').trim(); }
 function aiDigits(s){ return String(s==null?'':s).replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[٫،]/g,'.'); }
@@ -6432,7 +6432,7 @@ function aiDomainNames(){ return AI_DOMAINS.map(x=>x[0]); }
 function aiTxt(v){ return String(v==null?'':v).trim(); }
 
 /* ---- پرامپت (پویا: از فهرست‌های فعلی سامانه ساخته می‌شود) ---- */
-function aiRiskSpec(m){
+function aiRiskSpecOne(m){
   const dom=aiDomainNames()[0], areas=AR(), a0=areas[0]||'';
   const LV=L('RISK_LEVELS'), SOD=L('FMEA_SOD'), LL=L('LEC_L'), LE=L('LEC_E'), LC=L('LEC_C');
   const num=x=>parseFloat(x);
@@ -6469,12 +6469,30 @@ function aiRiskSpec(m){
   };
   return null;
 }
+/* روش «همه‌ی روش‌ها»: هر چهار روش ارزیابی ریسک سامانه در یک پرامپت؛ هوش مصنوعی برای هر خطر روش مناسب را برمی‌گزیند و در فیلد method می‌نویسد */
+function aiRiskSpec(m){
+  const withM=(k,sp)=>{ if(sp) sp.sample=Object.assign({method:k},sp.sample); return sp; };
+  if(m!=='all') return withM(m,aiRiskSpecOne(m));
+  const ks=['risks','fmea','lec','jsa'], parts=ks.map(k=>({k:k,sp:withM(k,aiRiskSpecOne(k))}));
+  const lines=[
+   'راهنمای انتخاب روش ارزیابی ریسک (در هر آیتم risks، فیلد method را دقیقاً یکی از risks | fmea | lec | jsa بنویس):',
+   '- risks (ماتریس ۵×۵): ارزیابی عمومی هر خطر یا وضعیت ناایمن قابل مشاهده؛ روش پیش‌فرض برای مواردی که روش دیگر مناسب‌تر نیست',
+   '- fmea: خرابی، نقص یا از کار افتادن یک تجهیز، حفاظ، سیستم کنترل یا فرآیند (حفاظ برداشته‌شده، نشتی، قطعه‌ی فرسوده، سیستم حفاظتی غیرفعال)',
+   '- lec: وقتی میزان یا تکرار حضور افراد در معرض خطر (مواجهه) نقش تعیین‌کننده دارد',
+   '- jsa: وقتی در عکس یک کار یا عملیات با مراحل مشخص در حال انجام است (مراحل واقعی و ترتیبی را بنویس)',
+   'قاعده‌ی پوشش: هر خطر مهم باید دست‌کم با یک روش مناسب ارزیابی شود. برای خطرهای حیاتی (احتمال فوت، آتش‌سوزی/انفجار، سقوط از ارتفاع، برق‌گرفتگی، مذاب و …) همان خطر را با دو روش یا بیشتر هم ارزیابی کن تا ریسک از چند زاویه سنجیده شود؛ برای موارد کم‌اهمیت از تکرار بی‌دلیل خودداری کن.',
+   'هر چهار نمونه‌ی قالب فقط برای نشان‌دادن ساختار فیلدهاست؛ فقط آیتم‌هایی را بیاور که واقعاً در عکس دیده می‌شود و فیلدهای هر روش را با همان روش بنویس.',
+   ''];
+  parts.forEach(x=>{ lines.push('▪ روش method = \"'+x.k+'\" — '+x.sp.name+':'); x.sp.lines.forEach(l=>lines.push(l)); lines.push(''); });
+  lines.pop();
+  return {all:true,name:'همه‌ی روش‌های ارزیابی ریسک (ماتریس ۵×۵، FMEA، LEC، JSA)',samples:parts.map(x=>x.sp.sample),lines:lines};
+}
 function aiPromptText(){
   const areas=AR(), cats=L('UNSAFE_CATS');
   const ctx=aiTxt(aiState.ctx), spec=aiRiskSpec(aiState.method);
   const doms=AI_DOMAINS.filter(x=>x[1]).map(x=>'  • '+x[0]+': '+x[1]);
   const sample={summary:'خلاصه‌ی یک‌جمله‌ای از وضعیت HSE عکس',anomalies:[{domain:aiDomainNames()[0],desc:'شرح دقیق آنومالی و محل آن در عکس',cat:cats[0]||'وضعیت ناایمن',area:areas[0]||'',severity:'شدید',probability:'زیاد',immediate:'اقدام فوری پیشنهادی'}]};
-  if(spec) sample.risks=[spec.sample];
+  if(spec) sample.risks=spec.samples||[spec.sample];
   const L1=[
    'تو یک کارشناس ارشد HSE (ایمنی، بهداشت شغلی و محیط‌زیست) با تجربه‌ی صنایع فولاد و ریخته‌گری هستی.',
    'عکس پیوست را با دقت و از «همه‌ی جنبه‌های HSE» بررسی کن و آنومالی‌ها (وضعیت‌ها و رفتارهای ناایمن)'+(spec?' و ریسک‌های قابل مشاهده':'')+' را شناسایی کن.'
@@ -6491,7 +6509,7 @@ function aiPromptText(){
    '۳) همه‌ی متن‌ها فارسی، کوتاه و کاربردی باشد. هر مورد جدا یک آیتم باشد.',
    '۴) خروجی فقط و فقط یک JSON معتبر باشد؛ بدون هیچ توضیح قبل یا بعد از آن و بدون علامت ```.',
    '۵) مقدار فیلدهای domain و cat و area و severity و probability'+(spec?' و فیلدهای عددی/انتخابی ریسک':'')+' دقیقاً یکی از مقادیر مجاز زیر باشد. اگر واحد مشخص نیست یا در فهرست نیست، area را "" بگذار.',
-   spec?('۶) روش ارزیابی ریسک: '+spec.name+'. هر خطر شغلی را در risks بیاور.'):'۶) ارزیابی ریسک لازم نیست؛ کلید risks را در خروجی نیاور.',
+   spec?(spec.all?('۶) ارزیابی ریسک: از «همه‌ی روش‌های ارزیابی ریسک» (ماتریس ۵×۵، FMEA، LEC، JSA) استفاده کن و هر خطر را در آرایه‌ی risks با روش مناسب بیاور؛ راهنمای انتخاب روش در انتهای همین پرامپت آمده است.'):('۶) روش ارزیابی ریسک: '+spec.name+'. هر خطر شغلی را در risks بیاور.')):'۶) ارزیابی ریسک لازم نیست؛ کلید risks را در خروجی نیاور.',
    '',
    'مقادیر مجاز:',
    '- domain: '+aiDomainNames().join(' | '),
@@ -6499,7 +6517,7 @@ function aiPromptText(){
    '- area: '+(areas.join(' | ')||'(فهرست خالی است)'),
    '- severity: '+AI_SEV.join(' | '),
    '- probability: '+AI_PRB.join(' | ')
-  ]);
+  ].concat(spec&&spec.all?['- method (در هر آیتم risks): risks | fmea | lec | jsa']:[]));
   const tail=(spec?spec.lines:[]).concat(['','قالب خروجی (فقط ساختار است؛ مقادیر نمونه‌اند):',JSON.stringify(sample,null,2)]);
   return L1.concat(rules,tail).join('\n');
 }
@@ -6534,12 +6552,14 @@ function aiExtractJson(txt){
 /* تشخیص روش ریسک از کلیدهای خروجی (اگر بعد از گرفتن پرامپت روش عوض شده باشد) */
 function aiDetectKind(r,sel){
   if(r&&typeof r==='object'){
+    const mm={risks:'risks',risk:'risks',matrix:'risks','ماتریس':'risks',fmea:'fmea',lec:'lec',jsa:'jsa'}[aiNorm(r.method).toLowerCase()];
+    if(mm) return mm;
     if(Array.isArray(r.steps)) return 'jsa';
     if('mode' in r||'effect' in r||'equip' in r) return 'fmea';
     if('L' in r||'E' in r||'C' in r) return 'lec';
     if('s' in r||'p' in r) return 'risks';
   }
-  return (sel&&sel!=='none')?sel:'risks';
+  return ['risks','fmea','lec','jsa'].indexOf(sel)>=0?sel:'risks';
 }
 function aiNormalize(obj){
   if(Array.isArray(obj)) obj={anomalies:obj};
@@ -6876,7 +6896,7 @@ function aiImgPage(){
   h+='<div class="card">'+step('۱','روش ارزیابی ریسک و کپی پرامپت')
    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">'
    +AI_METHODS.map(m=>'<button class="btn sm '+(aiState.method===m[0]?'pri':'ghost')+'" onclick="aiSetMethod(\''+m[0]+'\')">'+m[1]+' '+m[2]+'</button>').join('')+'</div>'
-   +'<div style="font-size:11.5px;color:var(--mut);line-height:1.9;margin-bottom:6px">همه‌ی حوزه‌های HSE (ایمنی، بهداشت شغلی، محیط‌زیست، آتش، PPE، 5S، اضطراری و …) در پرامپت لحاظ شده است. واحدها و مقیاس‌ها هر بار از فهرست‌های فعلی سامانه خوانده می‌شوند ('+nd(AR().length)+' واحد).</div>'
+   +'<div style="font-size:11.5px;color:var(--mut);line-height:1.9;margin-bottom:6px">همه‌ی حوزه‌های HSE (ایمنی، بهداشت شغلی، محیط‌زیست، آتش، PPE، 5S، اضطراری و …) در پرامپت لحاظ شده است.'+(aiState.method==='all'?' <b>حالت «همه‌ی روش‌ها»:</b> هر چهار روش ارزیابی ریسک (ماتریس ۵×۵، FMEA، LEC، JSA) در پرامپت هست و هوش مصنوعی برای هر خطر روش مناسب را انتخاب می‌کند؛ خطرهای حیاتی با چند روش ارزیابی می‌شوند.':'')+' واحدها و مقیاس‌ها هر بار از فهرست‌های فعلی سامانه خوانده می‌شوند ('+nd(AR().length)+' واحد).</div>'
    +'<div class="ff" style="margin:8px 0"><label>توضیح اختیاری (واحد، نوع کار، شرایط…)</label><input class="in" id="aiCtx" value="'+esc(aiState.ctx)+'" placeholder="مثلاً: سالن ذوب، اطراف کوره‌ی القایی" oninput="aiCtxSet(this.value)"></div>'
    +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" onclick="aiCopyPrompt()">📋 کپی پرامپت</button></div>'
    +'<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12.5px;color:var(--mut)">مشاهده‌ی متن پرامپت</summary>'
