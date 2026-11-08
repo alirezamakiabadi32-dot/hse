@@ -2885,6 +2885,24 @@ function exportFilteredRows(k){
     if(sf){rows=rows.filter(r=>r.status===sf);info.push('وضعیت: '+sf)}
     if(q){rows=rows.filter(r=>JSON.stringify(Object.assign({},r,{log:0,answers:0,photo:0})).toLowerCase().includes(q));info.push('جستجو: «'+($('#q').value.trim())+'»')}
     if(curPage==='risks'&&riskMethod==='matrix'&&riskFilter)info.push('شدت '+riskFilter.s+' / احتمال '+riskFilter.p);
+    /* فیلترهای کشویی زیر عنوان ستون‌ها: روی همهٔ ردیف‌ها اعمال می‌شود (نه فقط صفحهٔ جاری جدول) */
+    const rowsEl=$('#rows'), tbl=rowsEl?rowsEl.closest('table'):null;
+    if(tbl&&tbl._cflt&&typeof window.hseColNorm==='function'){
+      const nz=window.hseColNorm, M=MODS[k], cols=colsOf(k);
+      const plain=h=>stripHtml(h).replace(/\s+/g,' ').trim();
+      const heads=(tbl.tHead&&tbl.tHead.rows[0])?Array.from(tbl.tHead.rows[0].cells):[];
+      const checks=[];
+      tbl._cflt.forEach((sel,i)=>{
+        if(!sel||!sel.value) return;
+        let get=null;
+        if(i<cols.length) get=r=>plain(fmtCell(k,r,cols[i]));
+        else if(M.status&&i===cols.length) get=r=>plain(r.status?chip(r.status):'—');
+        if(!get) return;
+        checks.push({want:nz(sel.value),get:get});
+        info.push((heads[i]?heads[i].textContent.trim():'ستون')+': '+sel.value);
+      });
+      if(checks.length) rows=rows.filter(r=>checks.every(c=>nz(c.get(r))===c.want));
+    }
   }
   rows.sort((a,b)=>String(b.date||b.createdJ||'').localeCompare(String(a.date||a.createdJ||'')));
   return {rows:rows,info:info};
@@ -2896,7 +2914,7 @@ function buildModuleReport(k,rowsOverride){
   if(!rows.length) return '<p style="color:#999">'+(rowsOverride?'موردی با این فیلتر یافت نشد.':'موردی ثبت نشده است.')+'</p>';
   let h='<table><thead><tr>'+colsOf(k).map(c=>'<th>'+esc(colLabel(k,c))+'</th>').join('')+(M.status?'<th>وضعیت</th>':'')+'</tr></thead><tbody>';
   rows.forEach(r=>{
-    h+='<tr>'+M.cols.map(c=>'<td>'+(stripHtml(fmtCell(k,r,c))||'—')+'</td>').join('')+(M.status?'<td>'+(r.status||'—')+'</td>':'')+'</tr>';
+    h+='<tr>'+colsOf(k).map(c=>'<td>'+(stripHtml(fmtCell(k,r,c))||'—')+'</td>').join('')+(M.status?'<td>'+(r.status||'—')+'</td>':'')+'</tr>';
   });
   h+='</tbody></table>';
   return h;
@@ -7354,6 +7372,7 @@ dbRef.on('value', (snapshot) => {
    .replace(/[٠-٩]/g,d=>String(d.charCodeAt(0)-0x660))
    .replace(/\s+/g,' ').trim().toLowerCase();
  const cellText=c=>c?String(c.textContent||'').replace(/\s+/g,' ').trim():'';
+ window.hseColNorm=norm; /* برای هماهنگی چاپ/خروجی با فیلترهای ستونی */
  // فقط ردیف‌های داده (ردیف پیام «موردی نیست» که colspan دارد کنار گذاشته می‌شود)
  function dataRows(t,n){
   return Array.from(t.tBodies[0].rows).filter(r=>r.cells.length>=n);
