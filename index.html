@@ -430,6 +430,7 @@ html{-webkit-text-size-adjust:100%}
  .tbl tr,.card,.kpi{break-inside:avoid;page-break-inside:avoid}
  .tbl thead{display:table-header-group}
  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ *{font-family:'B Nazanin','BNazanin','B Nazanin Regular','Nazanin','Vazirmatn',Tahoma,serif!important}
  @page{size:A4;margin:10mm}
 }
 
@@ -2653,21 +2654,24 @@ function stripHtml(html){
   d.innerHTML=String(html);
   return (d.textContent||d.innerText||'').trim();
 }
+/* فونت خروجی‌ها (پرینت / PDF / Word): «B Nazanin» — اگر روی دستگاه نصب نباشد به فونت بعدی می‌رود */
+const PRINT_FONT="'B Nazanin','BNazanin','B Nazanin Regular','Nazanin','Vazirmatn',Tahoma,serif";
+const SYM_FONT="'Segoe UI Symbol','Apple Symbols','Noto Sans Symbols','DejaVu Sans',sans-serif";
 function reportCSSForWord(){
   return `<style>
-    body{font-family:Tahoma,sans-serif;direction:rtl;font-size:11pt;line-height:1.8;color:#0f172a}
-    h1{font-size:16pt;color:#c2410c;margin:0 0 8px;padding-bottom:6px;border-bottom:2px solid #ea580c}
-    h2{font-size:13pt;color:#0f172a;margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid #e2e8f0}
-    h3{font-size:12pt;color:#c2410c;margin:10px 0 4px}
-    p{font-size:10pt;margin:4px 0;color:#475569}
-    table{width:100%;border-collapse:collapse;margin:8px 0;font-size:10pt}
+    body{font-family:${PRINT_FONT};direction:rtl;font-size:13pt;line-height:1.8;color:#0f172a}
+    h1{font-size:19pt;color:#c2410c;margin:0 0 8px;padding-bottom:6px;border-bottom:2px solid #ea580c}
+    h2{font-size:15pt;color:#0f172a;margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid #e2e8f0}
+    h3{font-size:14pt;color:#c2410c;margin:10px 0 4px}
+    p{font-size:12pt;margin:4px 0;color:#475569}
+    table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12pt}
     th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:right;vertical-align:top}
     th{background:#f1f5f9;font-weight:700;color:#475569}
     tr:nth-child(even) td{background:#f8fafc}
     .kpi-row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
-    .kpi-box{flex:1 1 140px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;text-align:center;font-size:10pt;color:#475569}
-    .kpi-box b{display:block;font-size:16pt;color:#c2410c;margin:4px 0}
-    .footer{font-size:9pt;color:#64748b;margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;text-align:center}
+    .kpi-box{flex:1 1 140px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;text-align:center;font-size:12pt;color:#475569}
+    .kpi-box b{display:block;font-size:18pt;color:#c2410c;margin:4px 0}
+    .footer{font-size:10pt;color:#64748b;margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;text-align:center}
   </style>`;
 }
 function saveBlob(blob, name, mime){
@@ -2723,7 +2727,7 @@ function _docxBuild(html){
   const esc2=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const media=[],mrels=[];
   const NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
-  const rpr=o=>'<w:rPr><w:rFonts w:ascii="Tahoma" w:hAnsi="Tahoma" w:cs="Tahoma"/>'+(o.b?'<w:b/><w:bCs/>':'')+(o.color?'<w:color w:val="'+o.color+'"/>':'')+(o.sz?'<w:sz w:val="'+o.sz+'"/><w:szCs w:val="'+o.sz+'"/>':'')+'<w:rtl/><w:lang w:bidi="fa-IR"/></w:rPr>';
+  const rpr=o=>{const f=o.font||'B Nazanin',z=o.sz||26;return '<w:rPr><w:rFonts w:ascii="'+f+'" w:hAnsi="'+f+'" w:eastAsia="'+f+'" w:cs="'+f+'"/>'+(o.b?'<w:b/><w:bCs/>':'')+(o.color?'<w:color w:val="'+o.color+'"/>':'')+'<w:sz w:val="'+z+'"/><w:szCs w:val="'+z+'"/><w:rtl/><w:lang w:bidi="fa-IR"/></w:rPr>';};
   const run=(t,o)=>'<w:r>'+rpr(o||{})+'<w:t xml:space="preserve">'+esc2(t)+'</w:t></w:r>';
   const para=(inner,o)=>{o=o||{};return '<w:p><w:pPr>'+(o.border?'<w:pBdr><w:bottom w:val="single" w:sz="8" w:space="2" w:color="'+o.border+'"/></w:pBdr>':'')+'<w:bidi/><w:spacing w:before="'+(o.before||0)+'" w:after="'+(o.after===undefined?80:o.after)+'"/>'+(o.center?'<w:jc w:val="center"/>':'')+'</w:pPr>'+inner+'</w:p>';};
   function imgRun(el){
@@ -2751,23 +2755,25 @@ function _docxBuild(html){
         if(tg==='IMG'){ out+=imgRun(ch); return; }
         const no=Object.assign({},o);
         if(tg==='B'||tg==='STRONG') no.b=true;
+        if(ch.hasAttribute('data-sym')) no.font='Segoe UI Symbol';
         out+=inl(ch,no);
       }
     });
     return out;
   }
   function tbl(t){
+    const nb=t.hasAttribute('data-nb'), bdc=t.getAttribute('data-bd')||'CBD5E1';
     const rows=Array.from(t.rows).filter(r=>r.cells.length);
     if(!rows.length) return '';
     const nc=Math.max(...rows.map(r=>r.cells.length)), cw=Math.floor(9600/nc);
     let x='<w:tbl><w:tblPr><w:bidiVisual/><w:tblW w:w="9600" w:type="dxa"/><w:tblBorders>'
-      +['top','left','bottom','right','insideH','insideV'].map(s=>'<w:'+s+' w:val="single" w:sz="4" w:space="0" w:color="CBD5E1"/>').join('')
-      +'</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr><w:tblGrid>'+('<w:gridCol w:w="'+cw+'"/>').repeat(nc)+'</w:tblGrid>';
+      +['top','left','bottom','right','insideH','insideV'].map(s=>'<w:'+s+' w:val="'+(nb?'none':'single')+'" w:sz="4" w:space="0" w:color="'+(nb?'auto':bdc)+'"/>').join('')
+      +'</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>'+('<w:gridCol w:w="'+cw+'"/>').repeat(nc)+'</w:tblGrid>';
     rows.forEach(r=>{
       x+='<w:tr>';
       for(let i=0;i<nc;i++){
         const c=r.cells[i], th=!!c&&c.tagName==='TH';
-        const inner=c?inl(c,{b:th,sz:20}):'';
+        const inner=c?inl(c,{b:th,sz:24}):'';
         x+='<w:tc><w:tcPr><w:tcW w:w="'+cw+'" w:type="dxa"/>'+(th?'<w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/>':'')+'</w:tcPr>'+para(inner,{after:0})+'</w:tc>';
       }
       x+='</w:tr>';
@@ -2781,8 +2787,8 @@ function _docxBuild(html){
       const tg=ch.tagName;
       if(tg==='SCRIPT'||tg==='STYLE') return;
       if(/^H[1-3]$/.test(tg)){
-        const sz=tg==='H1'?32:(tg==='H2'?26:24), col=tg==='H2'?'0F172A':'C2410C';
-        const border=tg==='H1'?'EA580C':(tg==='H2'?'E2E8F0':null);
+        const bw=ch.hasAttribute('data-bw'), sz=tg==='H1'?38:(tg==='H2'?30:28), col=bw?'000000':(tg==='H2'?'0F172A':'C2410C');
+        const border=bw?'000000':(tg==='H1'?'EA580C':(tg==='H2'?'E2E8F0':null));
         out.push(para(inl(ch,{b:true,sz:sz,color:col}),{before:160,after:80,border:border})); return;
       }
       if(tg==='P'){ const x=inl(ch,{}); if(x) out.push(para(x)); return; }
@@ -2798,12 +2804,12 @@ function _docxBuild(html){
   const out=[];
   const root=new DOMParser().parseFromString('<div>'+html+'</div>','text/html').body.firstChild;
   blocks(root,out);
-  out.push(para(run('تهیه‌کننده: '+(me?me.name:'—')+'          امضا: ........................',{sz:22}),{before:360}));
+  if(html.indexOf('data-nosig')<0) out.push(para(run('تهیه‌کننده: '+(me?me.name:'—')+'          امضا: ........................',{sz:26}),{before:360}));
   const docXml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document '+NS+'><w:body>'+out.join('')
     +'<w:sectPr><w:footerReference w:type="default" r:id="rIdFtr1"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>';
-  const fp='<w:r><w:rPr><w:sz w:val="18"/></w:rPr>';
+  const fp='<w:r><w:rPr><w:rFonts w:ascii="B Nazanin" w:hAnsi="B Nazanin" w:eastAsia="B Nazanin" w:cs="B Nazanin"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>';
   const ftrXml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr '+NS+'><w:p><w:pPr><w:bidi/><w:jc w:val="center"/></w:pPr>'
-    +run('سامانه جامع HSE فولاد تنبور — '+todayJ()+' — صفحه ',{sz:18})
+    +run('سامانه جامع HSE فولاد تنبور — '+todayJ()+' — صفحه ',{sz:20})
     +fp+'<w:fldChar w:fldCharType="begin"/></w:r>'+fp+'<w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>'+fp+'<w:fldChar w:fldCharType="separate"/></w:r>'+fp+'<w:t>1</w:t></w:r>'+fp+'<w:fldChar w:fldCharType="end"/></w:r>'
     +'</w:p></w:ftr>';
   const H='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
@@ -2830,7 +2836,7 @@ function printHTML(h, title){
   const w=window.open('','_blank');
   if(!w){ toast('مرورگر پنجره چاپ را مسدود کرد — اجازه پاپ‌آپ را فعال کنید'); return; }
   w.document.write('<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8"><title>'+esc(title)+'</title>'+reportCSSForWord()
-    +'<style>@page{size:A4;margin:12mm}body{font-family:Tahoma,Vazirmatn,sans-serif;padding:8px;background:#fff}</style></head><body>'
+    +'<style>@page{size:A4;margin:12mm}body{font-family:'+PRINT_FONT+';padding:8px;background:#fff}</style></head><body>'
     +HSE_LOGO_HTML+h+'<div class="footer">سامانه جامع HSE فولاد تنبور — '+nd(todayJ())+'</div></body></html>');
   w.document.close();
   setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 500);
@@ -2840,18 +2846,18 @@ function exportPDF(html, filename){
   const styleId='hse-report-export-style';
   if(!document.getElementById(styleId)){
     const s=document.createElement('style'); s.id=styleId;
-    s.textContent=`.hse-report{font-family:Tahoma,Vazirmatn,sans-serif;direction:rtl;font-size:11pt;line-height:1.8;color:#0f172a;background:#fff;padding:20px}
-      .hse-report h1{font-size:16pt;color:#c2410c;margin:0 0 8px;padding-bottom:6px;border-bottom:2px solid #ea580c}
-      .hse-report h2{font-size:13pt;margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid #e2e8f0}
-      .hse-report p{font-size:10pt;margin:4px 0;color:#475569}
-      .hse-report table{width:100%;border-collapse:collapse;margin:8px 0;font-size:10pt}
+    s.textContent=`.hse-report{font-family:${PRINT_FONT};direction:rtl;font-size:13pt;line-height:1.8;color:#0f172a;background:#fff;padding:20px}
+      .hse-report h1{font-size:19pt;color:#c2410c;margin:0 0 8px;padding-bottom:6px;border-bottom:2px solid #ea580c}
+      .hse-report h2{font-size:15pt;margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid #e2e8f0}
+      .hse-report p{font-size:12pt;margin:4px 0;color:#475569}
+      .hse-report table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12pt}
       .hse-report th,.hse-report td{border:1px solid #cbd5e1;padding:6px 8px;text-align:right;vertical-align:top}
       .hse-report th{background:#f1f5f9;font-weight:700;color:#475569}
       .hse-report tr:nth-child(even) td{background:#f8fafc}
       .hse-report .kpi-row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
-      .hse-report .kpi-box{flex:1 1 140px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;text-align:center;font-size:10pt;color:#475569}
-      .hse-report .kpi-box b{display:block;font-size:16pt;color:#c2410c;margin:4px 0}
-      .hse-report .footer{font-size:9pt;color:#64748b;margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;text-align:center}`;
+      .hse-report .kpi-box{flex:1 1 140px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;text-align:center;font-size:12pt;color:#475569}
+      .hse-report .kpi-box b{display:block;font-size:18pt;color:#c2410c;margin:4px 0}
+      .hse-report .footer{font-size:10pt;color:#64748b;margin-top:20px;padding-top:8px;border-top:1px solid #e2e8f0;text-align:center}`;
     document.head.appendChild(s);
   }
   const wrap=document.createElement('div');
@@ -2965,6 +2971,68 @@ function s5DocHTML(r){
   if(hasSigns(r.signs)) h+=signDisplayHTML(r.signs);
   return h;
 }
+/* ---------- فرم اخطاریهٔ مشاهدات رفتاری (BBS) — مطابق نمونهٔ چاپی فولاد تنبور ----------
+   متن سه مرحلهٔ تذکر در همین آرایه است؛ برای تغییر عبارت‌ها فقط همین سه خط را ویرایش کنید. */
+const BBS_WARN_STEPS=[
+  'تذکر بار اول به صورت شفاهی و ثبت آنومالی و آموزش مجدد به فرد داده می‌شود.',
+  'بار دوم جریمه طبق آیین‌نامه',
+  'بار سوم ارجاع فرد به کمیته انضباطی و توبیخ و درج در پرونده'
+];
+/* این رکورد «چندمین تذکر» همان فرد است؟ (بر اساس ترتیب تاریخ مشاهده؛ فقط رکوردهای «تذکر داده شد = بله») */
+function bbsWarnSeq(r){
+  if(!r||!r.person||r.warned!=='بله') return 0;
+  const list=((db&&db.bbs)||[]).filter(x=>x.person===r.person&&x.warned==='بله');
+  list.sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||String(a.createdJ||'').localeCompare(String(b.createdJ||''))||String(a.id).localeCompare(String(b.id)));
+  const i=list.findIndex(x=>x.id===r.id);
+  return i<0?list.length:i+1;
+}
+function bbsSigners(r){
+  const sg=r.signs||{}, ppl=(db&&db.personnel)||[];
+  let exp=(sg.expert&&sg.expert.name)||(r.createdRole==='expert'?r.createdBy:'');
+  if(!exp){ const p=ppl.find(x=>x.role==='expert'); exp=p?p.name:''; }
+  let mgr=(sg.manager&&sg.manager.name)||'';
+  if(!mgr){ const p=ppl.find(x=>x.role==='manager'); mgr=p?p.name:''; }
+  if(mgr && !/^جناب/.test(mgr)) mgr='جناب آقای '+mgr;
+  return {exp:exp,mgr:mgr};
+}
+function bbsDocHTML(r){
+  const cur=Math.min(bbsWarnSeq(r),BBS_WARN_STEPS.length);
+  const cell='border:1px solid #9ca3af;padding:7px 10px;color:#000;font-size:13pt;background:#fff;vertical-align:middle';
+  const val=v=>(v===undefined||v===null||v==='')?'—':esc(v);
+  const rows=[
+    ['تاریخ مشاهده',val(r.date)],
+    ['محل',val(r.area)],
+    ['موضوع رفتار',val(r.cat)],
+    ['فرد مشاهده‌شده (خاطی)',val(r.person)],
+    ['تعداد رفتارهای ناایمن (هر مورد امتیاز منفی طبق آیین نامه)',(r.unsafe===undefined||r.unsafe===null||r.unsafe==='')?'—':esc(nd(r.unsafe))],
+    ['آیا به فرد تذکر داده شد؟',val(r.warned)],
+    ['بازخورد داده‌شده',val(r.feedback)]
+  ];
+  let h='<h1 data-bw data-nosig style="color:#000;border-bottom:1.5px solid #000;font-size:19pt">مشاهدات رفتاری (BBS)(اخطاریه)</h1>';
+  h+='<p style="color:#000;font-size:12pt">کد: <b><span dir="ltr">'+esc(r.id)+'</span></b> — ثبت: '+esc(r.createdBy||'—')+' — '+esc(r.createdJ||'')+'</p>';
+  h+='<table data-bd="9CA3AF" style="width:100%;border-collapse:collapse"><tbody>'
+    +rows.map(x=>'<tr><td style="'+cell+';width:50%">'+esc(x[0])+'</td><td style="'+cell+'">'+x[1]+'</td></tr>').join('')
+    +'</tbody></table>';
+  /* توضیحات: سه مرحلهٔ تذکر؛ مرحلهٔ فعلی این فرد پررنگ و تیک‌دار می‌شود */
+  const tick=' <span data-sym style="font-family:'+SYM_FONT+';font-size:17pt;color:#15803d;font-weight:700">✔</span>';
+  h+='<div style="margin-top:14px">';
+  BBS_WARN_STEPS.forEach((t,i)=>{
+    const on=(cur===i+1);
+    h+='<p style="color:#000;font-size:13pt;margin:6px 0">'+(i===0?'<b>توضیحات:</b> ':'')+(on?'<b>'+esc(t)+'</b>'+tick:esc(t))+'</p>';
+  });
+  h+='</div>';
+  /* امضاها */
+  const sg=bbsSigners(r), sn=r.signs||{};
+  const sigCell=(title,name,s)=>{
+    const img=s&&safeImg(s.img);
+    return '<td style="border:none;width:50%;vertical-align:top;color:#000;font-size:13pt;padding:6px 8px">'+title+': '+(name?'<b>'+esc(name)+'</b>':'........................')
+      +'<br>'+(img?'<img src="'+img+'" alt="امضا" width="150" style="width:150px;height:auto">':'<br><br><br>')+'<br>امضاء</td>';
+  };
+  h+='<p style="margin:0;font-size:12pt">&nbsp;</p>';
+  h+='<table data-nb style="width:100%;border-collapse:collapse;margin-top:26px"><tbody><tr>'
+    +sigCell('کارشناس HSE',sg.exp,sn.expert)+sigCell('مدیریت',sg.mgr,sn.manager)+'</tr></tbody></table>';
+  return h;
+}
 function exportRecord(k,id,format){
   const M=MODS[k];
   const r=db[k].find(x=>x.id===id);
@@ -2976,6 +3044,7 @@ function exportRecord(k,id,format){
     if(format==='print') printHTML(hs,fs); else if(format==='word') exportWord(hs,fs); else exportPDF(hs,fs);
     return;
   }
+  if(k==='bbs'){ const hb=bbsDocHTML(r), fb='HSE-BBS-'+r.id; if(format==='print') printHTML(hb,fb); else if(format==='word') exportWord(hb,fb); else exportPDF(hb,fb); return; }
   if(k==='ptw'){ const hp='<h1>🔥 فرم مجوز ایمنی انجام کار (PTW)</h1><p>کد: <b>'+esc(r.id)+'</b> — وضعیت: <b>'+esc(r.status||'—')+'</b> — ثبت: '+esc(r.createdBy||'')+' / '+esc(r.createdJ||'')+'</p>'+ptwDocHTML(r,false); const fp='HSE-PTW-'+r.id; if(format==='print') printHTML(hp,fp); else if(format==='word') exportWord(hp,fp); else exportPDF(hp,fp); return; }
   let h='<h1>'+M.i+' '+esc(M.t)+'</h1>';
   h+='<p>کد: <b>'+esc(r.id)+'</b>'+(r.code?' — کد CAPA: <b>'+esc(r.code)+'</b>':'')+' — ثبت: '+esc(r.createdBy||'')+' / '+esc(r.createdJ||'')+'</p>';
