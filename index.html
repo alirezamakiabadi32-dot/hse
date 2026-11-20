@@ -862,7 +862,7 @@ input,select,textarea{font-size:17px!important}
 
 <script>
 /* ============================================================
-   سامانه جامع HSE فولاد تنبور — نسخه ۴.۵ (پیوند CAPA با رکورد منبع)
+   سامانه جامع HSE فولاد تنبور — نسخه ۴.۶ (حفاظت در برابر کش قدیمی + بازیابی ایمن)
 ============================================================ */
 const firebaseConfig = {
   apiKey: "AIzaSyDzypxZ-gZjOKaDngoxsgyw1PvcOG5eUYU",
@@ -1491,6 +1491,7 @@ function _buildUpdatePayload(snapP, snapD){
       updates[m+'/'+id] = (id in now) ? JSON.parse(now[id]) : null;
     });
   });
+  _guardMassDelete(updates, cur);
   if(Object.keys(updates).length) updates.seq=_clean(db.seq||{});
   return {updates, cur};
 }
@@ -1527,6 +1528,69 @@ async function _ensureBaseline(){
   }
   _baselineOk = true;
   return true;
+}
+
+
+/* ============================================================
+   FIX v4.6: حفاظت در برابر کش قدیمیِ دستگاه
+   اگر دستگاهی تغییرِ ارسال‌نشده دارد ولی مدت‌ها باز نشده، به‌جای جایگزین‌کردنِ کل داده‌ی ابر با کش قدیمی،
+   فقط رکوردهایی که همین دستگاه واقعاً تغییر داده روی نسخه‌ی تازه‌ی ابر اعمال می‌شود.
+============================================================ */
+function _mergeStaleWithCloud(cdb, ldb, sy){
+  try{ localStorage.setItem(LS+'_stale', JSON.stringify({t:Date.now(), cache:ldb, sync:sy})); }catch(e){}
+  const oldBase = (sy && sy.base) || {};
+  const nd2 = {};
+  RECORD_MODS.forEach(m=>{
+    const cArr = Array.isArray(cdb[m]) ? cdb[m] : (cdb[m] ? Object.values(cdb[m]) : []);
+    const lArr = Array.isArray(ldb[m]) ? ldb[m] : (ldb[m] ? Object.values(ldb[m]) : []);
+    const lMap = {}; lArr.forEach(r=>{ if(r && r.id) lMap[r.id]=r; });
+    const ob = oldBase[m];
+    const ids = {};
+    Object.keys(_dirtyRecs[m]||{}).forEach(id=>{ ids[id]=1; });
+    if(_pendingModules[m] && ob){
+      Object.keys(lMap).forEach(id=>{ if(ob[id]!==JSON.stringify(lMap[id])) ids[id]=1; });
+      Object.keys(ob).forEach(id=>{ if(!(id in lMap)) ids[id]=1; });
+    }
+    const out = [], seen = {};
+    cArr.forEach(r=>{
+      if(!r || !r.id){ out.push(r); return; }
+      if(ids[r.id]){ seen[r.id]=1; if(lMap[r.id]) out.push(lMap[r.id]); }
+      else out.push(r);
+    });
+    Object.keys(ids).forEach(id=>{ if(lMap[id] && !seen[id]) out.push(lMap[id]); });
+    cdb[m] = out;
+    if(Object.keys(ids).length){ nd2[m]={}; Object.keys(ids).forEach(id=>{ nd2[m][id]=++_seqCounter; }); }
+  });
+  const sq = Object.assign({}, cdb.seq||{});
+  Object.keys(ldb.seq||{}).forEach(k=>{ sq[k]=Math.max(+sq[k]||0, +ldb.seq[k]||0); });
+  cdb.seq = sq;
+  const keepPM = {};
+  Object.keys(_pendingModules).forEach(m=>{
+    if(RECORD_MODS.indexOf(m)>=0 || m==='seq') return;
+    if(ldb[m]!==undefined){ cdb[m]=ldb[m]; keepPM[m]=_pendingModules[m]; }
+  });
+  _dirtyRecs = nd2;
+  _pendingModules = keepPM;
+  _persistSync();
+  return cdb;
+}
+/* جلوگیری از حذف انبوه رکوردها از ابر (مثلاً به‌خاطر کش قدیمی) */
+function _guardMassDelete(updates, cur){
+  RECORD_MODS.forEach(m=>{
+    const base = _base[m] || {};
+    const bn = Object.keys(base).length;
+    const dels = Object.keys(updates).filter(k=>k.indexOf(m+'/')===0 && updates[k]===null);
+    if(dels.length>=5 && dels.length>0.3*bn){
+      let ok=false;
+      try{ ok = confirm('⚠️ هشدار: '+dels.length+' رکورد از بخش «'+((MODS[m]&&MODS[m].t)||m)+'» (از '+bn+' رکورد) در حال حذف از ابر است.\nاگر عمداً حذف نکرده‌اید «انصراف» را بزنید.\n\nحذف انجام شود؟'); }catch(e){ ok=false; }
+      if(!ok){
+        dels.forEach(k=>{ delete updates[k]; const id=k.slice(m.length+1); if(cur[m] && base[id]!==undefined) cur[m][id]=base[id]; });
+        window._blockedDel = (window._blockedDel||0)+dels.length;
+        _lastCloudNorm = null; _missedRemote = true;
+        try{ toast('⛔ حذف انبوه '+nd(dels.length)+' رکورد متوقف شد'); }catch(e){}
+      }
+    }
+  });
 }
 
 async function _flushDelta(){
@@ -1573,7 +1637,11 @@ async function _flushDelta(){
     const delay = RETRY_DELAYS[Math.min(_saveRetryCount, RETRY_DELAYS.length - 1)];
     _saveRetryCount++;
     if(indicator) indicator.className = 'sync-indicator error';
-    if(txt) txt.textContent = 'خطا — تلاش مجدد ' + nd(_saveRetryCount) + ' در ' + nd(Math.round(delay/1000)) + 's';
+    console.error('ذخیره در ابر ناموفق:', err);
+    window._lastSaveErr = err;
+    const _em = String((err && (err.code || err.message)) || 'نامشخص').slice(0,60);
+    if(txt) txt.textContent = 'خطا ('+_em+') — تلاش مجدد ' + nd(_saveRetryCount) + ' در ' + nd(Math.round(delay/1000)) + 's';
+    if(_saveRetryCount===2){ try{ toast('⚠️ ذخیره در ابر انجام نمی‌شود: '+_em); }catch(e){} }
     setTimeout(_flushDelta, delay);
   } finally {
     _isSaving = false;
@@ -1610,6 +1678,13 @@ let _lastConnCheck = 0;
 async function checkConnection(){
   const ind = $('#syncIndicator'), txt = $('#syncTxt');
   if(!ind || !txt) return;
+  if(hasPendingChanges() && !_isSaving){
+    const n = Object.keys(_dirtyRecs).reduce((a,m)=>a+Object.keys(_dirtyRecs[m]).length,0)+Object.keys(_pendingModules).length;
+    const le = window._lastSaveErr ? ' — '+String(window._lastSaveErr.code||window._lastSaveErr.message||'').slice(0,40) : '';
+    ind.className = 'sync-indicator error';
+    txt.textContent = '⚠️ '+nd(n)+' تغییر هنوز در ابر ذخیره نشده'+le;
+    return;
+  }
   if(Date.now() - _lastConnCheck < 15000 && _cloudConnected){
     ind.className = 'sync-indicator ok';
     txt.textContent = 'متصل به Firebase';
@@ -1638,6 +1713,7 @@ async function checkConnection(){
 
 function toast(m){const t=$('#toast');if(!t)return;t.textContent=m;t.classList.remove('ok','warn','bad');const x=String(m);if(/^\s*(✔|✅)/.test(x))t.classList.add('ok');else if(/^\s*⚠/.test(x))t.classList.add('warn');else if(/^\s*(❌|✖|⛔)/.test(x))t.classList.add('bad');t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),x.length>60?9000:3200)}
 window.addEventListener('online', checkConnection);
+setInterval(function(){ try{ checkConnection(); }catch(e){} }, 15000);
 window.addEventListener('offline', function(){ const ind=$('#syncIndicator'), txt=$('#syncTxt'); if(ind&&txt){ind.className='sync-indicator error'; txt.textContent='قطع اینترنت';} });
 window.addEventListener('error',function(e){try{toast('⚠️ خطای فنی: '+e.message)}catch(x){}});
 const ROLE_CHIP={worker:['پرسنل اجرایی','b-info'],expert:['کارشناس ایمنی','b-org'],manager:['مدیر ارشد','b-bad']};
@@ -4469,31 +4545,38 @@ function importPaste(){
   '<button class="btn pri" onclick="applyImport()">بازیابی</button><button class="btn ghost" onclick="closeModal()">انصراف</button>');
 }
 function applyImport(){
- try{
-   const d=JSON.parse($('#bkimp').value);
-   if(!d.personnel||!d.incidents)throw new Error('bad');
-   db=sanitizeData(d);
-   Object.keys(db).forEach(m=>queueModule(m));
-   save({immediate:true});
-   toast('⏳ در حال ذخیره در ابر...');
-   waitForFlush().then(ok=>{ if(ok){ toast('✔ بازیابی شد'); setTimeout(()=>location.reload(), 500); } else toast('ذخیره ابری کامل نشد — اتصال را بررسی کنید'); });
- }catch(e){toast('متن معتبر نیست')}
+ try{ _runRestore(JSON.parse($('#bkimp').value)); }catch(e){ toast('متن معتبر نیست'); }
 }
 function doImport(inp){
  const f=inp.files[0];if(!f)return;
  const r=new FileReader();
- r.onload=e=>{
-   try{
-     const d=JSON.parse(e.target.result);
-     if(!d.personnel||!d.incidents)throw new Error('bad');
-     db=sanitizeData(d);
-     Object.keys(db).forEach(m=>queueModule(m));
-     save({immediate:true});
-     toast('⏳ در حال ذخیره در ابر...');
-     waitForFlush().then(ok=>{ if(ok){ toast('بازیابی انجام شد'); setTimeout(()=>location.reload(), 500); } else toast('ذخیره ابری کامل نشد — اتصال را بررسی کنید'); });
-   }catch(x){toast('فایل معتبر نیست')}
- };
+ r.onload=e=>{ try{ _runRestore(JSON.parse(e.target.result)); }catch(x){ toast('فایل معتبر نیست'); } };
  r.readAsText(f);
+}
+/* بازیابی ایمن: فقط رکوردهایی که در سامانه نیستند اضافه می‌شوند؛ هیچ رکوردی حذف یا بازنویسی نمی‌شود */
+function _runRestore(d){
+ if(!d || !d.personnel) throw new Error('bad');
+ const s=sanitizeData(d);
+ const plan={}; let total=0;
+ RECORD_MODS.forEach(m=>{
+   const src=Array.isArray(s[m])?s[m]:[];
+   const have=new Set((db[m]||[]).map(r=>r&&r.id));
+   const miss=src.filter(r=>r && r.id && !have.has(r.id));
+   if(miss.length){ plan[m]=miss; total+=miss.length; }
+ });
+ if(!total){ toast('همه‌ی رکوردهای این پشتیبان از قبل در سامانه هست'); return; }
+ const lines=Object.keys(plan).map(m=>((MODS[m]&&MODS[m].t)||m)+': '+plan[m].length).join('\n');
+ if(!confirm('این رکوردها که در سامانه نیستند بازگردانده می‌شوند:\n\n'+lines+'\n\nمجموع: '+total+'\nهیچ داده‌ی فعلی حذف یا بازنویسی نمی‌شود. ادامه؟')) return;
+ Object.keys(plan).forEach(m=>{
+   if(!Array.isArray(db[m])) db[m]=[];
+   plan[m].forEach(r=>{ db[m].push(r); queueRec(m,r.id); });
+ });
+ db.seq=db.seq||{};
+ Object.keys(s.seq||{}).forEach(k=>{ db.seq[k]=Math.max(+db.seq[k]||0, +s.seq[k]||0); });
+ queueModule('seq');
+ save({immediate:true});
+ toast('⏳ در حال ذخیره در ابر...');
+ waitForFlush(20000).then(ok=>{ if(ok){ toast('✔ '+nd(total)+' رکورد بازگردانده شد'); setTimeout(()=>location.reload(), 800); } else toast('ذخیره ابری کامل نشد — اتصال را بررسی کنید'); });
 }
 function doReset(){
  if(!me||me.role!=='manager'){toast('فقط مدیر می‌تواند بازنشانی کند');return}
@@ -7408,8 +7491,15 @@ dbRef.on('value', (snapshot) => {
      _dirtyRecs = sy.dr||{};
      const seqs = [...Object.values(_pendingModules), ...Object.values(_dirtyRecs).flatMap(o=>Object.values(o))];
      _seqCounter = Math.max(0, ...seqs);
-     _base = Object.assign(_base, sy.base||{});
-     if(hasPendingChanges()){ db = sanitizeData(cache); loaded = true; }
+     if(hasPendingChanges()){
+       if(readOk && cloudRaw && cloudRaw.personnel && loaded){
+         /* ابر در دسترس است: پایه همیشه نسخهٔ تازهٔ ابر است و فقط تغییرات واقعیِ همین دستگاه روی آن اعمال می‌شود */
+         db = _mergeStaleWithCloud(db, cache, sy);
+       } else {
+         _base = Object.assign(_base, sy.base||{});
+         db = sanitizeData(cache); loaded = true;
+       }
+     }
    }
  }catch(e){console.warn(e)}
 
